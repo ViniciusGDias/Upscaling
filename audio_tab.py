@@ -404,6 +404,24 @@ class AudioSeparationTab(ctk.CTkFrame):
         if self.is_processing:
             return
 
+        # Check Demucs availability before starting
+        if not self.separator.is_demucs_available:
+            msg = (
+                "O motor Demucs (Meta AI) para separação de áudio é opcional e ainda não está instalado no seu computador.\n\n"
+                "Deseja gerar o instalador em 1-clique (.bat) para instalar o PyTorch CUDA e o Demucs automaticamente?"
+            )
+            if messagebox.askyesno("Demucs Opcional", msg):
+                from engine_manager import create_pytorch_install_script
+                bat_p = create_pytorch_install_script()
+                messagebox.showinfo(
+                    "Script Criado com Sucesso! ✓",
+                    f"O instalador rápido foi gerado em:\n{bat_p}\n\n"
+                    "Basta dar 2 cliques no arquivo 'instalar_motores_ia.bat' para instalar o PyTorch CUDA e o Demucs automaticamente no seu Windows!"
+                )
+                import subprocess
+                subprocess.run(["explorer", "/select,", str(bat_p)])
+            return
+
         input_path = self.file_entry.get().strip()
         if not input_path or not os.path.isfile(input_path):
             messagebox.showerror("Erro", "Selecione um arquivo válido.")

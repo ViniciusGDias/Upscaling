@@ -113,8 +113,13 @@ def get_audio_info(filepath: str) -> Optional[dict]:
 def check_demucs_installed() -> bool:
     """Check if demucs is installed."""
     try:
+        import demucs
+        return True
+    except ImportError:
+        pass
+    try:
         result = subprocess.run(
-            [sys.executable, "-m", "demucs", "--help"],
+            ["demucs", "--help"],
             capture_output=True, text=True,
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
         )
@@ -130,8 +135,19 @@ def install_demucs(on_log: Optional[Callable] = None) -> bool:
             on_log("📦 Instalando Demucs (Meta AI)... Isso pode demorar alguns minutos.")
             on_log("  → Baixando PyTorch + Demucs + dependências...")
 
+        # Find usable pip or python executable
+        pip_cmd = shutil.which("pip")
+        if pip_cmd:
+            cmd = [pip_cmd, "install", "-U", "demucs"]
+        else:
+            py_cmd = shutil.which("python") or shutil.which("py")
+            if py_cmd:
+                cmd = [py_cmd, "-m", "pip", "install", "-U", "demucs"]
+            else:
+                cmd = [sys.executable, "-m", "pip", "install", "-U", "demucs"]
+
         result = subprocess.run(
-            [sys.executable, "-m", "pip", "install", "-U", "demucs"],
+            cmd,
             capture_output=True, text=True,
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0,
             timeout=600,  # 10 minute timeout
