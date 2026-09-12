@@ -256,7 +256,7 @@ class InstagramAnalyzerTab(ctk.CTkFrame):
     def _copy_to_clipboard(self, text: str, btn: ctk.CTkButton, original_text: str = "📋 Copiar"):
         _copy_text_to_clipboard(self, text)
         btn.configure(text="✅ Copiado!", fg_color="#10b981")
-        self.after(1800, lambda: btn.configure(text=original_text, fg_color="#3b82f6"))
+        self.after(1800, lambda: btn.configure(text=original_text, fg_color="#16a34a"))
 
     def _render_results(self, data: dict):
         # Limpa área da direita
@@ -353,7 +353,7 @@ class InstagramAnalyzerTab(ctk.CTkFrame):
                 
                 btn_copy_cap = ctk.CTkButton(
                     top_c, text="📋 Copiar Legenda", width=120, height=28,
-                    fg_color="#3b82f6", hover_color="#2563eb", font=ctk.CTkFont(size=11, weight="bold")
+                    fg_color="#16a34a", hover_color="#15803d", font=ctk.CTkFont(size=11, weight="bold")
                 )
                 btn_copy_cap.configure(command=lambda t=full_text, b=btn_copy_cap: self._copy_to_clipboard(t, b, "📋 Copiar Legenda"))
                 btn_copy_cap.pack(side="right")

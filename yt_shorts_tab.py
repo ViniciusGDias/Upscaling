@@ -87,7 +87,7 @@ class YTShortsAnalyzerTab(ctk.CTkFrame):
         
         self.btn_browse = ctk.CTkButton(
             row_pick, text="📁 Procurar", width=90, height=32,
-            fg_color="#3b82f6", hover_color="#2563eb",
+            fg_color="#16a34a", hover_color="#15803d",
             command=self._choose_video
         )
         self.btn_browse.pack(side="right")
@@ -229,7 +229,7 @@ class YTShortsAnalyzerTab(ctk.CTkFrame):
     def _copy_to_clipboard(self, text: str, btn: ctk.CTkButton, original_text: str = "📋 Copiar"):
         _copy_text_to_clipboard(self, text)
         btn.configure(text="✅ Copiado!", fg_color="#10b981")
-        self.after(1800, lambda: btn.configure(text=original_text, fg_color="#3b82f6"))
+        self.after(1800, lambda: btn.configure(text=original_text, fg_color="#16a34a"))
 
     def _render_results(self, data: dict):
         for w in self.right_scroll.winfo_children():
@@ -316,7 +316,7 @@ class YTShortsAnalyzerTab(ctk.CTkFrame):
                 title_text = t.get("title", "")
                 ctk.CTkLabel(t_row, text=title_text, font=ctk.CTkFont(weight="bold", size=12), text_color="#fef08a", wraplength=380, justify="left").pack(side="left", padx=5)
                 
-                btn_c = ctk.CTkButton(t_row, text="📋 Copiar", width=80, height=26, font=ctk.CTkFont(size=11), fg_color="#3b82f6", hover_color="#2563eb")
+                btn_c = ctk.CTkButton(t_row, text="📋 Copiar", width=80, height=26, font=ctk.CTkFont(size=11), fg_color="#16a34a", hover_color="#15803d")
                 btn_c.configure(command=lambda txt=title_text, b=btn_c: self._copy_to_clipboard(txt, b))
                 btn_c.pack(side="right")
 
@@ -345,7 +345,7 @@ class YTShortsAnalyzerTab(ctk.CTkFrame):
                 ctk.CTkLabel(c_header, text=f"💥 Legenda {idx}  [{style_badge}]", font=ctk.CTkFont(size=12, weight="bold"), text_color="#fbbf24").pack(side="left")
 
                 cap_text = c.get("text", "")
-                btn_cp = ctk.CTkButton(c_header, text="📋 Copiar", width=80, height=26, font=ctk.CTkFont(size=11), fg_color="#3b82f6", hover_color="#2563eb")
+                btn_cp = ctk.CTkButton(c_header, text="📋 Copiar", width=80, height=26, font=ctk.CTkFont(size=11), fg_color="#16a34a", hover_color="#15803d")
                 btn_cp.configure(command=lambda txt=cap_text, b=btn_cp: self._copy_to_clipboard(txt, b))
                 btn_cp.pack(side="right")
 
@@ -400,7 +400,7 @@ class YTShortsAnalyzerTab(ctk.CTkFrame):
 
                 btn_copy_d = ctk.CTkButton(
                     top_d, text="📋 Copiar Tudo", width=120, height=28,
-                    fg_color="#3b82f6", hover_color="#2563eb", font=ctk.CTkFont(size=11, weight="bold")
+                    fg_color="#16a34a", hover_color="#15803d", font=ctk.CTkFont(size=11, weight="bold")
                 )
                 btn_copy_d.configure(command=lambda t=full_text, b=btn_copy_d: self._copy_to_clipboard(t, b, "📋 Copiar Tudo"))
                 btn_copy_d.pack(side="right")
@@ -454,7 +454,7 @@ class YTShortsAnalyzerTab(ctk.CTkFrame):
                 ctk.CTkLabel(top_cm, text=f"💬 Comentário {idx}", font=ctk.CTkFont(weight="bold", size=12), text_color="#c4b5fd").pack(side="left")
 
                 comm_text = cm.get("comment", "")
-                btn_copy_cm = ctk.CTkButton(top_cm, text="📋 Copiar Comentário", width=130, height=26, font=ctk.CTkFont(size=11), fg_color="#3b82f6", hover_color="#2563eb")
+                btn_copy_cm = ctk.CTkButton(top_cm, text="📋 Copiar Comentário", width=130, height=26, font=ctk.CTkFont(size=11), fg_color="#16a34a", hover_color="#15803d")
                 btn_copy_cm.configure(command=lambda t=comm_text, b=btn_copy_cm: self._copy_to_clipboard(t, b, "📋 Copiar Comentário"))
                 btn_copy_cm.pack(side="right")
 

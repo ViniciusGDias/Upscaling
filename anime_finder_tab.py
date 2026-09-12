@@ -121,7 +121,7 @@ class AnimeFinderTab(ctk.CTkFrame):
         self.ent_chat.grid(row=0, column=0, sticky="ew", padx=(0, 6))
         self.ent_chat.bind("<Return>", lambda e: self._send_followup())
 
-        self.btn_send_chat = ctk.CTkButton(row_input, text="Enviar", width=70, height=30, fg_color="#3b82f6", hover_color="#2563eb", command=self._send_followup)
+        self.btn_send_chat = ctk.CTkButton(row_input, text="Enviar", width=70, height=30, fg_color="#16a34a", hover_color="#15803d", command=self._send_followup)
         self.btn_send_chat.grid(row=0, column=1)
 
         # ── Coluna Direita: Resultados Scrolláveis ──
@@ -257,7 +257,7 @@ class AnimeFinderTab(ctk.CTkFrame):
     def _copy_text(self, text: str, btn: ctk.CTkButton, original_text: str = "📋 Copiar"):
         _copy_text_to_clipboard(self, text)
         btn.configure(text="✅ Copiado!", fg_color="#10b981")
-        self.after(1800, lambda: btn.configure(text=original_text, fg_color="#3b82f6"))
+        self.after(1800, lambda: btn.configure(text=original_text, fg_color="#16a34a"))
 
     def _open_youtube_search(self, term: str):
         encoded = urllib.parse.quote(term)
@@ -329,7 +329,7 @@ class AnimeFinderTab(ctk.CTkFrame):
                     btn_row = ctk.CTkFrame(ep_box, fg_color="transparent")
                     btn_row.pack(fill="x", padx=8, pady=(4, 6))
 
-                    btn_cp = ctk.CTkButton(btn_row, text="📋 Copiar Termo de Busca", width=140, height=24, font=ctk.CTkFont(size=11), fg_color="#3b82f6", hover_color="#2563eb")
+                    btn_cp = ctk.CTkButton(btn_row, text="📋 Copiar Termo de Busca", width=140, height=24, font=ctk.CTkFont(size=11), fg_color="#16a34a", hover_color="#15803d")
                     btn_cp.configure(command=lambda t=term, b=btn_cp: self._copy_text(t, b, "📋 Copiar Termo de Busca"))
                     btn_cp.pack(side="left", padx=(0, 6))
 
@@ -375,7 +375,7 @@ class AnimeFinderTab(ctk.CTkFrame):
             btn_row = ctk.CTkFrame(card, fg_color="transparent")
             btn_row.pack(fill="x", padx=12, pady=(6, 10))
 
-            btn_cp = ctk.CTkButton(btn_row, text="📋 Copiar Termo", width=110, height=26, font=ctk.CTkFont(size=11), fg_color="#3b82f6", hover_color="#2563eb")
+            btn_cp = ctk.CTkButton(btn_row, text="📋 Copiar Termo", width=110, height=26, font=ctk.CTkFont(size=11), fg_color="#16a34a", hover_color="#15803d")
             btn_cp.configure(command=lambda t=term, b=btn_cp: self._copy_text(t, b, "📋 Copiar Termo"))
             btn_cp.pack(side="left", padx=(0, 8))
 

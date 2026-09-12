@@ -1,8 +1,8 @@
 """
 Urahara - Build & Installer Orchestrator
 Automates:
-1. Compiling Urahara.exe using PyInstaller (with --noconsole, no terminal).
-2. Compiling Urahara_Setup.exe using Inno Setup (if installed).
+1. Compiling Urahara (fast --onedir mode, no terminal window).
+2. Compiling Urahara_Setup.exe using Inno Setup.
 3. Creating a portable distribution package (ZIP) ready for GitHub Releases.
 """
 
@@ -40,6 +40,7 @@ def find_inno_compiler() -> str:
     if found:
         return found
     common_locations = [
+        Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Inno Setup 6" / "ISCC.exe",
         Path(r"C:\Program Files (x86)\Inno Setup 6\ISCC.exe"),
         Path(r"C:\Program Files\Inno Setup 6\ISCC.exe"),
         Path(r"C:\Program Files (x86)\Inno Setup 5\ISCC.exe"),
@@ -57,28 +58,31 @@ def main():
     print(f" [Urahara Studio v{ver}] - Gerador de Executavel & Instalador")
     print("=" * 60)
 
-    # 1. Build EXE with PyInstaller
-    print("\n[1/3] Compilando Urahara.exe (Modo Janela / Sem Terminal)...")
+    # 1. Build EXE with PyInstaller (--onedir for instantaneous startup)
+    print("\n[1/3] Compilando Urahara (Modo Janela / Inicialização Instantânea)...")
     res = subprocess.run([sys.executable, "build_exe.py"], cwd=str(APP_DIR))
     if res.returncode != 0:
         print("\n✕ Erro ao compilar com PyInstaller.")
         sys.exit(1)
 
-    exe_path = APP_DIR / "dist" / "Urahara.exe"
+    dist_folder = APP_DIR / "dist" / "Urahara"
+    exe_path = dist_folder / "Urahara.exe"
     if not exe_path.exists():
-        print(f"\n✕ Executável não encontrado em {exe_path}.")
-        sys.exit(1)
+        # Fallback to single exe if onedir not used
+        exe_path = APP_DIR / "dist" / "Urahara.exe"
+        if not exe_path.exists():
+            print(f"\n✕ Executável não encontrado em {dist_folder} nem em dist/Urahara.exe.")
+            sys.exit(1)
 
     print(f"\n✓ Executável Urahara.exe gerado com sucesso em: {exe_path}")
 
-    # 2. Check Inno Setup for setup.exe
-    print("\n[2/3] Verificando Inno Setup para gerar Setup.exe...")
+    # 2. Compile Inno Setup for Setup.exe
+    print("\n[2/3] Compilando instalador Setup.exe com Inno Setup...")
     iscc = find_inno_compiler()
     setup_created = False
 
     if iscc:
         print(f"   ✓ Inno Setup encontrado: {iscc}")
-        print("   Compilando Urahara_Setup.exe...")
         iss_file = APP_DIR / "installer.iss"
         if iss_file.exists():
             res_iscc = subprocess.run([iscc, str(iss_file)], cwd=str(APP_DIR))
@@ -87,25 +91,33 @@ def main():
                 print(f"   🎉 Instalador criado com sucesso: {setup_path}")
                 setup_created = True
             else:
-                print("   ⚠️ Inno Setup retornou erro. Gerando pacote portátil ZIP...")
+                print("   ⚠️ Inno Setup retornou erro. Verifique a sintaxe de installer.iss.")
     else:
         print("   ℹ️ Inno Setup não está instalado no sistema.")
-        print("   (Para gerar o Urahara_Setup.exe automaticamente, instale o Inno Setup gratuito em: https://jrsoftware.org/isdl.php)")
 
     # 3. Create Portable Release ZIP
-    print("\n[3/3] Criando pacote portátil Urahara_Portable.zip...")
+    print("\n[3/3] Criando pacote portátil Urahara_v{ver}_Portable.zip...")
     out_dir = APP_DIR / "setup_output"
     out_dir.mkdir(parents=True, exist_ok=True)
     zip_path = out_dir / f"Urahara_v{ver}_Portable.zip"
 
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
-        zf.write(exe_path, "Urahara.exe")
-        zf.write(APP_DIR / "app_icon.ico", "app_icon.ico")
-        zf.write(APP_DIR / "app_icon.png", "app_icon.png")
-        zf.write(APP_DIR / "version.json", "version.json")
-        zf.write(APP_DIR / ".env.example", ".env.example")
+        if dist_folder.exists():
+            # Add all files from dist/Urahara
+            for root, _, files in os.walk(dist_folder):
+                for f in files:
+                    fp = Path(root) / f
+                    rel = fp.relative_to(dist_folder)
+                    zf.write(fp, f"Urahara/{rel}")
+        else:
+            zf.write(exe_path, "Urahara/Urahara.exe")
+
+        zf.write(APP_DIR / "app_icon.ico", "Urahara/app_icon.ico")
+        zf.write(APP_DIR / "app_icon.png", "Urahara/app_icon.png")
+        zf.write(APP_DIR / "version.json", "Urahara/version.json")
+        zf.write(APP_DIR / ".env.example", "Urahara/.env.example")
         if (APP_DIR / "README.md").exists():
-            zf.write(APP_DIR / "README.md", "README.md")
+            zf.write(APP_DIR / "README.md", "Urahara/README.md")
         # Include realcugan models
         cugan_dir = APP_DIR / "bin" / "realcugan"
         if cugan_dir.exists():
@@ -113,14 +125,14 @@ def main():
                 for f in files:
                     fp = Path(root) / f
                     rel = fp.relative_to(APP_DIR)
-                    zf.write(fp, str(rel))
+                    zf.write(fp, f"Urahara/{rel}")
 
     print(f"✓ Pacote portátil criado: {zip_path}")
     print("\n" + "=" * 60)
     print(" 🎉 PROCESSO CONCLUÍDO!")
     if setup_created:
         print(f" 1. Instalador: setup_output/Urahara_Setup_v{ver}.exe")
-    print(f" 2. Executável Portátil: dist/Urahara.exe (Sem terminal)")
+    print(f" 2. Pasta com App Instantâneo: dist/Urahara/Urahara.exe")
     print(f" 3. Pacote para Release: setup_output/Urahara_v{ver}_Portable.zip")
     print("=" * 60)
 

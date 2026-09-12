@@ -68,15 +68,16 @@ from engine_manager import check_all_engines
 
 # ── Theme Configuration ──────────────────────────────────────────────────────
 ctk.set_appearance_mode("dark")
-ctk.set_default_color_theme("blue")
+ctk.set_default_color_theme("green")
 
-# Color palette — Minimal Black Pro (Vercel/Linear-inspired)
+# Color palette — Urahara Hat Green & Minimal Black Pro
 COLORS = {
     "bg_dark": "#09090b",          # true black background
     "bg_card": "#111113",          # slightly lifted card
     "bg_card_hover": "#18181b",    # hover state
-    "accent_primary": "#e2e8f0",   # near-white for primary actions
-    "accent_secondary": "#94a3b8", # muted silver hover
+    "accent_primary": "#16a34a",   # Urahara Hat Emerald Green
+    "accent_secondary": "#22c55e", # Urahara Hat Light Green
+    "accent_dark": "#14532d",      # Urahara Hat Deep Green
     "success": "#22c55e",
     "warning": "#f59e0b",
     "error": "#ef4444",
@@ -84,7 +85,7 @@ COLORS = {
     "text_secondary": "#71717a",   # zinc-500 — muted labels
     "text_muted": "#3f3f46",       # zinc-700 — very subtle
     "border": "#27272a",           # zinc-800 — ultra-thin borders
-    "border_active": "#52525b",    # zinc-600 — focus/hover border
+    "border_active": "#16a34a",    # Urahara green focus/hover border
     "console_bg": "#050505",
     "console_text": "#a1a1aa",     # subtle console grey
 }

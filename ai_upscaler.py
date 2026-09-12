@@ -68,9 +68,7 @@ def _apply_torchvision_compat_patch():
     except Exception:
         pass  # If patch fails, let the real import error surface later
 
-
-_apply_torchvision_compat_patch()
-
+# _apply_torchvision_compat_patch() is called lazily when loading Real-ESRGAN
 
 
 # ── Available AI Models ───────────────────────────────────────────────────────
@@ -332,6 +330,7 @@ class AIVideoUpscaler:
             raise ValueError(f"Modelo desconhecido: {model_key}")
 
         # Import here so the rest of the app doesn't fail if not installed
+        _apply_torchvision_compat_patch()
         import torch
         from basicsr.archs.rrdbnet_arch import RRDBNet
         from realesrgan import RealESRGANer

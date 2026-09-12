@@ -208,7 +208,7 @@ class SettingsTab(ctk.CTkFrame):
             font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
             fg_color="#18181b",
             hover_color=COLORS["border_active"],
-            text_color="#60a5fa",
+            text_color="#4ade80",
             corner_radius=6,
             height=26,
             command=lambda: webbrowser.open("https://aistudio.google.com/apikey"),

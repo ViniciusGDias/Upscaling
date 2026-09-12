@@ -9,7 +9,7 @@ PyInstaller.__main__.run([
     'app.py',
     '--name=Urahara',
     '--noconsole',
-    '--onefile',
+    '--onedir',
     '--icon=app_icon.ico',
     '--add-data=upscaler.py;.',
     '--add-data=audio_separator.py;.',
