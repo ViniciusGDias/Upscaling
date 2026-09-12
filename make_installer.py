@@ -13,6 +13,14 @@ import zipfile
 import subprocess
 from pathlib import Path
 
+try:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8")
+except Exception:
+    pass
+
 APP_DIR = Path(__file__).parent.resolve()
 VERSION_FILE = APP_DIR / "version.json"
 
@@ -46,7 +54,7 @@ def find_inno_compiler() -> str:
 def main():
     ver = get_version()
     print("=" * 60)
-    print(f" 🎩 Urahara Studio v{ver} - Gerador de Executável & Instalador")
+    print(f" [Urahara Studio v{ver}] - Gerador de Executavel & Instalador")
     print("=" * 60)
 
     # 1. Build EXE with PyInstaller
