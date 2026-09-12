@@ -306,3 +306,94 @@ def download_and_install_ffmpeg(
                 on_complete(False, err_msg)
 
     threading.Thread(target=_run, daemon=True).start()
+
+
+REALCUGAN_ZIP_URL = "https://github.com/nihui/realcugan-ncnn-vulkan/releases/download/20220728/realcugan-ncnn-vulkan-20220728-windows.zip"
+
+
+def download_and_install_realcugan(
+    on_progress: Optional[Callable[[float, str], None]] = None,
+    on_log: Optional[Callable[[str], None]] = None,
+    on_complete: Optional[Callable[[bool, str], None]] = None
+):
+    """
+    Download Real-CUGAN Vulkan engine (~14 MB) and extract to bin/realcugan/
+    """
+    def _run():
+        def _log(msg):
+            if on_log:
+                try:
+                    on_log(msg)
+                except Exception:
+                    pass
+
+        def _prog(pct, msg):
+            if on_progress:
+                try:
+                    on_progress(pct, msg)
+                except Exception:
+                    pass
+
+        _log("⬇️ Iniciando download do motor Real-CUGAN Vulkan (Anime 4K)...")
+        _prog(0.05, "Conectando ao servidor oficial (GitHub Releases)...")
+
+        cugan_target_dir = BIN_DIR / "realcugan"
+        cugan_target_dir.mkdir(parents=True, exist_ok=True)
+        temp_zip = BIN_DIR / "realcugan_temp.zip"
+
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+        }
+
+        try:
+            req = urllib.request.Request(REALCUGAN_ZIP_URL, headers=headers)
+            with urllib.request.urlopen(req, timeout=30) as response:
+                total_size = int(response.info().get("Content-Length", 0))
+                downloaded_bytes = 0
+                chunk_size = 1024 * 64
+
+                with open(temp_zip, "wb") as out_file:
+                    while True:
+                        chunk = response.read(chunk_size)
+                        if not chunk:
+                            break
+                        out_file.write(chunk)
+                        downloaded_bytes += len(chunk)
+                        if total_size > 0:
+                            pct = 0.10 + (downloaded_bytes / total_size) * 0.70
+                            mb_down = downloaded_bytes / (1024 * 1024)
+                            mb_tot = total_size / (1024 * 1024)
+                            _prog(pct, f"Baixando Real-CUGAN: {mb_down:.1f}MB / {mb_tot:.1f}MB")
+
+            _prog(0.85, "Extraindo motor Real-CUGAN e modelos...")
+            _log("📦 Extraindo binários Vulkan e modelos de textura...")
+
+            with zipfile.ZipFile(temp_zip, "r") as zip_ref:
+                for member in zip_ref.namelist():
+                    parts = Path(member).parts
+                    if len(parts) > 1:
+                        rel_path = Path(*parts[1:])
+                    else:
+                        rel_path = Path(parts[0])
+
+                    dest = cugan_target_dir / rel_path
+                    if member.endswith("/"):
+                        dest.mkdir(parents=True, exist_ok=True)
+                    else:
+                        dest.parent.mkdir(parents=True, exist_ok=True)
+                        with zip_ref.open(member) as src, open(dest, "wb") as dst:
+                            shutil.copyfileobj(src, dst)
+
+            temp_zip.unlink(missing_ok=True)
+            _prog(1.0, "Real-CUGAN instalado com sucesso!")
+            _log("🎉 Motor Real-CUGAN 4K pronto para uso!")
+            if on_complete:
+                on_complete(True, "Motor Real-CUGAN instalado com sucesso em ./bin/realcugan/!")
+        except Exception as e:
+            err_msg = f"Erro ao baixar Real-CUGAN: {e}"
+            _log(f"✕ {err_msg}")
+            if on_complete:
+                on_complete(False, err_msg)
+
+    threading.Thread(target=_run, daemon=True).start()
+

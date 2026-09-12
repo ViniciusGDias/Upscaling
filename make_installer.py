@@ -118,14 +118,6 @@ def main():
         zf.write(APP_DIR / ".env.example", "Urahara/.env.example")
         if (APP_DIR / "README.md").exists():
             zf.write(APP_DIR / "README.md", "Urahara/README.md")
-        # Include realcugan models
-        cugan_dir = APP_DIR / "bin" / "realcugan"
-        if cugan_dir.exists():
-            for root, _, files in os.walk(cugan_dir):
-                for f in files:
-                    fp = Path(root) / f
-                    rel = fp.relative_to(APP_DIR)
-                    zf.write(fp, f"Urahara/{rel}")
 
     print(f"✓ Pacote portátil criado: {zip_path}")
     print("\n" + "=" * 60)

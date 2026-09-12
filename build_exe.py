@@ -24,9 +24,13 @@ PyInstaller.__main__.run([
     f'--add-data={ctk_path};customtkinter/',
     '--hidden-import=windnd',
     '--hidden-import=soundfile',
-    '--hidden-import=demucs',
-    '--hidden-import=torch',
-    '--hidden-import=torchaudio',
+    '--exclude-module=torch',
+    '--exclude-module=torchvision',
+    '--exclude-module=torchaudio',
+    '--exclude-module=demucs',
+    '--exclude-module=basicsr',
+    '--exclude-module=realesrgan',
+    '--noconfirm',
     '--clean',
 ])
 

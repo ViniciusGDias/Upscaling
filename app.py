@@ -1336,16 +1336,36 @@ class VideoUpscalerApp(ctk.CTk):
                 self.cancel_btn.configure(state="disabled")
                 return
 
-            available, msg = check_realesrgan_available()
-            if not available:
-                messagebox.showerror(
-                    "IA não disponível",
-                    f"{msg}\n\nClique em '📦 Instalar IA' para instalar as dependências."
-                )
-                self.is_processing = False
-                self.start_btn.configure(state="normal", text="🚀  Iniciar Upscaling")
-                self.cancel_btn.configure(state="disabled")
-                return
+            selected_model = self.ai_model_var.get()
+            is_cugan = "CUGAN" in selected_model
+
+            if is_cugan:
+                from ai_upscaler import find_realcugan_bin
+                cugan_bin = find_realcugan_bin()
+                if not cugan_bin or not os.path.isfile(cugan_bin):
+                    self.is_processing = False
+                    self.start_btn.configure(state="normal", text="🚀  Iniciar Upscaling")
+                    self.cancel_btn.configure(state="disabled")
+                    if messagebox.askyesno(
+                        "Motor Real-CUGAN Opcional",
+                        "O motor Real-CUGAN 4K (~14 MB) é opcional e ainda não foi baixado.\n\n"
+                        "Deseja baixá-lo agora automaticamente com 1 clique?"
+                    ):
+                        self.tabview.set("⚙️  Configurações")
+                        if hasattr(self, "settings_tab"):
+                            self.settings_tab._auto_download_realcugan()
+                    return
+            else:
+                available, msg = check_realesrgan_available()
+                if not available:
+                    messagebox.showerror(
+                        "IA não disponível",
+                        f"{msg}\n\nRecomendamos utilizar os modelos Real-CUGAN (Vulkan), que são leves (~14 MB) e funcionam em qualquer placa de vídeo."
+                    )
+                    self.is_processing = False
+                    self.start_btn.configure(state="normal", text="🚀  Iniciar Upscaling")
+                    self.cancel_btn.configure(state="disabled")
+                    return
 
             selected_model = self.ai_model_var.get()
             engine_tag = "Real-CUGAN (Vulkan / Alta Velocidade)" if "CUGAN" in selected_model else "Real-ESRGAN (CUDA)"

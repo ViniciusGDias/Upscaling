@@ -674,7 +674,9 @@ class SettingsTab(ctk.CTkFrame):
             title="⚡ Real-CUGAN Vulkan (Motor 4K para Anime)",
             desc="Upscaling ultrarrápido para animes e desenhos com modelos Pro e SE.",
             is_ok=cugan["installed"],
-            detail="Binário e modelos prontos em ./bin/realcugan/" if cugan["installed"] else "Motor não encontrado em ./bin/realcugan/",
+            detail="Binário e modelos prontos em ./bin/realcugan/" if cugan["installed"] else "Motor sob demanda (~14 MB). Baixe se for usar upscaling.",
+            action_btn_text="⬇️ Baixar Motor 4K (~14 MB)" if not cugan["installed"] else None,
+            action_cmd=self._auto_download_realcugan if not cugan["installed"] else None,
         )
 
         # 3. CUDA & GPU
@@ -779,6 +781,32 @@ class SettingsTab(ctk.CTkFrame):
             self.after(0, _done)
 
         download_and_install_ffmpeg(on_progress=_on_prog, on_log=_on_log, on_complete=_on_comp)
+
+    def _auto_download_realcugan(self):
+        """Trigger automatic 1-click download of Real-CUGAN."""
+        self.engine_prog_frame.pack(fill="x", padx=16, pady=(0, 10))
+        self.engine_progress.set(0.05)
+        self.engine_prog_label.configure(text="Iniciando download do Real-CUGAN (~14 MB)...")
+        self.engine_prog_label.pack(anchor="w", pady=(4, 0))
+
+        def _on_prog(pct, msg):
+            self.after(0, lambda: (self.engine_progress.set(pct), self.engine_prog_label.configure(text=msg)))
+
+        def _on_log(msg):
+            self._log(msg)
+
+        def _on_comp(success, msg):
+            def _done():
+                self.engine_prog_frame.pack_forget()
+                self.refresh_engine_status()
+                if success:
+                    messagebox.showinfo("Real-CUGAN Instalado! ✓", f"{msg}\n\nO motor 4K para animes já está pronto para uso!")
+                else:
+                    messagebox.showerror("Erro no Download", msg)
+            self.after(0, _done)
+
+        from engine_manager import download_and_install_realcugan
+        download_and_install_realcugan(on_progress=_on_prog, on_log=_on_log, on_complete=_on_comp)
 
     def _check_for_updates_ui(self):
         """User clicked 'Verificar Agora' button."""
