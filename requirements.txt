@@ -1,0 +1,7 @@
+customtkinter>=5.2.0
+Pillow>=10.0.0
+demucs>=4.0.0
+
+# AI Upscaling (Real-ESRGAN) — optional, install manually for CUDA support:
+# pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+# pip install basicsr realesrgan opencv-python facexlib gfpgan

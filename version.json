@@ -1,0 +1,17 @@
+{
+  "version": "1.0.0",
+  "name": "Urahara",
+  "release_date": "2026-09-11",
+  "changelog": [
+    "Lançamento da versão 1.0.0 com 7 ferramentas integradas.",
+    "Upscaling 4K com Real-CUGAN Vulkan e Real-ESRGAN CUDA.",
+    "Diretor IA com curadoria Top 3 e Smart Cortes.",
+    "Refinador Mastercut inteligente com proteção anti-corte excessivo.",
+    "Isolamento vocal e instrumental com Demucs.",
+    "Analisador profissional para Instagram Reels e YouTube Shorts.",
+    "Anime Finder com busca contextual de episódios e cenas.",
+    "Painel de Configuração de Chaves de IA e Motores com download automático de FFmpeg.",
+    "Sistema de notificação de novas versões."
+  ],
+  "download_url": "https://github.com/ViniciusGDias/Upscaling/releases/latest"
+}

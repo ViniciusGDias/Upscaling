@@ -1,0 +1,71 @@
+# ==============================================================================
+# SEGURANÇA MÁXIMA - Chaves Pessoais e Segredos (NUNCA COMMITTAR NO GIT)
+# ==============================================================================
+.env
+.env.local
+.env.*.local
+*.key
+*.pem
+credentials.json
+
+# ==============================================================================
+# Builds, Executáveis e Pacotes Gigantes (NÃO COMMITTAR)
+# ==============================================================================
+dist/
+build/
+*.spec
+*.exe
+*.dll
+*.zip
+*.rar
+*.7z
+*.tar.gz
+
+# ==============================================================================
+# Python & Caches
+# ==============================================================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.cache/
+
+# ==============================================================================
+# Arquivos de Mídia e Testes de Vídeo
+# ==============================================================================
+*.mp4
+*.mkv
+*.avi
+*.mov
+*.wmv
+*.flv
+*.webm
+*.ts
+*.wav
+*.mp3
+
+# ==============================================================================
+# Logs e Temporários
+# ==============================================================================
+*.log
+logs/
+temp/
+tmp/
+scratch/
+uploads/
+Videos/
+
+# Executáveis baixados em runtime
+bin/ffmpeg.exe
+bin/ffprobe.exe
+bin/ffmpeg_temp.zip
+bin/_ffmpeg_extracted/
+
+# Sistema Operacional
+Thumbs.db
+Desktop.ini
+.DS_Store
