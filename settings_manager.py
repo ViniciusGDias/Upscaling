@@ -15,13 +15,13 @@ from dotenv import load_dotenv
 ENV_PATH = Path(__file__).parent / ".env"
 
 AVAILABLE_GEMINI_MODELS = [
+    ("gemini-3.6-flash", "Gemini 3.6 Flash (Mais Estável & Rápido)"),
     ("gemini-3.8-flash", "Gemini 3.8 Flash (Mais Novo / Grátis)"),
     ("gemini-3.7-flash", "Gemini 3.7 Flash (Grátis)"),
-    ("gemini-3.6-flash", "Gemini 3.6 Flash (Grátis)"),
     ("gemini-3.5-flash", "Gemini 3.5 Flash (Grátis)"),
-    ("gemini-2.5-flash", "Gemini 2.5 Flash (Grátis)"),
     ("gemini-flash-lite-latest", "Gemini Flash Lite (Ultra Rápido / 500 RPD)"),
     ("gemini-flash-latest", "Gemini Flash (Padrão)"),
+    ("gemini-2.5-flash", "Gemini 2.5 Flash (Legado)"),
 ]
 
 
@@ -84,10 +84,12 @@ def save_app_settings(
     try:
         keys_list = parse_keys_from_text(gemini_keys_text)
         joined_gemini = ",".join(keys_list)
-        clean_groq = groq_key.strip().strip('"\'')
-        clean_or = openrouter_key.strip().strip('"\'')
-        clean_felo = felo_key.strip().strip('"\'')
-        clean_model = gemini_model.strip() or "gemini-3.8-flash"
+        clean_groq = groq_key.strip().strip('"\'').splitlines()[0].strip() if groq_key.strip() else ""
+        if clean_groq.startswith("AQ.") or clean_groq.startswith("AIzaSy"):
+            clean_groq = ""  # User mistakenly pasted a Gemini key into Groq
+        clean_or = openrouter_key.strip().strip('"\'').splitlines()[0].strip() if openrouter_key.strip() else ""
+        clean_felo = felo_key.strip().strip('"\'').splitlines()[0].strip() if felo_key.strip() else ""
+        clean_model = gemini_model.strip() or "gemini-3.6-flash"
 
         # Update running os.environ in memory instantly
         os.environ["GEMINI_API_KEY"] = joined_gemini

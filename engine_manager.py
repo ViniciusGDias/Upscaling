@@ -101,31 +101,61 @@ def check_all_engines() -> Dict[str, Dict[str, Any]]:
     cugan_models = BIN_DIR / "realcugan" / "models-se"
     realcugan_ok = cugan_exe.exists() and cugan_models.exists()
 
-    # PyTorch & CUDA
-    cuda_ok = False
-    device_name = "CPU"
+    # Hardware GPU Detection (detects NVIDIA GPUs like GTX 1650 even without PyTorch)
+    has_nvidia_gpu = False
+    gpu_name = ""
     vram_gb = 0.0
+
+    # 1. Check via nvidia-smi directly
+    try:
+        res = subprocess.run(
+            ["nvidia-smi", "--query-gpu=name,memory.total", "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=3,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+        )
+        if res.returncode == 0 and res.stdout.strip():
+            line = res.stdout.strip().splitlines()[0]
+            parts = line.split(",")
+            gpu_name = parts[0].strip()
+            if len(parts) > 1:
+                vram_gb = round(float(parts[1].strip()) / 1024, 1)
+            has_nvidia_gpu = True
+    except Exception:
+        pass
+
+    # 2. Check PyTorch & CUDA support
+    torch_installed = False
+    torch_cuda_ok = False
     try:
         import torch
+        torch_installed = True
         if torch.cuda.is_available():
-            cuda_ok = True
-            device_name = torch.cuda.get_device_name(0)
-            try:
-                vram_gb = round(torch.cuda.get_device_properties(0).total_memory / (1024 ** 3), 1)
-            except Exception:
-                pass
+            torch_cuda_ok = True
+            if not gpu_name:
+                gpu_name = torch.cuda.get_device_name(0)
+                try:
+                    vram_gb = round(torch.cuda.get_device_properties(0).total_memory / (1024 ** 3), 1)
+                except Exception:
+                    pass
     except Exception:
         pass
 
-    # Whisper
+    # 3. Whisper (Faster-Whisper + CTranslate2)
     whisper_ok = False
+    whisper_detail = "Faster-Whisper (Modo CPU)"
     try:
         import faster_whisper
+        import ctranslate2
+        cuda_count = ctranslate2.get_cuda_device_count()
         whisper_ok = True
+        if cuda_count > 0:
+            whisper_detail = f"Faster-Whisper (Aceleração CUDA na GPU ativa)"
+        else:
+            whisper_detail = "Faster-Whisper (CPU Otimizado)"
     except Exception:
         pass
 
-    # Demucs
+    # 4. Demucs
     demucs_ok = False
     try:
         import demucs
@@ -143,16 +173,19 @@ def check_all_engines() -> Dict[str, Dict[str, Any]]:
         "realcugan": {
             "installed": realcugan_ok,
             "path": str(cugan_exe) if realcugan_ok else "",
-            "type": "Vulkan / NCNN (GPU Universal)"
+            "type": "Vulkan / NCNN (GPU Universal - GTX 1650/RTX/AMD/Intel)"
         },
         "cuda": {
-            "available": cuda_ok,
-            "device_name": device_name,
-            "vram_gb": vram_gb
+            "has_gpu": has_nvidia_gpu or torch_cuda_ok,
+            "available": torch_cuda_ok,
+            "device_name": gpu_name or ("NVIDIA GPU" if has_nvidia_gpu else "CPU"),
+            "vram_gb": vram_gb,
+            "torch_installed": torch_installed,
+            "torch_cuda": torch_cuda_ok,
         },
         "whisper": {
             "available": whisper_ok,
-            "engine": "Faster-Whisper (Local)" if whisper_ok else "Pendente"
+            "detail": whisper_detail
         },
         "demucs": {
             "available": demucs_ok
@@ -396,4 +429,42 @@ def download_and_install_realcugan(
                 on_complete(False, err_msg)
 
     threading.Thread(target=_run, daemon=True).start()
+
+
+def create_pytorch_install_script() -> Path:
+    """
+    Generate an easy 1-click batch script ('instalar_motores_ia.bat')
+    to install PyTorch CUDA and Demucs for NVIDIA GPUs (like GTX 1650 / RTX).
+    """
+    bat_path = APP_DIR / "instalar_motores_ia.bat"
+    content = """@echo off
+chcp 65001 > nul
+title Urahara Studio - Instalador de Motores Opcionais
+cls
+echo ============================================================
+echo   [Urahara Studio] Instalador de Motores Opcionais
+echo ============================================================
+echo.
+echo Este script instala os motores opcionais:
+echo  - PyTorch com aceleracao GPU CUDA (compativel com GTX 1650 e superiores)
+echo  - Demucs (Separacao de audio vocal e instrumental)
+echo.
+echo Pressione qualquer tecla para iniciar a instalacao...
+pause > nul
+echo.
+echo [1/2] Baixando e instalando PyTorch com CUDA 12.1...
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+echo.
+echo [2/2] Instalando Demucs (Meta AI)...
+pip install demucs
+echo.
+echo ============================================================
+echo   Instalacao finalizada! Reinicie o aplicativo Urahara.
+echo ============================================================
+pause
+"""
+    with open(bat_path, "w", encoding="utf-8") as f:
+        f.write(content)
+    return bat_path
+
 

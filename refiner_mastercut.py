@@ -152,10 +152,17 @@ def detect_speech_segments(video_path: str, on_progress=None, on_log=None):
             on_progress(0.25, "Transcrevendo falas e diálogos com Whisper...")
 
         from faster_whisper import WhisperModel
-        import torch
 
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        compute_type = "float16" if device == "cuda" else "int8"
+        device = "cpu"
+        compute_type = "int8"
+        try:
+            import ctranslate2
+            if ctranslate2.get_cuda_device_count() > 0:
+                device = "cuda"
+                compute_type = "float16"
+        except Exception:
+            pass
+
         if on_log:
             on_log(f"   Modelo Whisper: base | Dispositivo: {device.upper()} ({compute_type})")
 
@@ -256,9 +263,15 @@ def detect_visual_action_blocks(video_path: str, on_log=None):
 def _get_api_keys() -> list:
     """Read Gemini API keys from environment or .env."""
     raw = os.getenv("GEMINI_API_KEY", "").strip()
-    if not raw or raw == "sua_chave_aqui":
+    if not raw or "sua_chave" in raw:
         return []
-    keys = [k.strip() for k in raw.replace(";", ",").split(",") if k.strip() and k.strip() != "sua_chave_aqui"]
+    keys = []
+    seen = set()
+    for part in raw.replace(";", "\n").replace(",", "\n").splitlines():
+        clean_k = part.strip().strip('"\'')
+        if clean_k and "sua_chave" not in clean_k.lower() and clean_k not in seen:
+            seen.add(clean_k)
+            keys.append(clean_k)
     return keys
 
 
@@ -543,8 +556,9 @@ Retorne EXCLUSIVAMENTE um objeto JSON no seguinte formato (sem comentários, ape
                     on_log(f"Aviso modelo {model_name}: {e}")
 
     # Fallback to Groq if configured
-    groq_key = os.getenv("GROQ_API_KEY", "").strip()
-    if groq_key:
+    groq_raw = os.getenv("GROQ_API_KEY", "").strip()
+    groq_key = groq_raw.splitlines()[0].strip() if groq_raw else ""
+    if groq_key and groq_key.startswith("gsk_"):
         try:
             import requests
             if on_log:

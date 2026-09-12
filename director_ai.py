@@ -30,15 +30,14 @@ def _get_gemini_keys() -> List[str]:
         return []
     seen = set()
     keys = []
-    for k in raw.replace(";", ",").split(","):
-        clean_k = k.strip().strip('"\'')
+    for part in raw.replace(";", "\n").replace(",", "\n").splitlines():
+        clean_k = part.strip().strip('"\'')
         if clean_k and "sua_chave" not in clean_k.lower() and clean_k not in seen:
             seen.add(clean_k)
             keys.append(clean_k)
     # Prioritize keys starting with AIzaSy (official Google AI Studio keys)
     keys.sort(key=lambda k: 0 if k.startswith("AIzaSy") else 1)
     return keys
-
 
 
 def _get_api_key(name: str) -> str:
@@ -49,8 +48,15 @@ def _get_api_key(name: str) -> str:
     raw = os.getenv(name, "")
     if not raw or "sua_chave" in raw:
         return ""
-    # Support comma-separated multiple keys, take first
-    return raw.replace(";", ",").split(",")[0].strip().strip('"\'')
+    # Support comma, semicolon, or newline-separated multiple keys, take first valid line
+    for part in raw.replace(";", "\n").replace(",", "\n").splitlines():
+        clean_k = part.strip().strip('"\'')
+        if clean_k and "sua_chave" not in clean_k.lower():
+            # If requesting GROQ key, ignore if user accidentally pasted a Gemini key
+            if name == "GROQ_API_KEY" and (clean_k.startswith("AQ.") or clean_k.startswith("AIzaSy")):
+                continue
+            return clean_k
+    return ""
 
 
 def _time_str_to_seconds(t_str: Any) -> float:
@@ -250,15 +256,21 @@ def transcribe_audio_groq(audio_path: str, groq_key: str, on_log: Optional[Calla
 
 
 def transcribe_audio_local(audio_path: str, on_log: Optional[Callable[[str], None]] = None) -> str:
-    """Fallback local transcription with faster-whisper."""
+    """Fallback local transcription with faster-whisper (CTranslate2, works without PyTorch)."""
     if on_log:
         on_log("🎙️ Transcrevendo com faster-whisper local (GPU/CPU)...")
 
     from faster_whisper import WhisperModel
-    import torch
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    compute_type = "float16" if device == "cuda" else "int8"
+    device = "cpu"
+    compute_type = "int8"
+    try:
+        import ctranslate2
+        if ctranslate2.get_cuda_device_count() > 0:
+            device = "cuda"
+            compute_type = "float16"
+    except Exception:
+        pass
 
     model = WhisperModel("base", device=device, compute_type=compute_type)
     segments, _ = model.transcribe(audio_path, beam_size=2)
@@ -277,7 +289,7 @@ def transcribe_audio_local(audio_path: str, on_log: Optional[Callable[[str], Non
 def transcribe_video_audio(audio_path: str, on_log: Optional[Callable[[str], None]] = None) -> str:
     """Smart transcriber: Groq Whisper API first, falls back to faster-whisper."""
     groq_key = _get_api_key("GROQ_API_KEY")
-    if groq_key:
+    if groq_key and groq_key.startswith("gsk_"):
         try:
             return transcribe_audio_groq(audio_path, groq_key, on_log)
         except Exception as e:
@@ -351,6 +363,7 @@ def call_ai_text(
 
         user_model = os.getenv("GEMINI_MODEL", "").strip()
         base_models = [
+            "gemini-3.6-flash",
             "gemini-3.8-flash",
             "gemini-3.7-flash",
             "gemini-flash-lite-latest",
@@ -379,7 +392,7 @@ def call_ai_text(
                             "responseMimeType": "application/json"
                         }
                     }
-                    resp = requests.post(url, json=payload, timeout=15)
+                    resp = requests.post(url, json=payload, timeout=20)
 
                     if resp.status_code == 200:
                         data = resp.json()
@@ -396,25 +409,30 @@ def call_ai_text(
                         # Model not available on this specific key/tier, quickly try next model
                         continue
 
-                    elif resp.status_code in (429, 503):
-                        # Rate limit or quota exhausted or overloaded - put on 90s cooldown
-                        _gemini_key_cooldowns[key] = now + 90.0
-                        _safe_log(_logger, f"⚠ Gemini cota excedida na chave {masked} (cód {resp.status_code}). Rotacionando...")
+                    elif resp.status_code == 503:
+                        # 503 = Temporary spike / model overloaded on Google's side.
+                        # DO NOT abandon the key! Try the next model on this SAME key!
+                        _safe_log(_logger, f"ℹ Gemini [{model}] com alta demanda (503). Tentando modelo alternativo...")
+                        continue
+
+                    elif resp.status_code == 429:
+                        # 429 = Rate limit exceeded on this key. Put on cooldown and rotate to next key.
+                        _gemini_key_cooldowns[key] = now + 60.0
+                        _safe_log(_logger, f"⚠ Gemini cota por minuto atingida na chave {masked} (429). Rotacionando chave...")
                         break  # Break out of model loop for this key, go to next key
 
                     else:
                         continue
 
                 except (requests.exceptions.Timeout, requests.exceptions.ConnectionError):
-                    _gemini_key_cooldowns[key] = now + 90.0
-                    _safe_log(_logger, f"⚠ Gemini timeout na chave {masked}. Rotacionando...")
-                    break
+                    _safe_log(_logger, f"ℹ Timeout de conexão no modelo {model}. Tentando próximo...")
+                    continue
                 except Exception:
                     continue
 
     # 2. TIER 2: GROQ FALLBACK
     groq_key = _get_api_key("GROQ_API_KEY")
-    if groq_key:
+    if groq_key and groq_key.startswith("gsk_"):
         _safe_log(_logger, "⚠ Alternando para Groq (alta velocidade e capacidade)...")
         url = "https://api.groq.com/openai/v1/chat/completions"
         headers = {"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"}

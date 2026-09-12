@@ -582,6 +582,15 @@ class SettingsTab(ctk.CTkFrame):
                 break
 
         groq_val = self.groq_entry.get().strip()
+        if groq_val and (groq_val.startswith("AQ.") or groq_val.startswith("AIzaSy")):
+            groq_val = ""
+            self.groq_entry.delete(0, "end")
+            messagebox.showwarning(
+                "Aviso: Chave Groq Inválida",
+                "Você colou uma chave do Google Gemini no campo do Groq.\n\n"
+                "As chaves do Gemini devem ficar apenas no campo principal 'Chave(s) da API (Google Gemini)'.\n\n"
+                "O campo do Groq é opcional (começa com 'gsk_'). Ele foi limpo para evitar erros."
+            )
         or_val = self.openrouter_entry.get().strip()
         felo_val = self.felo_entry.get().strip()
 
@@ -681,11 +690,24 @@ class SettingsTab(ctk.CTkFrame):
 
         # 3. CUDA & GPU
         cuda = engines["cuda"]
+        if cuda["has_gpu"]:
+            gpu_status_tag = f"✓ {cuda['device_name']}"
+            if cuda["vram_gb"] > 0:
+                gpu_status_tag += f" ({cuda['vram_gb']} GB VRAM)"
+            gpu_detail = "Placa NVIDIA detectada. Aceleração Vulkan (Real-CUGAN) e NVENC 100% ativas."
+            if not cuda["torch_cuda"]:
+                gpu_detail += " (PyTorch CUDA opcional não instalado)"
+        else:
+            gpu_status_tag = "Modo CPU"
+            gpu_detail = "Nenhuma GPU NVIDIA detectada. Processamento em CPU."
+
         self._render_engine_card(
             title="🖥️ Aceleração por Hardware (GPU / CUDA)",
             desc="Processamento acelerado por placa de vídeo NVIDIA.",
-            is_ok=cuda["available"],
-            detail=f"GPU Ativa: {cuda['device_name']} ({cuda['vram_gb']} GB VRAM)" if cuda["available"] else "Modo CPU (Nenhuma GPU NVIDIA CUDA detectada)",
+            is_ok=cuda["has_gpu"],
+            detail=f"{gpu_status_tag} · {gpu_detail}",
+            action_btn_text="📖 Como Instalar PyTorch CUDA" if (cuda["has_gpu"] and not cuda["torch_cuda"]) else None,
+            action_cmd=self._show_pytorch_cuda_dialog if (cuda["has_gpu"] and not cuda["torch_cuda"]) else None,
         )
 
         # 4. Whisper
@@ -694,17 +716,126 @@ class SettingsTab(ctk.CTkFrame):
             title="🧠 Faster-Whisper (Transcrição e Sincronia de Falas)",
             desc="Mapeamento de palavras e legendas com timestamps exatos.",
             is_ok=wh["available"],
-            detail="Biblioteca Faster-Whisper pronta para uso local e via Groq Cloud." if wh["available"] else "Pendente",
+            detail=wh.get("detail", "Pronto para uso local."),
         )
 
         # 5. Demucs
         dem = engines["demucs"]
         self._render_engine_card(
             title="🎧 Demucs (Separação Vocal e Instrumental Meta AI)",
-            desc="Isolamento de vozes e trilhas sonoras.",
+            desc="Isolamento de vozes e trilhas sonoras (Opcional).",
             is_ok=dem["available"],
-            detail="Pronto para isolamento de canais." if dem["available"] else "Pendente",
+            detail="Pronto para isolamento de canais." if dem["available"] else "Motor opcional não instalado. Requer PyTorch CUDA.",
+            action_btn_text="📖 Como Instalar Demucs" if not dem["available"] else None,
+            action_cmd=self._show_pytorch_cuda_dialog if not dem["available"] else None,
         )
+
+    def _show_pytorch_cuda_dialog(self):
+        """Open a modern guide on how to install PyTorch CUDA and Demucs."""
+        from engine_manager import create_pytorch_install_script
+
+        dialog = ctk.CTkToplevel(self)
+        dialog.title("Guia de Instalação: PyTorch com Aceleração CUDA & Demucs")
+        dialog.geometry("680x520")
+        dialog.minsize(620, 480)
+        dialog.configure(fg_color=COLORS["bg_dark"])
+        dialog.grab_set()
+
+        # Title
+        ctk.CTkLabel(
+            dialog,
+            text="⚡ Motores Opcionais: PyTorch (CUDA) & Demucs",
+            font=ctk.CTkFont(family="Segoe UI", size=15, weight="bold"),
+            text_color=COLORS["text_primary"],
+        ).pack(anchor="w", padx=20, pady=(18, 4))
+
+        info_text = (
+            "💡 Dica de Hardware (GTX 1650 / RTX / etc):\n"
+            "• O Real-CUGAN (Upscaler 4K) e o Faster-Whisper já rodam nativamente acelerados pela sua GPU via Vulkan e CTranslate2, sem necessidade do PyTorch!\n"
+            "• O PyTorch com CUDA só é necessário caso você queira usar a aba 'Separação de Áudio' (Demucs) ou modelos pesados de Real-ESRGAN.\n"
+            "• Para manter o instalador base do Urahara ultraleve (213 MB em vez de 2 GB), você pode instalar o PyTorch quando desejar usando os passos abaixo:"
+        )
+        ctk.CTkLabel(
+            dialog,
+            text=info_text,
+            font=ctk.CTkFont(family="Segoe UI", size=11),
+            text_color=COLORS["accent_secondary"],
+            justify="left", anchor="w",
+        ).pack(fill="x", padx=20, pady=(0, 12))
+
+        # Command Box Frame
+        cmd_card = ctk.CTkFrame(dialog, fg_color="#141416", corner_radius=8, border_width=1, border_color=COLORS["border"])
+        cmd_card.pack(fill="x", padx=20, pady=(0, 12))
+
+        ctk.CTkLabel(
+            cmd_card,
+            text="Comando de Instalação Recomendado (Terminal / Prompt de Comando):",
+            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+            text_color=COLORS["text_secondary"],
+            anchor="w",
+        ).pack(fill="x", padx=12, pady=(10, 4))
+
+        cmd_text = "pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121\npip install demucs"
+        cmd_box = ctk.CTkTextbox(cmd_card, height=55, font=ctk.CTkFont(family="Consolas", size=11), fg_color="#0a0a0c", text_color="#4ade80")
+        cmd_box.pack(fill="x", padx=12, pady=(0, 10))
+        cmd_box.insert("1.0", cmd_text)
+        cmd_box.configure(state="disabled")
+
+        # Action Buttons Row
+        btn_row = ctk.CTkFrame(dialog, fg_color="transparent")
+        btn_row.pack(fill="x", padx=20, pady=(4, 16))
+
+        def _copy_cmd():
+            self.clipboard_clear()
+            self.clipboard_append(cmd_text)
+            self.update()
+            copy_btn.configure(text="✓ Comando Copiado!", fg_color=COLORS["success"])
+            self.after(2500, lambda: copy_btn.configure(text="📋 Copiar Comando", fg_color=COLORS["accent_primary"]))
+
+        copy_btn = ctk.CTkButton(
+            btn_row,
+            text="📋 Copiar Comando",
+            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+            fg_color=COLORS["accent_primary"],
+            hover_color=COLORS["accent_secondary"],
+            text_color=COLORS["bg_dark"],
+            corner_radius=6, height=32,
+            command=_copy_cmd
+        )
+        copy_btn.pack(side="left", padx=(0, 10))
+
+        def _generate_bat():
+            bat_p = create_pytorch_install_script()
+            messagebox.showinfo(
+                "Script Criado com Sucesso! ✓",
+                f"O arquivo de instalação em 1-clique foi gerado em:\n{bat_p}\n\nBasta dar 2 cliques nele para instalar o PyTorch CUDA e Demucs automaticamente!"
+            )
+            import subprocess
+            subprocess.run(["explorer", "/select,", str(bat_p)])
+
+        bat_btn = ctk.CTkButton(
+            btn_row,
+            text="⚡ Gerar Script .bat na Pasta do App",
+            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+            fg_color="#1f1f23",
+            hover_color=COLORS["border_active"],
+            text_color=COLORS["text_primary"],
+            corner_radius=6, height=32,
+            command=_generate_bat
+        )
+        bat_btn.pack(side="left", padx=(0, 10))
+
+        web_btn = ctk.CTkButton(
+            btn_row,
+            text="🌐 Site do PyTorch →",
+            font=ctk.CTkFont(family="Segoe UI", size=11),
+            fg_color="transparent",
+            hover_color="#18181b",
+            text_color=COLORS["text_secondary"],
+            corner_radius=6, height=32,
+            command=lambda: webbrowser.open("https://pytorch.org/get-started/locally/"),
+        )
+        web_btn.pack(side="right")
 
     def _render_engine_card(self, title: str, desc: str, is_ok: bool, detail: str, action_btn_text: Optional[str] = None, action_cmd: Optional[Callable] = None):
         row = ctk.CTkFrame(self.engines_container, fg_color="#141416", corner_radius=8, border_width=1, border_color=COLORS["border"])
