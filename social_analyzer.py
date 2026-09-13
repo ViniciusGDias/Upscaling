@@ -228,6 +228,10 @@ Responda EXATAMENTE neste formato JSON:
 {{
     "video_analysis": {{
         "content_summary": "Resumo detalhado do conteúdo da cena",
+        "characters_detected": [
+            "Nome do Personagem 1 (Papel/Ação/Fala neste corte específico)",
+            "Nome do Personagem 2 (Papel/Ação/Fala neste corte específico)"
+        ],
         "character_context": "Como os personagens e elementos de {work_type_str} estão contextualizados e o apelo aos fãs",
         "strengths": ["Ponto forte 1", "Ponto forte 2", "Ponto forte 3"],
         "weaknesses": ["Ponto de melhoria 1", "Ponto de melhoria 2"]
@@ -280,6 +284,12 @@ Responda EXATAMENTE neste formato JSON:
         }}
     ]
 }}
+
+IMPORTANTE SOBRE CHARACTERS_DETECTED (IDENTIFICAÇÃO DE PERSONAGENS NO CORTE):
+Analise detalhadamente o áudio, falas transcritas, termos/jargões, golpes, tom de voz e o contexto da obra para identificar com precisão QUEM SÃO os personagens presentes, falando ou em destaque neste corte específico.
+- Liste no campo "characters_detected" cada personagem com seu nome oficial e uma breve descrição da sua ação ou fala na cena (ex: ["Gojo Satoru (enfrentando o inimigo e ativando o Mugen)", "Jogo (em desespero com o ataque)"]).
+- Se o corte tiver apenas 1 personagem, liste esse personagem com clareza.
+- Se não for possível identificar com 100% de precisão (vídeo sem falas ou nomes), aponte os personagens prováveis com base no contexto ou indique "Não identificados com precisão".
 
 IMPORTANTE SOBRE VIDEO_CAPTIONS (LEGENDAS NO TOPO):
 As "video_captions" são LEGENDAS/TEXTOS que ficam sobrepostos NO TOPO DO VÍDEO para chamar atenção imediatamente e impedir o espectador de passar (swipe) o vídeo. NÃO são títulos nem descrições. São frases CURTAS (máximo 8-10 palavras), IMPACTANTES e PROVOCATIVAS que aparecem como texto na tela do vídeo. Devem causar curiosidade, choque, hype ou emoção. Exemplos de estilo: "ELE FEZ O IMPOSSÍVEL... 😱", "NINGUÉM ESPERAVA ISSO 🔥", "ASSISTA ATÉ O FINAL...", "O MOMENTO QUE MUDOU TUDO". Gere pelo menos 5 opções variadas de legendas de vídeo com "text", "style" e "why_viral".
@@ -451,7 +461,7 @@ def get_video_info_fast(video_path: str) -> Dict[str, Any]:
             "-of", "json",
             video_path
         ]
-        res = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        res = subprocess.run(cmd, capture_output=True, encoding="utf-8", errors="replace", timeout=10)
         if res.returncode == 0 and res.stdout:
             data = json.loads(res.stdout)
             streams = data.get("streams", [])
@@ -478,7 +488,7 @@ def get_video_info_fast(video_path: str) -> Dict[str, Any]:
             "-of", "csv=p=0",
             video_path
         ]
-        res_a = subprocess.run(cmd_a, capture_output=True, text=True, timeout=5)
+        res_a = subprocess.run(cmd_a, capture_output=True, encoding="utf-8", errors="replace", timeout=5)
         if res_a.returncode == 0 and "audio" in res_a.stdout.lower():
             info["has_audio"] = True
     except Exception:

@@ -8,6 +8,9 @@
     "Suporte nativo a placas NVIDIA GTX 1650 (CTranslate2 e Vulkan sem estouro de VRAM).",
     "Rotacionador resiliente de IA com tolerância a picos temporários (503) e chave Groq.",
     "Novo guia e gerador de script (.bat) para PyTorch CUDA e Demucs.",
+    "Identificação inteligente de personagens presentes no corte no Analisador de YouTube Shorts.",
+    "Suporte total a emojis e caracteres especiais em nomes de arquivos no Upscaler e Refinador.",
+    "Auto-correção de offset de episódio e fallback resiliente garantido no Mastercut.",
     "Tema visual verde Kisuke Urahara aplicado em todas as ferramentas."
   ],
   "download_url": "https://github.com/ViniciusGDias/Upscaling/releases/latest"

@@ -218,7 +218,7 @@ def find_ffplay() -> Optional[str]:
     try:
         result = subprocess.run(
             ["ffplay", "-version"],
-            capture_output=True, text=True,
+            capture_output=True, encoding="utf-8", errors="replace",
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
         )
         if result.returncode == 0:
@@ -246,7 +246,7 @@ def find_ffmpeg() -> Optional[str]:
     try:
         result = subprocess.run(
             ["ffmpeg", "-version"],
-            capture_output=True, text=True,
+            capture_output=True, encoding="utf-8", errors="replace",
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
         )
         if result.returncode == 0:
@@ -274,7 +274,7 @@ def find_ffprobe() -> Optional[str]:
     try:
         result = subprocess.run(
             ["ffprobe", "-version"],
-            capture_output=True, text=True,
+            capture_output=True, encoding="utf-8", errors="replace",
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
         )
         if result.returncode == 0:
@@ -312,7 +312,8 @@ def get_video_info(filepath: str) -> Optional[VideoInfo]:
             filepath
         ]
         result = subprocess.run(
-            cmd, capture_output=True, text=True,
+            cmd, capture_output=True,
+            encoding="utf-8", errors="replace",
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
         )
 
@@ -587,7 +588,8 @@ class VideoUpscaler:
                     cmd,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
-                    universal_newlines=True,
+                    encoding="utf-8",
+                    errors="replace",
                     creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
                 )
 

@@ -1066,7 +1066,8 @@ class DirectorTab(ctk.CTkFrame):
         else:
             # Clean title for Windows filenames
             raw_title = cand.get("title") or "corte"
-            clean_title = re.sub(r'[\\/*?:"<>|]', '', str(raw_title)).strip()
+            clean_title = re.sub(r'[\\/*?:"<>|]', '', str(raw_title))
+            clean_title = re.sub(r'[^\w\s\-.,()]', '', clean_title, flags=re.UNICODE).strip()
             clean_title = re.sub(r'\s+', '_', clean_title)[:45]
             if not clean_title:
                 clean_title = "corte"

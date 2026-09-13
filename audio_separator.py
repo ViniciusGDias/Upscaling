@@ -65,7 +65,7 @@ def get_audio_info(filepath: str) -> Optional[dict]:
             filepath
         ]
         result = subprocess.run(
-            cmd, capture_output=True, text=True,
+            cmd, capture_output=True, encoding="utf-8", errors="replace",
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
         )
 
@@ -120,7 +120,7 @@ def check_demucs_installed() -> bool:
     try:
         result = subprocess.run(
             ["demucs", "--help"],
-            capture_output=True, text=True,
+            capture_output=True, encoding="utf-8", errors="replace",
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
         )
         return result.returncode == 0
@@ -148,7 +148,7 @@ def install_demucs(on_log: Optional[Callable] = None) -> bool:
 
         result = subprocess.run(
             cmd,
-            capture_output=True, text=True,
+            capture_output=True, encoding="utf-8", errors="replace",
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0,
             timeout=600,  # 10 minute timeout
         )
@@ -225,7 +225,7 @@ class AudioSeparator:
                 on_log("🎞️ Extraindo áudio do vídeo...")
 
             result = subprocess.run(
-                cmd, capture_output=True, text=True,
+                cmd, capture_output=True, encoding="utf-8", errors="replace",
                 creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
             )
 
@@ -278,7 +278,7 @@ class AudioSeparator:
 
         try:
             result = subprocess.run(
-                cmd, capture_output=True, text=True,
+                cmd, capture_output=True, encoding="utf-8", errors="replace",
                 creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
             )
             return result.returncode == 0
@@ -314,7 +314,7 @@ class AudioSeparator:
 
         try:
             result = subprocess.run(
-                cmd, capture_output=True, text=True,
+                cmd, capture_output=True, encoding="utf-8", errors="replace",
                 creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
             )
             if result.returncode != 0 and on_log:

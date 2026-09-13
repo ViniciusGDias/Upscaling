@@ -45,7 +45,7 @@ def _run_ffmpeg_with_nvenc_fallback(cmd: list, timeout: int = 600, on_log=None) 
 
     result = None
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        result = subprocess.run(cmd, capture_output=True, encoding="utf-8", errors="replace", timeout=timeout)
     except Exception as e:
         if on_log:
             on_log(f"[FFmpeg] Exceção na tentativa NVENC: {e}")
@@ -78,7 +78,7 @@ def _run_ffmpeg_with_nvenc_fallback(cmd: list, timeout: int = 600, on_log=None) 
                 out_target = fallback_cmd.pop()
                 fallback_cmd.extend(["-pix_fmt", "yuv420p", out_target])
 
-            result = subprocess.run(fallback_cmd, capture_output=True, text=True, timeout=timeout)
+            result = subprocess.run(fallback_cmd, capture_output=True, encoding="utf-8", errors="replace", timeout=timeout)
             if result.returncode == 0 and on_log:
                 on_log("✓ Sucesso com fallback libx264 (CPU)!")
     return result
@@ -94,7 +94,7 @@ def get_video_duration(video_path: str) -> float:
             "-of", "csv=p=0",
             str(video_path)
         ]
-        res = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+        res = subprocess.run(cmd, capture_output=True, encoding="utf-8", errors="replace", timeout=15)
         if res.returncode == 0 and res.stdout.strip():
             return float(res.stdout.strip())
     except Exception:
@@ -113,7 +113,7 @@ def check_video_has_audio(video_path: str) -> bool:
             "-of", "csv=p=0",
             str(video_path)
         ]
-        res = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        res = subprocess.run(cmd, capture_output=True, encoding="utf-8", errors="replace", timeout=10)
         return "audio" in res.stdout.lower()
     except Exception:
         return False
@@ -341,7 +341,7 @@ def detect_visual_action_blocks(video_path: str, on_log=None):
             "-vf", "fps=3,select='gt(scene,0.20)',showinfo",
             "-f", "null", "-"
         ]
-        res = subprocess.run(cmd, capture_output=True, text=True, timeout=20)
+        res = subprocess.run(cmd, capture_output=True, encoding="utf-8", errors="replace", timeout=20)
         scene_times = []
         for line in res.stderr.splitlines():
             if 'pts_time:' in line:
@@ -1081,7 +1081,7 @@ def render_mastercut_video(
         probe_res = subprocess.run(
             [ffprobe_bin, "-v", "error", "-select_streams", "v:0",
              "-show_entries", "stream=width,height", "-of", "csv=p=0:s=x", str(source_path)],
-            capture_output=True, text=True, timeout=10
+            capture_output=True, encoding="utf-8", errors="replace", timeout=10
         )
         if probe_res.returncode == 0:
             parts = probe_res.stdout.strip().split("x")

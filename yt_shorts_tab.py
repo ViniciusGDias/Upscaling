@@ -231,6 +231,11 @@ class YTShortsAnalyzerTab(ctk.CTkFrame):
         btn.configure(text="✅ Copiado!", fg_color="#10b981")
         self.after(1800, lambda: btn.configure(text=original_text, fg_color="#16a34a"))
 
+    def _fill_character(self, name: str):
+        self.ent_character.delete(0, "end")
+        self.ent_character.insert(0, name)
+        self._log(f"Personagem preenchido automaticamente: '{name}'")
+
     def _render_results(self, data: dict):
         for w in self.right_scroll.winfo_children():
             w.destroy()
@@ -281,7 +286,63 @@ class YTShortsAnalyzerTab(ctk.CTkFrame):
             text_color="#e4e4e7",
             wraplength=480,
             justify="left"
-        ).pack(anchor="w", padx=15, pady=(0, 6))
+        ).pack(anchor="w", padx=15, pady=(0, 8))
+
+        # Personagens Identificados no Corte
+        raw_chars = (
+            va.get("characters_detected") or
+            data.get("characters_detected") or
+            va.get("personagens_detectados") or
+            va.get("characters")
+        )
+        if raw_chars:
+            if isinstance(raw_chars, list):
+                char_items = [str(c).strip() for c in raw_chars if str(c).strip()]
+            elif isinstance(raw_chars, str):
+                char_items = [c.strip() for c in raw_chars.split("\n") if c.strip()]
+            else:
+                char_items = []
+
+            if char_items:
+                char_box = ctk.CTkFrame(score_card, fg_color="#18181b", corner_radius=8, border_width=1, border_color="#8b5cf6")
+                char_box.pack(fill="x", padx=15, pady=(0, 8))
+
+                char_head = ctk.CTkFrame(char_box, fg_color="transparent")
+                char_head.pack(fill="x", padx=10, pady=(6, 4))
+
+                ctk.CTkLabel(
+                    char_head,
+                    text="👥 Personagens Identificados no Corte:",
+                    font=ctk.CTkFont(size=11, weight="bold"),
+                    text_color="#c084fc"
+                ).pack(side="left")
+
+                first_name = char_items[0].split("(")[0].split("—")[0].split("-")[0].replace("•", "").strip()
+                if first_name and not self.ent_character.get().strip():
+                    btn_fill = ctk.CTkButton(
+                        char_head,
+                        text=f"Usar '{first_name[:16]}'",
+                        width=85,
+                        height=22,
+                        font=ctk.CTkFont(size=10, weight="bold"),
+                        fg_color="#7c3aed",
+                        hover_color="#6d28d9",
+                        command=lambda n=first_name: self._fill_character(n)
+                    )
+                    btn_fill.pack(side="right")
+
+                for ch in char_items:
+                    bullet = ch if ch.startswith(("•", "-", "*")) else f"• {ch}"
+                    ctk.CTkLabel(
+                        char_box,
+                        text=bullet,
+                        font=ctk.CTkFont(size=11),
+                        text_color="#f1f5f9",
+                        wraplength=460,
+                        justify="left"
+                    ).pack(anchor="w", padx=12, pady=(1, 2))
+
+                ctk.CTkFrame(char_box, fg_color="transparent", height=4).pack()
 
         # Contexto do Personagem / Anime / Dorama
         char_ctx = va.get("character_context") or va.get("dorama_context")
