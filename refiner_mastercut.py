@@ -121,9 +121,69 @@ def check_video_has_audio(video_path: str) -> bool:
 
 # ─── Speech & Action Recognition ─────────────────────────────────────────────
 
+def _parse_time_seconds(val):
+    """
+    Parses timestamp representations into float seconds:
+    - float / int: 12.5 -> 12.5
+    - strings: '12.5', '12,5', '12.5s', '12s'
+    - time strings: '01:14', '01:14.5', '00:01:14'
+    Returns float or None.
+    """
+    if val is None:
+        return None
+    if isinstance(val, (int, float)):
+        return float(val)
+    if isinstance(val, str):
+        s = val.strip().lower().rstrip('s')
+        s = s.replace(',', '.')
+        if not s:
+            return None
+        if ':' in s:
+            parts = s.split(':')
+            try:
+                if len(parts) == 2:
+                    return float(parts[0]) * 60.0 + float(parts[1])
+                elif len(parts) == 3:
+                    return float(parts[0]) * 3600.0 + float(parts[1]) * 60.0 + float(parts[2])
+            except (ValueError, TypeError):
+                return None
+        try:
+            return float(s)
+        except (ValueError, TypeError):
+            return None
+    return None
+
+
+def _extract_chunk_bounds(chunk: dict):
+    """
+    Extracts start, end, and text from a chunk dictionary supporting various key aliases.
+    """
+    if not isinstance(chunk, dict):
+        return None, None, ""
+    s_raw = None
+    for k in ("start", "start_time", "inicio", "startTime", "from", "t_start", "comeco", "in"):
+        if k in chunk:
+            s_raw = chunk[k]
+            break
+    e_raw = None
+    for k in ("end", "end_time", "fim", "endTime", "to", "t_end", "termino", "out"):
+        if k in chunk:
+            e_raw = chunk[k]
+            break
+    t_raw = "[Corte Mastercut]"
+    for k in ("text", "texto", "descricao", "description", "title", "titulo", "scene"):
+        if k in chunk and chunk[k]:
+            t_raw = str(chunk[k])
+            break
+    s = _parse_time_seconds(s_raw)
+    e = _parse_time_seconds(e_raw)
+    return s, e, t_raw
+
+
 def detect_speech_segments(video_path: str, on_progress=None, on_log=None):
     """
-    Extracts 16kHz mono audio and runs faster_whisper to get word-level timestamps.
+    Extracts 16kHz mono audio and transcribes it to get word-level / segment-level timestamps.
+    Tries Groq Whisper API first (if key configured), then falls back to local faster_whisper.
     Returns: (all_words, full_text, duration)
     """
     ffmpeg_bin = _get_ffmpeg_bin("ffmpeg")
@@ -146,66 +206,123 @@ def detect_speech_segments(video_path: str, on_progress=None, on_log=None):
         ]
         subprocess.run(cmd_audio, capture_output=True, timeout=120)
 
+        # 1. Try Groq Whisper API (whisper-large-v3-turbo, ultra fast & accurate)
+        groq_raw = os.getenv("GROQ_API_KEY", "").strip()
+        groq_key = groq_raw.splitlines()[0].strip().strip('"\'') if groq_raw else ""
+        if groq_key and groq_key.startswith("gsk_") and os.path.exists(temp_wav_path):
+            try:
+                import requests
+                file_size_mb = os.path.getsize(temp_wav_path) / (1024 * 1024)
+                if file_size_mb <= 24:
+                    if on_log:
+                        on_log("🎙️ Transcrevendo áudio com Whisper Large v3 (Groq Nuvem)...")
+                    if on_progress:
+                        on_progress(0.20, "Transcrevendo falas via Groq Whisper Large v3...")
+                    url = "https://api.groq.com/openai/v1/audio/transcriptions"
+                    headers = {"Authorization": f"Bearer {groq_key}"}
+                    with open(temp_wav_path, "rb") as f:
+                        files = {"file": (os.path.basename(temp_wav_path), f, "audio/wav")}
+                        data = {
+                            "model": "whisper-large-v3-turbo",
+                            "response_format": "verbose_json",
+                            "temperature": "0.0",
+                        }
+                        resp = requests.post(url, headers=headers, files=files, data=data, timeout=90)
+                    if resp.status_code == 200:
+                        res_json = resp.json()
+                        all_words = []
+                        raw_words = res_json.get("words", [])
+                        raw_segments = res_json.get("segments", [])
+                        if raw_words:
+                            for w in raw_words:
+                                s = _parse_time_seconds(w.get("start"))
+                                e = _parse_time_seconds(w.get("end"))
+                                wd = str(w.get("word", "")).strip()
+                                if s is not None and e is not None and wd:
+                                    all_words.append({"start": round(s, 3), "end": round(e, 3), "text": wd})
+                        elif raw_segments:
+                            for seg in raw_segments:
+                                s = _parse_time_seconds(seg.get("start"))
+                                e = _parse_time_seconds(seg.get("end"))
+                                txt = str(seg.get("text", "")).strip()
+                                if s is not None and e is not None and txt:
+                                    all_words.append({"start": round(s, 3), "end": round(e, 3), "text": txt})
+                        full_text = res_json.get("text", "").strip()
+                        duration = real_duration
+                        if all_words and on_log:
+                            on_log(f"✓ Groq Whisper concluiu: {len(all_words)} marcações mapeadas com precisão!")
+                        if all_words:
+                            return all_words, full_text, duration
+            except Exception as e_groq:
+                if on_log:
+                    on_log(f"ℹ️ Groq Whisper indisponível ({e_groq}). Tentando Whisper local...")
+
+        # 2. Try local Faster-Whisper
         if on_log:
-            on_log("🧠 Analisando falas com Faster-Whisper (CUDA / CPU)...")
+            on_log("🧠 Analisando falas com Faster-Whisper local...")
         if on_progress:
-            on_progress(0.25, "Transcrevendo falas e diálogos com Whisper...")
-
-        from faster_whisper import WhisperModel
-
-        device = "cpu"
-        compute_type = "int8"
-        try:
-            import ctranslate2
-            if ctranslate2.get_cuda_device_count() > 0:
-                device = "cuda"
-                compute_type = "float16"
-        except Exception:
-            pass
-
-        if on_log:
-            on_log(f"   Modelo Whisper: base | Dispositivo: {device.upper()} ({compute_type})")
+            on_progress(0.25, "Transcrevendo falas e diálogos com Whisper local...")
 
         try:
-            model = WhisperModel("base", device=device, compute_type=compute_type)
-        except Exception:
-            model = WhisperModel("base", device="cpu", compute_type="int8")
+            from faster_whisper import WhisperModel
+            device = "cpu"
+            compute_type = "int8"
+            try:
+                import ctranslate2
+                if ctranslate2.get_cuda_device_count() > 0:
+                    device = "cuda"
+                    compute_type = "float16"
+            except Exception:
+                pass
 
-        segments_iter, info = model.transcribe(temp_wav_path, beam_size=5, word_timestamps=True)
+            if on_log:
+                on_log(f"   Modelo Whisper: base | Dispositivo: {device.upper()} ({compute_type})")
 
-        all_words = []
-        full_text_parts = []
+            try:
+                model = WhisperModel("base", device=device, compute_type=compute_type)
+            except Exception:
+                model = WhisperModel("base", device="cpu", compute_type="int8")
 
-        for seg in list(segments_iter):
-            if seg.words:
-                for w in seg.words:
+            segments_iter, info = model.transcribe(temp_wav_path, beam_size=5, word_timestamps=True)
+
+            all_words = []
+            full_text_parts = []
+
+            for seg in list(segments_iter):
+                if seg.words:
+                    for w in seg.words:
+                        all_words.append({
+                            "start": round(w.start, 3),
+                            "end": round(w.end, 3),
+                            "text": w.word.strip()
+                        })
+                else:
                     all_words.append({
-                        "start": round(w.start, 3),
-                        "end": round(w.end, 3),
-                        "text": w.word.strip()
+                        "start": round(seg.start, 3),
+                        "end": round(seg.end, 3),
+                        "text": seg.text.strip()
                     })
-            else:
-                all_words.append({
-                    "start": round(seg.start, 3),
-                    "end": round(seg.end, 3),
-                    "text": seg.text.strip()
-                })
-            full_text_parts.append(seg.text.strip())
+                full_text_parts.append(seg.text.strip())
 
-        duration = info.duration if info else real_duration
-        if duration <= 0.0:
-            duration = real_duration
+            duration = info.duration if info else real_duration
+            if duration <= 0.0:
+                duration = real_duration
 
-        if on_log:
-            on_log(f"✓ Whisper concluiu: {len(all_words)} palavras mapeadas em {duration:.1f}s.")
-        if on_progress:
-            on_progress(0.40, f"Transcrição concluída: {len(all_words)} palavras mapeadas.")
+            if on_log:
+                on_log(f"✓ Whisper local concluiu: {len(all_words)} palavras mapeadas em {duration:.1f}s.")
+            if on_progress:
+                on_progress(0.40, f"Transcrição concluída: {len(all_words)} palavras mapeadas.")
 
-        return all_words, " ".join(full_text_parts), duration
+            return all_words, " ".join(full_text_parts), duration
+
+        except Exception as err_local:
+            if on_log:
+                on_log(f"⚠️ Whisper local não disponível: {err_local}. Prosseguindo com análise estrutural e fatiamento inteligente...")
+            return [], "", real_duration
 
     except Exception as err:
         if on_log:
-            on_log(f"⚠️ Erro ao transcrever com Whisper: {err}")
+            on_log(f"⚠️ Erro na extração de áudio: {err}")
         return [], "", real_duration
     finally:
         if os.path.exists(temp_wav_path):
@@ -475,7 +592,7 @@ Use esse conhecimento de anime/série para identificar com precisão os personag
 Seu objetivo é criar o **MASTERCUT CONCENTRADO ("O SUCO DO VÍDEO")** deste vídeo.
 {ctx_block}
 DADOS DO VÍDEO BRUTO:
-- Duração Original: {video_duration:.1f} segundos (analise de 0.0s até {video_duration:.1f}s)
+- Duração Original: {video_duration:.1f} segundos (A LINHA DO TEMPO VAI ESTRITAMENTE DE 0.0s ATÉ {video_duration:.1f}s)
 - Diálogos Transcritos Completos:
 {chr(10).join(speech_summary) if speech_summary else "[Sem falas detectadas - use cortes visuais]"}
 - Cenas de Ação/Luta Mapeadas:
@@ -486,14 +603,18 @@ DADOS DO VÍDEO BRUTO:
 - Modo de Refino Selecionado: {mode_guide}
 - DURAÇÃO TOTAL OBRIGATÓRIA DA SOMA DOS SEGMENTOS: entre {min_dur:.1f}s e {max_dur:.1f}s.
 
-⛔ REGRAS CRÍTICAS ANTI-MUTILAÇÃO / ANTI-CORTE EXCESSIVO:
-1. **PISO MÍNIMO INVIOLÁVEL**: É TERMINANTEMENTE PROIBIDO retornar um tempo total inferior a {min_dur:.1f}s!
+⛔ REGRAS CRÍTICAS DE TIMESTAMPS E ANTI-MUTILAÇÃO:
+1. **LIMITES OBRIGATÓRIOS DOS TIMESTAMPS**:
+   - Este clipe tem EXATAMENTE {video_duration:.1f} segundos no total.
+   - Os valores de "start" e "end" DEVEM ser números decimais em segundos entre 0.0 e {video_duration:.1f}.
+   - NUNCA use timestamps do episódio original completo (ex: 120s, 300s, 800s, 1500s). Os cortes DEVEM ser relativos a ESTE clipe, começando em 0.0s e terminando no máximo em {video_duration:.1f}s!
+2. **PISO MÍNIMO INVIOLÁVEL**: É TERMINANTEMENTE PROIBIDO retornar um tempo total inferior a {min_dur:.1f}s!
    Se o vídeo original tem {video_duration:.1f}s, você NUNCA deve gerar apenas 15s, 19s ou 25s jogando fora momentos cruciais.
-2. **COMO REFINAR SEM PERDER O SENTIDO**:
+3. **COMO REFINAR SEM PERDER O SENTIDO**:
    - Um bom Mastercut acelera o ritmo CORTANDO SILÊNCIOS MORTOS (>0.35s entre falas) e andanças vazias.
    - NÃO corte diálogos no meio, não tire réplicas entre personagens e não descarte reações épicas.
    - Mantenha a narrativa coesa, com início/gancho, conflito/desenvolvimento e clímax.
-3. **DIVISÃO DINÂMICA**: Divida a timeline em múltiplos cortes cirúrgicos (3 a 7 segmentos) que juntos preencham a duração entre {min_dur:.1f}s e {max_dur:.1f}s.
+4. **DIVISÃO DINÂMICA**: Divida a timeline em múltiplos cortes cirúrgicos (3 a 7 segmentos) que juntos preencham a duração entre {min_dur:.1f}s e {max_dur:.1f}s.
 
 Retorne EXCLUSIVAMENTE um objeto JSON no seguinte formato (sem comentários, apenas JSON puro):
 {{
@@ -540,12 +661,22 @@ Retorne EXCLUSIVAMENTE um objeto JSON no seguinte formato (sem comentários, ape
                 text = response.text
                 if text:
                     data = json.loads(text)
-                    if isinstance(data, dict):
-                        timeline = data.get("ai_viral", data.get("mastercut", []))
-                        if timeline and isinstance(timeline, list) and len(timeline) > 0:
-                            if on_log:
-                                on_log(f"✓ IA ({model_name}) desenhou Mastercut com {len(timeline)} cortes estratégicos!")
-                            return timeline
+                    timeline = None
+                    if isinstance(data, list):
+                        timeline = data
+                    elif isinstance(data, dict):
+                        timeline = (
+                            data.get("ai_viral") or
+                            data.get("mastercut") or
+                            data.get("segments") or
+                            data.get("cortes") or
+                            data.get("cuts") or
+                            data.get("timeline")
+                        )
+                    if timeline and isinstance(timeline, list) and len(timeline) > 0:
+                        if on_log:
+                            on_log(f"✓ IA ({model_name}) desenhou Mastercut com {len(timeline)} cortes estratégicos!")
+                        return timeline
             except Exception as e:
                 err_s = str(e)
                 if "429" in err_s or "RESOURCE_EXHAUSTED" in err_s:
@@ -574,8 +705,19 @@ Retorne EXCLUSIVAMENTE um objeto JSON no seguinte formato (sem comentários, ape
             if resp.status_code == 200:
                 content = resp.json().get("choices", [{}])[0].get("message", {}).get("content", "")
                 data = json.loads(content)
-                timeline = data.get("ai_viral", data.get("mastercut", []))
-                if timeline:
+                timeline = None
+                if isinstance(data, list):
+                    timeline = data
+                elif isinstance(data, dict):
+                    timeline = (
+                        data.get("ai_viral") or
+                        data.get("mastercut") or
+                        data.get("segments") or
+                        data.get("cortes") or
+                        data.get("cuts") or
+                        data.get("timeline")
+                    )
+                if timeline and isinstance(timeline, list) and len(timeline) > 0:
                     if on_log:
                         on_log(f"✓ Sucesso via Groq Fallback! {len(timeline)} cortes encontrados.")
                     return timeline
@@ -597,31 +739,45 @@ def build_heuristic_mastercut(
     """
     Local heuristic fallback when no LLM is available or connected.
     Finds dialogue segments with minimum silence (>0.35s cut), prioritizing natural speech continuity.
+    Guaranteed NEVER to return an empty list.
     """
     if on_log:
         on_log("⚡ Construindo Mastercut inteligente via algoritmo de densidade de diálogo e corte de silêncio...")
 
-    if not all_words:
-        # Video with no speech detected: divide into 3-4 visual segments
-        seg_len = min(15.0, max(8.0, min_dur / 3.0))
-        return [
-            {"start": round(video_duration * 0.05, 3), "end": round(video_duration * 0.05 + seg_len, 3), "text": "[Abertura Visual]"},
-            {"start": round(video_duration * 0.45, 3), "end": round(video_duration * 0.45 + seg_len, 3), "text": "[Desenvolvimento Central]"},
-            {"start": round(max(0, video_duration - seg_len - 1.0), 3), "end": round(video_duration - 1.0, 3), "text": "[Clímax Final]"},
+    def _create_visual_cuts():
+        if video_duration <= min_dur + 1.0:
+            return [{"start": 0.0, "end": round(video_duration, 3), "text": "[Corte Concentrado Integral]"}]
+        target_total = max(min_dur, min(max_dur, video_duration * 0.75))
+        seg_len = min(15.0, max(8.0, target_total / 3.0))
+        s1 = round(max(0.0, video_duration * 0.05), 3)
+        e1 = round(min(video_duration, s1 + seg_len), 3)
+        s2 = round(max(e1 + 0.5, video_duration * 0.45 - seg_len / 2.0), 3)
+        e2 = round(min(video_duration, s2 + seg_len), 3)
+        s3 = round(max(e2 + 0.5, video_duration - seg_len - 0.5), 3)
+        e3 = round(min(video_duration, video_duration - 0.1), 3)
+        cuts = [
+            {"start": s1, "end": e1, "text": "[Abertura / Gancho]"},
+            {"start": s2, "end": e2, "text": "[Desenvolvimento Central]"},
+            {"start": s3, "end": e3, "text": "[Clímax / Desfecho]"}
         ]
+        valid_cuts = [c for c in cuts if c["end"] > c["start"]]
+        if not valid_cuts:
+            valid_cuts = [{"start": 0.0, "end": round(video_duration, 3), "text": "[Corte Integral]"}]
+        return valid_cuts
+
+    if not all_words:
+        return _create_visual_cuts()
 
     groups = group_words_by_speech_gaps(all_words, max_gap=0.35)
     if not groups:
-        return []
+        return _create_visual_cuts()
 
     # If short video or soft mode, preserve all valid speech groups!
     total_speech_dur = sum(g["duration"] for g in groups)
 
     if total_speech_dur <= max_dur:
-        # Keep all speech groups chronologically
         picked = sorted(groups, key=lambda x: x["start"])
     else:
-        # Need to trim less dense groups to fit max_dur
         for g in groups:
             d = max(0.5, g["duration"])
             g["score"] = (g["words_count"] / d) * (min(10.0, d) ** 0.5)
@@ -641,7 +797,10 @@ def build_heuristic_mastercut(
 
         picked.sort(key=lambda x: x["start"])
 
-    return [{"start": g["start"], "end": g["end"], "text": g["text"]} for g in picked]
+    res = [{"start": g["start"], "end": g["end"], "text": g["text"]} for g in picked]
+    if not res:
+        return _create_visual_cuts()
+    return res
 
 
 def protect_against_overcutting(
@@ -656,9 +815,25 @@ def protect_against_overcutting(
     Safety Guard: If AI or heuristic produced an overly aggressive cut (e.g. 19s on a 60s clip),
     this intelligently restores adjacent dialogue and missing key scenes until min_dur is reached,
     preventing mutilation of important moments while keeping dead silences cut.
+    Guaranteed NEVER to return an empty list.
     """
     if not refined:
-        return refined
+        if video_duration <= min_dur + 1.0:
+            return [{"start": 0.0, "end": round(video_duration, 3), "text": "[Mastercut Preservado]"}]
+        target_total = min(min_dur, video_duration * 0.8)
+        seg_dur = target_total / 3.0
+        gap = max(0.5, (video_duration - target_total) / 4.0)
+        s1 = round(gap, 3)
+        e1 = round(min(video_duration, s1 + seg_dur), 3)
+        s2 = round(min(video_duration - 2.0, e1 + gap), 3)
+        e2 = round(min(video_duration, s2 + seg_dur), 3)
+        s3 = round(min(video_duration - 1.0, e2 + gap), 3)
+        e3 = round(min(video_duration, s3 + seg_dur), 3)
+        return [
+            {"start": s1, "end": e1, "text": "[Abertura Narrativa]"},
+            {"start": s2, "end": e2, "text": "[Desenvolvimento Central]"},
+            {"start": s3, "end": e3, "text": "[Clímax Final]"}
+        ]
 
     total_cur = sum(s["end"] - s["start"] for s in refined)
     if total_cur >= min_dur:
@@ -753,6 +928,7 @@ def build_refined_segments(
     """
     Executes AI Mastercut selection with smart audio padding (-80ms, +250ms),
     merging overlaps and applying anti-overcut protection to prevent mutilation.
+    Guaranteed NEVER to return an empty list of segments!
     """
     min_dur, max_dur = calculate_mastercut_bounds(video_duration, refine_mode, target_duration_mode)
     if on_log:
@@ -768,22 +944,35 @@ def build_refined_segments(
         on_log=on_log
     )
 
-    if not timeline or len(timeline) < 2:
-        timeline = build_heuristic_mastercut(
-            all_words,
-            video_duration,
-            min_dur=min_dur,
-            max_dur=max_dur,
-            refine_mode=refine_mode,
-            on_log=on_log
-        )
+    raw_parsed = []
+    if timeline and isinstance(timeline, list):
+        for chunk in timeline:
+            s_t, e_t, txt = _extract_chunk_bounds(chunk)
+            if s_t is not None and e_t is not None and e_t > s_t:
+                raw_parsed.append({"start": s_t, "end": e_t, "text": txt})
+
+    # Detect if AI hallucinated episode-level timestamps (e.g. all starts >= video_duration)
+    if raw_parsed and all(item["start"] >= video_duration for item in raw_parsed):
+        min_start = min(item["start"] for item in raw_parsed)
+        if on_log:
+            on_log(f"ℹ️ IA gerou timestamps absolutos de episódio (início em {min_start:.1f}s). Sincronizando para a linha do tempo do clipe...")
+        shifted = []
+        for item in raw_parsed:
+            new_s = max(0.0, item["start"] - min_start)
+            new_e = item["end"] - min_start
+            if new_s < video_duration and new_e > new_s:
+                shifted.append({
+                    "start": new_s,
+                    "end": min(video_duration, new_e),
+                    "text": item["text"]
+                })
+        if shifted:
+            raw_parsed = shifted
 
     refined = []
-    for chunk in timeline:
-        if not isinstance(chunk, dict):
-            continue
-        s_t = float(chunk.get("start", 0))
-        e_t = float(chunk.get("end", 0))
+    for chunk in raw_parsed:
+        s_t = chunk["start"]
+        e_t = chunk["end"]
 
         # Smart Padding: -80ms start (natural breath), +250ms end (preserves word ending)
         s_t = max(0.0, s_t - 0.080)
@@ -797,6 +986,33 @@ def build_refined_segments(
                 "end": e_t_r,
                 "text": chunk.get("text", "[Corte Mastercut]")
             })
+
+    # CRITICAL: If after parsing AI timeline, refined is STILL empty or has fewer than 2 segments:
+    if not refined or len(refined) < 2:
+        if on_log:
+            if not refined:
+                on_log("⚠️ Cortes da IA eram inválidos ou fora dos limites do clipe. Ativando algoritmo heurístico de segurança...")
+            else:
+                on_log("⚡ Complementando cortes via inteligência heurística...")
+        fallback_timeline = build_heuristic_mastercut(
+            all_words,
+            video_duration,
+            min_dur=min_dur,
+            max_dur=max_dur,
+            refine_mode=refine_mode,
+            on_log=on_log
+        )
+        for chunk in fallback_timeline:
+            s_t, e_t, txt = _extract_chunk_bounds(chunk)
+            if s_t is not None and e_t is not None and e_t > s_t:
+                s_t_r = round(max(0.0, s_t - 0.080), 3)
+                e_t_r = round(min(video_duration, e_t + 0.250), 3)
+                if e_t_r > s_t_r:
+                    refined.append({
+                        "start": s_t_r,
+                        "end": e_t_r,
+                        "text": txt
+                    })
 
     # Merge overlapping segments
     refined = _merge_segments(refined)
@@ -828,6 +1044,10 @@ def build_refined_segments(
                 break
         if trimmed:
             refined = trimmed
+
+    # Absolute ultimate failsafe: NEVER return empty!
+    if not refined:
+        refined = [{"start": 0.0, "end": round(video_duration, 3), "text": "[Mastercut Completo]"}]
 
     return refined
 
@@ -1028,7 +1248,9 @@ class MastercutPipeline:
                 raise InterruptedError("Operação cancelada pelo usuário.")
 
             if not segments:
-                raise ValueError("Não foi possível identificar segmentos válidos para o Mastercut.")
+                if on_log:
+                    on_log("⚠️ Nenhum segmento retornado. Ativando corte mestre de segurança para renderização...")
+                segments = [{"start": 0.0, "end": round(duration, 3), "text": "[Mastercut Completo]"}]
 
             # Step 4: Video Assembly
             if on_log:
