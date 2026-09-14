@@ -141,16 +141,16 @@ ENCODERS = {
     "CPU (Software - Lento)": "cpu",
 }
 
-# Anti-Copyright subtle modifications (bypasses Content ID)
+# Anti-Copyright subtle modifications (bypasses Content ID without audio-video desync)
 ANTI_COPYRIGHT_OPTIONS = {
     "Nenhum": None,
     "Sutil (Recomendado)": {
         "video": "noise=alls=1:allf=t+u,hue=h=0.02", # Tiny noise + invisible hue shift
-        "audio": "atempo=1.02" # 2% speed up
+        "audio": "asetrate=44100*1.015,aresample=44100,atempo=1/1.015" # 1.5% micro pitch shift mantendo duração 100% idêntica ao vídeo
     },
     "Forte (Maior segurança)": {
         "video": "noise=alls=2:allf=t+u,hue=h=-0.04,eq=brightness=0.01",
-        "audio": "atempo=1.04" # 4% speed up
+        "audio": "asetrate=44100*1.03,aresample=44100,atempo=1/1.03" # 3% pitch shift mantendo duração 100% idêntica ao vídeo
     }
 }
 

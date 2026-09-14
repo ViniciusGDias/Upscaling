@@ -1,15 +1,16 @@
 {
-  "version": "1.0.1",
+  "version": "1.0.2",
   "name": "Urahara",
-  "release_date": "2026-09-12",
+  "release_date": "2026-09-14",
   "changelog": [
-    "Instalador 90% mais leve (de 2.06 GB para ~213 MB) com inicialização instantânea.",
+    "Nova opção de Loop Contextual vs Sem Loop no Refinador (Mastercut com replay infinito >100% retenção).",
+    "Correção definitiva de dessincronização labial no modo Anti-Copyright do Upscaler (tom com duração 100% idêntica).",
+    "Sincronização estrita frame-a-frame de áudio e vídeo com tempo zero no Refinador.",
+    "Instalador ultra-leve (~213 MB) com inicialização instantânea.",
     "Motores opcionais sob demanda (Real-CUGAN 4K e FFmpeg instaláveis em 1 clique).",
     "Suporte nativo a placas NVIDIA GTX 1650 (CTranslate2 e Vulkan sem estouro de VRAM).",
     "Rotacionador resiliente de IA com tolerância a picos temporários (503) e chave Groq.",
-    "Novo guia e gerador de script (.bat) para PyTorch CUDA e Demucs.",
     "Identificação inteligente de personagens presentes no corte no Analisador de YouTube Shorts.",
-    "Modo Anti-Copyright do Refinador re-calibrado com sincronia labial perfeita e velocidade sutil.",
     "Suporte total a emojis e caracteres especiais em nomes de arquivos no Upscaler e Refinador.",
     "Auto-correção de offset de episódio e fallback resiliente garantido no Mastercut.",
     "Tema visual verde Kisuke Urahara aplicado em todas as ferramentas."

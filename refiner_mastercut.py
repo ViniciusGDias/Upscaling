@@ -534,6 +534,7 @@ def call_ai_mastercut_timeline(
     video_context="",
     refine_mode="balanced",
     target_duration_mode="auto",
+    enable_loop=False,
     on_log=None
 ):
     """
@@ -588,6 +589,14 @@ Use esse conhecimento de anime/série para identificar com precisão os personag
     }
     mode_guide = mode_descriptions.get(refine_mode, mode_descriptions["balanced"])
 
+    loop_instruction = ""
+    if enable_loop:
+        loop_instruction = """
+5. **ESTRUTURA DE LOOP CONTEXTUAL (REPLAY PERFEITO PARA SHORTS/REELS/TIKTOK)**:
+   - Este vídeo será montado com Loop Contextual Infinito.
+   - O desfecho/clímax final (últimos 3s a 5s) deve ter uma fala marcante ou clímax coeso que possa servir de abertura/gancho e conectar o final do clipe de volta com o início!
+"""
+
     prompt = f"""Você é o EDITOR CHEFE SUPREMO DE CINEMA E CONTEÚDO VIRAL.
 Seu objetivo é criar o **MASTERCUT CONCENTRADO ("O SUCO DO VÍDEO")** deste vídeo.
 {ctx_block}
@@ -615,7 +624,7 @@ DADOS DO VÍDEO BRUTO:
    - NÃO corte diálogos no meio, não tire réplicas entre personagens e não descarte reações épicas.
    - Mantenha a narrativa coesa, com início/gancho, conflito/desenvolvimento e clímax.
 4. **DIVISÃO DINÂMICA**: Divida a timeline em múltiplos cortes cirúrgicos (3 a 7 segmentos) que juntos preencham a duração entre {min_dur:.1f}s e {max_dur:.1f}s.
-
+{loop_instruction}
 Retorne EXCLUSIVAMENTE um objeto JSON no seguinte formato (sem comentários, apenas JSON puro):
 {{
   "ai_viral": [
@@ -916,6 +925,86 @@ def protect_against_overcutting(
     return expanded
 
 
+def apply_contextual_loop(
+    refined: list,
+    all_words: list,
+    video_duration: float,
+    on_log=None
+) -> list:
+    """
+    Transforms a linear Mastercut into an Infinite Contextual Loop:
+    1. Locates the final contextual phrase/climax (last ~2.5s - 5.0s) at the end of the video.
+    2. Slices it cleanly (respecting word and phrase boundaries).
+    3. Moves this slice to the very beginning (0.0s) as the Hook/Opening.
+    4. The video's body ends exactly where this slice begins.
+    5. When played in loops (Shorts/Reels/TikTok), the end seamlessly connects to the start!
+    """
+    if not refined or len(refined) < 1:
+        return refined
+
+    total_dur = sum(s["end"] - s["start"] for s in refined)
+    if total_dur < 6.0:
+        if on_log:
+            on_log("ℹ️ Vídeo muito curto para fatiar loop contextual. Mantendo fluxo contínuo.")
+        return refined
+
+    last_seg = dict(refined[-1])
+    h_end = last_seg["end"]
+
+    # Target hook duration: between 2.5s and 4.8s (ideal ~3.5s)
+    h_start = round(max(last_seg["start"], h_end - 3.5), 3)
+
+    # If we have word-level timestamps, find the nearest natural phrase or word start
+    if all_words:
+        # Candidate words in the window [h_end - 5.0s, h_end - 2.0s]
+        window_words = [w for w in all_words if (h_end - 5.0) <= w["start"] <= (h_end - 2.0) and w["end"] <= h_end]
+        if window_words:
+            best_w = None
+            for w in window_words:
+                all_idx = all_words.index(w) if w in all_words else -1
+                if all_idx > 0:
+                    prev_w = all_words[all_idx - 1]
+                    gap = w["start"] - prev_w["end"]
+                    prev_txt = prev_w.get("text", "")
+                    if gap >= 0.20 or any(p in prev_txt for p in [".", "!", "?", ",", "—", "-"]):
+                        best_w = w
+                        break
+            if best_w is None:
+                best_w = min(window_words, key=lambda w: abs((h_end - w["start"]) - 3.2))
+            h_start = round(max(last_seg["start"], best_w["start"] - 0.05), 3)
+
+    hook_len = h_end - h_start
+    if hook_len < 1.8:
+        h_start = round(max(last_seg["start"], h_end - 2.8), 3)
+        hook_len = h_end - h_start
+
+    result = [dict(s) for s in refined[:-1]]
+    remaining_last_seg_dur = h_start - last_seg["start"]
+
+    if remaining_last_seg_dur >= 0.8:
+        last_seg["end"] = h_start
+        result.append(last_seg)
+    elif not result:
+        # If there were no prior segments, keep last_seg adjusted
+        last_seg["end"] = h_start
+        result.append(last_seg)
+
+    # Insert hook at index 0
+    hook_segment = {
+        "start": h_start,
+        "end": h_end,
+        "text": "[Hook de Loop Contextual]"
+    }
+    result.insert(0, hook_segment)
+
+    if on_log:
+        on_log(f"🔁 Loop Contextual aplicado com sucesso!")
+        on_log(f"   • Hook de Abertura: {h_start:.2f}s ➔ {h_end:.2f}s ({hook_len:.1f}s)")
+        on_log(f"   • O final do vídeo agora conecta perfeitamente com o início para repetição infinita!")
+
+    return result
+
+
 def build_refined_segments(
     all_words,
     video_duration,
@@ -923,6 +1012,7 @@ def build_refined_segments(
     video_context="",
     refine_mode="balanced",
     target_duration_mode="auto",
+    enable_loop=False,
     on_log=None
 ):
     """
@@ -941,6 +1031,7 @@ def build_refined_segments(
         video_context=video_context,
         refine_mode=refine_mode,
         target_duration_mode=target_duration_mode,
+        enable_loop=enable_loop,
         on_log=on_log
     )
 
@@ -958,12 +1049,12 @@ def build_refined_segments(
             on_log(f"ℹ️ IA gerou timestamps absolutos de episódio (início em {min_start:.1f}s). Sincronizando para a linha do tempo do clipe...")
         shifted = []
         for item in raw_parsed:
-            new_s = max(0.0, item["start"] - min_start)
-            new_e = item["end"] - min_start
-            if new_s < video_duration and new_e > new_s:
+            rel_s = item["start"] - min_start
+            rel_e = item["end"] - min_start
+            if rel_s < video_duration:
                 shifted.append({
-                    "start": new_s,
-                    "end": min(video_duration, new_e),
+                    "start": round(max(0.0, rel_s), 3),
+                    "end": round(min(video_duration, rel_e), 3),
                     "text": item["text"]
                 })
         if shifted:
@@ -971,21 +1062,30 @@ def build_refined_segments(
 
     refined = []
     for chunk in raw_parsed:
-        s_t = chunk["start"]
-        e_t = chunk["end"]
+        s_t, e_t, txt = _extract_chunk_bounds(chunk)
+        if s_t is not None and e_t is not None and e_t > s_t:
+            s_t_r = round(max(0.0, s_t - 0.080), 3)
+            e_t_r = round(min(video_duration, e_t + 0.250), 3)
+            if e_t_r > s_t_r and s_t_r < video_duration:
+                refined.append({
+                    "start": s_t_r,
+                    "end": e_t_r,
+                    "text": txt
+                })
 
-        # Smart Padding: -80ms start (natural breath), +250ms end (preserves word ending)
-        s_t = max(0.0, s_t - 0.080)
-        e_t = min(video_duration, e_t + 0.250)
-        s_t_r = round(s_t, 3)
-        e_t_r = round(e_t, 3)
-
-        if e_t_r > s_t_r and s_t_r < video_duration:
-            refined.append({
-                "start": s_t_r,
-                "end": e_t_r,
-                "text": chunk.get("text", "[Corte Mastercut]")
-            })
+    # Fallback to direct raw chunks if padding failed
+    if not refined and raw_parsed:
+        for chunk in raw_parsed:
+            s_t = chunk["start"]
+            e_t = chunk["end"]
+            s_t_r = round(s_t, 3)
+            e_t_r = round(e_t, 3)
+            if e_t_r > s_t_r and s_t_r < video_duration:
+                refined.append({
+                    "start": s_t_r,
+                    "end": e_t_r,
+                    "text": chunk.get("text", "[Corte Mastercut]")
+                })
 
     # CRITICAL: If after parsing AI timeline, refined is STILL empty or has fewer than 2 segments:
     if not refined or len(refined) < 2:
@@ -1045,6 +1145,15 @@ def build_refined_segments(
         if trimmed:
             refined = trimmed
 
+    # Apply contextual loop if requested
+    if enable_loop:
+        refined = apply_contextual_loop(
+            refined=refined,
+            all_words=all_words,
+            video_duration=video_duration,
+            on_log=on_log
+        )
+
     # Absolute ultimate failsafe: NEVER return empty!
     if not refined:
         refined = [{"start": 0.0, "end": round(video_duration, 3), "text": "[Mastercut Completo]"}]
@@ -1060,6 +1169,7 @@ def render_mastercut_video(
     output_path: str,
     vocal_isolation: bool = True,
     anti_copyright: bool = False,
+    enable_loop: bool = False,
     on_progress=None,
     on_log=None
 ) -> dict:
@@ -1155,7 +1265,8 @@ def render_mastercut_video(
         ]
 
     if on_log:
-        on_log(f"🎬 Renderizando Mastercut com {n} cortes selecionados...")
+        loop_tag = " [Loop Contextual]" if enable_loop else ""
+        on_log(f"🎬 Renderizando Mastercut com {n} cortes selecionados{loop_tag}...")
     if on_progress:
         on_progress(0.70, f"Renderizando Mastercut com {n} cortes via FFmpeg...")
 
@@ -1179,6 +1290,8 @@ def render_mastercut_video(
         "size_mb": round(final_size_mb, 1),
         "vocal_isolation": vocal_isolation,
         "anti_copyright": anti_copyright,
+        "enable_loop": enable_loop,
+        "loop_mode": "Contextual (Replay Infinito)" if enable_loop else "Sem Loop (Direto)",
         "segments": segments
     }
 
@@ -1211,6 +1324,7 @@ class MastercutPipeline:
         anti_copyright: bool = False,
         refine_mode: str = "balanced",
         target_duration_mode: str = "auto",
+        enable_loop: bool = False,
         on_progress=None,
         on_log=None
     ) -> dict:
@@ -1245,6 +1359,7 @@ class MastercutPipeline:
                 video_context=video_context,
                 refine_mode=refine_mode,
                 target_duration_mode=target_duration_mode,
+                enable_loop=enable_loop,
                 on_log=on_log
             )
 
@@ -1265,6 +1380,7 @@ class MastercutPipeline:
                 output_path=output_path,
                 vocal_isolation=vocal_isolation,
                 anti_copyright=anti_copyright,
+                enable_loop=enable_loop,
                 on_progress=on_progress,
                 on_log=on_log
             )

@@ -2,7 +2,7 @@
 ; Generates a professional single-file Setup.exe with instant-launch installed files
 
 #define MyAppName "Urahara"
-#define MyAppVersion "1.0.1"
+#define MyAppVersion "1.0.2"
 #define MyAppPublisher "Vinicius Dias"
 #define MyAppURL "https://github.com/ViniciusGDias/Upscaling"
 #define MyAppExeName "Urahara.exe"

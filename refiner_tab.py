@@ -316,7 +316,7 @@ class RefinerMastercutTab(ctk.CTkFrame):
 
         # Col 2: Target Duration
         dur_box = ctk.CTkFrame(ctrls_row, fg_color="transparent")
-        dur_box.pack(side="left", fill="x", expand=True, padx=(8, 0))
+        dur_box.pack(side="left", fill="x", expand=True, padx=(4, 4))
 
         ctk.CTkLabel(
             dur_box, text="⏱️  Duração Alvo do Mastercut:",
@@ -343,6 +343,34 @@ class RefinerMastercutTab(ctk.CTkFrame):
             command=self._on_setting_changed,
         )
         self.target_duration_menu.pack(fill="x")
+
+        # Col 3: Loop Structure
+        loop_box = ctk.CTkFrame(ctrls_row, fg_color="transparent")
+        loop_box.pack(side="left", fill="x", expand=True, padx=(4, 0))
+
+        ctk.CTkLabel(
+            loop_box, text="🔁  Estrutura de Loop:",
+            font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
+            text_color=COLORS["text_primary"], anchor="w",
+        ).pack(fill="x", pady=(0, 4))
+
+        self.loop_mode_var = ctk.StringVar(value="▶️ Sem Loop (Mastercut Direto)")
+        self.loop_mode_menu = ctk.CTkOptionMenu(
+            loop_box,
+            values=[
+                "▶️ Sem Loop (Mastercut Direto)",
+                "🔁 Com Loop Contextual (Replay Infinito)",
+            ],
+            variable=self.loop_mode_var,
+            font=ctk.CTkFont(family="Segoe UI", size=11),
+            fg_color=COLORS["bg_dark"],
+            button_color=COLORS["border"],
+            button_hover_color=COLORS["bg_card_hover"],
+            text_color=COLORS["text_primary"],
+            height=34,
+            command=self._on_setting_changed,
+        )
+        self.loop_mode_menu.pack(fill="x")
 
         # Dynamic Duration Hint & Anti-Cut Shield Banner
         self.hint_frame = ctk.CTkFrame(card, fg_color=COLORS["bg_dark"], corner_radius=8, border_width=1, border_color=COLORS["border"])
@@ -662,6 +690,10 @@ class RefinerMastercutTab(ctk.CTkFrame):
                 f"(Modo: {mode_name}). Proteção de narrativa ativa para garantir início, desenvolvimento e clímax."
             )
 
+        loop_val = self.loop_mode_var.get() if hasattr(self, "loop_mode_var") else ""
+        if "Com Loop" in loop_val:
+            msg += "\n🔁 Loop Contextual Ativo: O clímax e frase final serão posicionados como abertura (0.0s), conectando perfeitamente o fim ao início para replay infinito (>100% retenção no Shorts/Reels/TikTok)."
+
         self.hint_label.configure(text=msg)
 
     def _browse_output(self):
@@ -679,13 +711,14 @@ class RefinerMastercutTab(ctk.CTkFrame):
             initialfile = f"{p.stem}_mastercut.mp4"
 
         filepath = filedialog.asksaveasfilename(
-            title="Escolher onde salvar o Mastercut",
+            title="Salvar Vídeo Mastercut Como",
             filetypes=filetypes,
             defaultextension=".mp4",
             initialdir=initialdir,
             initialfile=initialfile,
         )
         if filepath:
+            self.output_path = filepath
             self.output_entry.delete(0, "end")
             self.output_entry.insert(0, filepath)
 
@@ -700,45 +733,43 @@ class RefinerMastercutTab(ctk.CTkFrame):
         self.log_box.delete("1.0", "end")
         self.log_box.configure(state="disabled")
 
+    # ── Pipeline Execution ────────────────────────────────────────────────
+
     def _start_mastercut(self):
         if not self.input_path or not os.path.exists(self.input_path):
-            messagebox.showwarning("Aviso", "Por favor, selecione um arquivo de vídeo válido.")
+            messagebox.showwarning("Aviso", "Por favor, selecione um vídeo de entrada válido.")
             return
 
-        if self.is_processing:
+        out_val = self.output_entry.get().strip()
+        if not out_val:
+            messagebox.showwarning("Aviso", "Por favor, defina o local onde o Mastercut será salvo.")
             return
 
-        # Prepare output path from user entry or default
-        custom_out = self.output_entry.get().strip()
-        if custom_out:
-            self.output_path = custom_out
-        else:
-            input_p = Path(self.input_path)
-            out_name = f"{input_p.stem}_mastercut_{int(time.time())}.mp4"
-            out_dir = input_p.parent
-            self.output_path = str(out_dir / out_name)
+        self.output_path = out_val
+        self._run_refine()
 
+    def _run_refine(self):
         self.is_processing = True
         self._start_time = time.time()
-        self.last_result = None
+        self.generate_btn.configure(state="disabled", text="⏳  Processando Mastercut...")
+        self.cancel_btn.configure(state="normal", text_color=COLORS["text_primary"])
+        self.status_label.configure(text="Iniciando pipeline...")
+        self.progress_bar.set(0.0)
 
-        # UI updates
-        self.generate_btn.configure(state="disabled", text="⏳ Processando Mastercut...")
-        self.cancel_btn.configure(state="normal", text_color=COLORS["error"])
-
-        if not self.progress_card.winfo_ismapped():
-            self.progress_card.pack(fill="x", pady=(0, 10))
         if self.result_card.winfo_ismapped():
             self.result_card.pack_forget()
 
         refine_mode = self._get_refine_mode_key()
         target_dur = self._get_target_duration_key()
+        loop_val = self.loop_mode_var.get() if hasattr(self, "loop_mode_var") else ""
+        enable_loop = "com loop" in loop_val.lower()
 
         self._clear_log()
         self._log(f"════════ Refinador: Mastercut Concentrado ════════")
         self._log(f"Entrada: {self.input_path}")
         self._log(f"Saída:   {self.output_path}")
         self._log(f"Modo:    {refine_mode} | Duração Alvo: {target_dur}")
+        self._log(f"Loop:    {'🔁 Com Loop Contextual (Replay Infinito)' if enable_loop else '▶️ Sem Loop (Mastercut Direto)'}")
 
         vocal_iso = self.vocal_isolation_var.get()
         anti_copy = self.anti_copyright_var.get()
@@ -756,6 +787,7 @@ class RefinerMastercutTab(ctk.CTkFrame):
                     anti_copyright=anti_copy,
                     refine_mode=refine_mode,
                     target_duration_mode=target_dur,
+                    enable_loop=enable_loop,
                     on_progress=lambda p, msg: self.after(0, self._on_progress_update, p, msg),
                     on_log=lambda msg: self.after(0, self._log, msg),
                 )
@@ -782,9 +814,10 @@ class RefinerMastercutTab(ctk.CTkFrame):
         pct = stats["time_saved_percent"]
         segs = stats["segments_count"]
         size = stats["size_mb"]
+        loop_badge = " | 🔁 Loop Contextual Ativo" if stats.get("enable_loop") else ""
 
         self.stats_label.configure(
-            text=f"Duração: {dur_before} ➔ {dur_after} ({pct}% economizado) | {segs} cortes | Tamanho: {size} MB"
+            text=f"Duração: {dur_before} ➔ {dur_after} ({pct}% economizado) | {segs} cortes | Tamanho: {size} MB{loop_badge}"
         )
         self.result_card.pack(fill="x", pady=(0, 10))
         self._log(f"✓ Concluído com sucesso em {time.time() - self._start_time:.1f}s!")
