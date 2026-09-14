@@ -376,7 +376,7 @@ class RefinerMastercutTab(ctk.CTkFrame):
 
         self.anti_copyright_var = ctk.BooleanVar(value=False)
         ctk.CTkCheckBox(
-            opts_row, text="Modo Anti-Copyright (micro-zoom 1.05x + velocidade 1.05x)",
+            opts_row, text="Modo Anti-Copyright Sutil (micro-zoom + velocidade calibrada com sincronia perfeita)",
             variable=self.anti_copyright_var,
             font=ctk.CTkFont(family="Segoe UI", size=12),
             text_color=COLORS["text_primary"],

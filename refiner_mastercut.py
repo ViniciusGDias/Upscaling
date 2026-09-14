@@ -1093,36 +1093,40 @@ def render_mastercut_video(
 
     n = len(segments)
     filter_complex = []
-    concat_v_inputs = []
-    concat_a_inputs = []
+    concat_inputs = []
 
     for i, seg in enumerate(segments):
         s = seg["start"]
         e = seg["end"]
         filter_complex.append(f"[0:v]trim=start={s:.3f}:end={e:.3f},setpts=PTS-STARTPTS[v{i}]")
-        concat_v_inputs.append(f"[v{i}]")
         if has_audio:
             filter_complex.append(f"[0:a]atrim=start={s:.3f}:end={e:.3f},asetpts=PTS-STARTPTS[a{i}]")
-            concat_a_inputs.append(f"[a{i}]")
+            concat_inputs.append(f"[v{i}][a{i}]")
+        else:
+            concat_inputs.append(f"[v{i}]")
 
     video_post_filters = ""
     audio_post_filters = ",aformat=channel_layouts=stereo"
 
     if anti_copyright:
-        scaled_w = int(video_width * 1.05)
-        scaled_h = int(video_height * 1.05)
+        # Micro-calibração anti-copyright sutil (1.8% de aceleração e zoom, imperceptível aos olhos e ouvidos)
+        speed_factor = 1.018
+        scaled_w = int(video_width * speed_factor)
+        scaled_h = int(video_height * speed_factor)
         scaled_w -= (scaled_w % 2)
         scaled_h -= (scaled_h % 2)
-        video_post_filters = f",setpts=PTS/1.05,hflip,eq=contrast=1.04:saturation=1.03:gamma=1.01,scale=w={scaled_w}:h={scaled_h},crop={video_width}:{video_height}"
-        audio_post_filters += ",atempo=1.05"
+        video_post_filters = f",setpts=PTS/{speed_factor},scale=w={scaled_w}:h={scaled_h},crop={video_width}:{video_height},eq=contrast=1.02:saturation=1.02:gamma=1.005"
+        audio_post_filters += f",atempo={speed_factor}"
 
     if vocal_isolation:
         audio_post_filters += ",highpass=f=80,lowpass=f=7500,afftdn=nr=14:nf=-25"
 
+    # Sincronização labial estrita: elimina qualquer delay ou buffer de latência de atempo/afftdn
+    audio_post_filters += ",aresample=async=1000:first_pts=0"
+
     curr_v_stream = "raw_v"
     if has_audio:
-        filter_complex.append(f"{''.join(concat_v_inputs)}concat=n={n}:v=1:a=0[raw_v]")
-        filter_complex.append(f"{''.join(concat_a_inputs)}concat=n={n}:v=0:a=1[raw_a]")
+        filter_complex.append(f"{''.join(concat_inputs)}concat=n={n}:v=1:a=1[raw_v][raw_a]")
         filter_complex.append(f"[{curr_v_stream}]null{video_post_filters}[outv]")
         filter_complex.append(f"[raw_a]anull{audio_post_filters}[outa]")
         filter_str = ";\n".join(filter_complex)
@@ -1137,7 +1141,7 @@ def render_mastercut_video(
             str(output_path)
         ]
     else:
-        filter_complex.append(f"{''.join(concat_v_inputs)}concat=n={n}:v=1:a=0[raw_v]")
+        filter_complex.append(f"{''.join(concat_inputs)}concat=n={n}:v=1:a=0[raw_v]")
         filter_complex.append(f"[{curr_v_stream}]null{video_post_filters}[outv]")
         filter_str = ";\n".join(filter_complex)
 
