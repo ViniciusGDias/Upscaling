@@ -18,19 +18,36 @@ load_dotenv()
 
 
 def _get_ffmpeg_bin(cmd: str = "ffmpeg") -> str:
-    """Return path to ffmpeg or ffprobe executable."""
+    """Return path to ffmpeg or ffprobe executable, checking engine_manager, app bin, and system PATH."""
+    try:
+        from engine_manager import find_engine_executable
+        found = find_engine_executable(cmd)
+        if found:
+            return found
+    except Exception:
+        pass
+
     import shutil
     found = shutil.which(cmd)
     if found:
         return found
-    base_dir = Path(__file__).parent.resolve()
+
+    app_root = Path(sys.executable).parent.resolve() if getattr(sys, "frozen", False) else Path(__file__).parent.resolve()
     cmd_exe = f"{cmd}.exe" if sys.platform.startswith("win") else cmd
-    local_bin = base_dir / cmd_exe
-    if local_bin.exists():
-        return str(local_bin)
-    for p in base_dir.glob(f"**/{cmd_exe}"):
+    candidates = [
+        app_root / "bin" / cmd_exe,
+        app_root / cmd_exe,
+        Path(__file__).parent.resolve() / "bin" / cmd_exe,
+        Path(__file__).parent.resolve() / cmd_exe,
+        Path(r"C:\ffmpeg\bin") / cmd_exe,
+        Path(os.environ.get("PROGRAMFILES", r"C:\Program Files")) / "ffmpeg" / "bin" / cmd_exe,
+        Path(os.environ.get("LOCALAPPDATA", "")) / "ffmpeg" / "bin" / cmd_exe,
+        Path(os.path.expanduser("~")) / "ffmpeg" / "bin" / cmd_exe,
+    ]
+    for p in candidates:
         if p.exists():
             return str(p.resolve())
+
     return cmd
 
 
@@ -1380,6 +1397,24 @@ class MastercutPipeline:
         self._cancelled = False
 
         try:
+            # Pre-flight check: ensure FFmpeg and FFprobe are available
+            ffmpeg_bin = _get_ffmpeg_bin("ffmpeg")
+            ffprobe_bin = _get_ffmpeg_bin("ffprobe")
+            import shutil
+            ffmpeg_ok = Path(ffmpeg_bin).exists() if os.path.isabs(ffmpeg_bin) else bool(shutil.which(ffmpeg_bin))
+            ffprobe_ok = Path(ffprobe_bin).exists() if os.path.isabs(ffprobe_bin) else bool(shutil.which(ffprobe_bin))
+
+            if not ffmpeg_ok or not ffprobe_ok:
+                err_msg = (
+                    "O motor FFmpeg/FFprobe não foi encontrado no sistema.\n"
+                    "O Urahara necessita do FFmpeg para recortar e renderizar vídeos.\n"
+                    "Por favor, verifique se a pasta 'bin' está junto ao aplicativo ou "
+                    "instale o FFmpeg com 1 clique através da aba 'Configurações'."
+                )
+                if on_log:
+                    on_log(f"✕ Erro Crítico: {err_msg}")
+                raise FileNotFoundError(err_msg)
+
             # Step 1: Detect speech & words
             if on_log:
                 on_log("═══ ETAPA 1/3: Mapeamento de Diálogos (Whisper) ═══")

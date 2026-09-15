@@ -18,13 +18,23 @@ import subprocess
 from pathlib import Path
 from typing import Dict, Any, Tuple, Optional, Callable
 
+def get_app_root() -> Path:
+    """Return root directory of the application whether running from source or frozen executable."""
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).parent.resolve()
+    return Path(__file__).parent.resolve()
+
+
+APP_ROOT = get_app_root()
 APP_DIR = Path(__file__).parent.resolve()
-BIN_DIR = APP_DIR / "bin"
+BIN_DIR = APP_ROOT / "bin"
 BIN_DIR.mkdir(parents=True, exist_ok=True)
 
-# Ensure BIN_DIR is in the runtime PATH
-if str(BIN_DIR) not in os.environ.get("PATH", ""):
-    os.environ["PATH"] = f"{BIN_DIR};" + os.environ.get("PATH", "")
+# Ensure both APP_ROOT/bin and APP_DIR/bin are in the runtime PATH
+for b_path in [BIN_DIR, APP_DIR / "bin"]:
+    b_str = str(b_path.resolve())
+    if b_path.exists() and b_str not in os.environ.get("PATH", ""):
+        os.environ["PATH"] = f"{b_str};" + os.environ.get("PATH", "")
 
 
 # Official Windows static FFmpeg release build URLs
@@ -37,35 +47,37 @@ FFMPEG_URLS = [
 
 
 def find_engine_executable(name: str) -> Optional[str]:
-    """Find executable in ./bin, current dir, or system PATH."""
+    """Find executable in ./bin, app root, internal dir, or system PATH."""
     ext = ".exe" if sys.platform == "win32" else ""
     target = f"{name}{ext}"
 
-    # 1. Check local bin/
-    local_bin = BIN_DIR / target
-    if local_bin.exists():
-        return str(local_bin)
+    # 1. Check APP_ROOT/bin and local candidate directories
+    candidates = [
+        APP_ROOT / "bin" / target,
+        APP_ROOT / target,
+        APP_DIR / "bin" / target,
+        APP_DIR / target,
+    ]
+    for c in candidates:
+        if c.exists():
+            return str(c.resolve())
 
-    # 2. Check app root
-    local_root = APP_DIR / target
-    if local_root.exists():
-        return str(local_root)
-
-    # 3. Check system PATH
+    # 2. Check system PATH
     found = shutil.which(name)
     if found:
         return found
 
-    # 4. Check common Windows fallback paths
+    # 3. Check common Windows fallback paths
     if sys.platform == "win32":
         common_paths = [
             Path(r"C:\ffmpeg\bin") / target,
             Path(os.environ.get("PROGRAMFILES", r"C:\Program Files")) / "ffmpeg" / "bin" / target,
             Path(os.environ.get("LOCALAPPDATA", "")) / "ffmpeg" / "bin" / target,
+            Path(os.path.expanduser("~")) / "ffmpeg" / "bin" / target,
         ]
         for p in common_paths:
             if p.exists():
-                return str(p)
+                return str(p.resolve())
 
     return None
 

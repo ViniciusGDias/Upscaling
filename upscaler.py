@@ -241,7 +241,15 @@ def find_ffplay() -> Optional[str]:
 
 
 def find_ffmpeg() -> Optional[str]:
-    """Find FFmpeg executable in system PATH or common locations."""
+    """Find FFmpeg executable in engine_manager, system PATH, or common locations."""
+    try:
+        from engine_manager import find_engine_executable
+        found = find_engine_executable("ffmpeg")
+        if found:
+            return found
+    except Exception:
+        pass
+
     # Try system PATH first
     try:
         result = subprocess.run(
@@ -270,7 +278,15 @@ def find_ffmpeg() -> Optional[str]:
 
 
 def find_ffprobe() -> Optional[str]:
-    """Find FFprobe executable."""
+    """Find FFprobe executable in engine_manager, system PATH, or common locations."""
+    try:
+        from engine_manager import find_engine_executable
+        found = find_engine_executable("ffprobe")
+        if found:
+            return found
+    except Exception:
+        pass
+
     try:
         result = subprocess.run(
             ["ffprobe", "-version"],

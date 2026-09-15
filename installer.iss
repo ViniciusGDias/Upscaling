@@ -34,6 +34,7 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 
 [Files]
 Source: "dist\Urahara\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "bin\*"; DestDir: "{app}\bin"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "app_icon.ico"; DestDir: "{app}"; Flags: ignoreversion
 Source: "app_icon.png"; DestDir: "{app}"; Flags: ignoreversion
 Source: "version.json"; DestDir: "{app}"; Flags: ignoreversion
