@@ -131,18 +131,41 @@ AI_MODELS = {
 
 
 def find_realcugan_bin() -> Optional[str]:
-    """Find realcugan-ncnn-vulkan executable."""
+    """Find realcugan-ncnn-vulkan executable across app root, bin, internal, and system PATH."""
     from pathlib import Path
-    base = Path(__file__).parent
+    import sys
+    import shutil
+
+    try:
+        from engine_manager import find_engine_executable
+        found = find_engine_executable("realcugan")
+        if found and os.path.isfile(found):
+            return str(Path(found).resolve())
+    except Exception:
+        pass
+
+    app_root = Path(sys.executable).parent.resolve() if getattr(sys, "frozen", False) else Path(__file__).parent.resolve()
+    internal_dir = Path(__file__).parent.resolve()
+
     candidates = [
-        base / "bin" / "realcugan" / "realcugan-ncnn-vulkan.exe",
-        base / "realcugan-ncnn-vulkan.exe",
+        app_root / "bin" / "realcugan" / "realcugan-ncnn-vulkan.exe",
+        app_root / "realcugan" / "realcugan-ncnn-vulkan.exe",
+        app_root / "bin" / "realcugan-ncnn-vulkan.exe",
+        internal_dir / "bin" / "realcugan" / "realcugan-ncnn-vulkan.exe",
+        internal_dir / "realcugan" / "realcugan-ncnn-vulkan.exe",
+        internal_dir / "bin" / "realcugan-ncnn-vulkan.exe",
+        Path(os.environ.get("LOCALAPPDATA", "")) / "Urahara" / "bin" / "realcugan" / "realcugan-ncnn-vulkan.exe",
+        Path(r"C:\realcugan\realcugan-ncnn-vulkan.exe"),
     ]
     for p in candidates:
         if p.is_file():
             return str(p.resolve())
-    import shutil
-    return shutil.which("realcugan-ncnn-vulkan")
+
+    which_found = shutil.which("realcugan-ncnn-vulkan")
+    if which_found:
+        return str(Path(which_found).resolve())
+
+    return None
 
 
 def check_realesrgan_available() -> tuple[bool, str]:
@@ -193,7 +216,15 @@ def get_torch_device() -> str:
 
 
 def _find_ffmpeg() -> Optional[str]:
-    """Find FFmpeg executable."""
+    """Find FFmpeg executable across engine_manager, app root, bin, and system PATH."""
+    try:
+        from engine_manager import find_engine_executable
+        found = find_engine_executable("ffmpeg")
+        if found:
+            return found
+    except Exception:
+        pass
+
     try:
         result = subprocess.run(
             ["ffmpeg", "-version"], capture_output=True, encoding="utf-8", errors="replace",
@@ -205,19 +236,32 @@ def _find_ffmpeg() -> Optional[str]:
         pass
 
     if os.name == 'nt':
+        from pathlib import Path
+        import sys
+        app_root = Path(sys.executable).parent.resolve() if getattr(sys, "frozen", False) else Path(__file__).parent.resolve()
         for path in [
+            app_root / "bin" / "ffmpeg.exe",
+            app_root / "ffmpeg.exe",
             r"C:\ffmpeg\bin\ffmpeg.exe",
             os.path.join(os.environ.get('PROGRAMFILES', ''), 'ffmpeg', 'bin', 'ffmpeg.exe'),
             os.path.join(os.environ.get('LOCALAPPDATA', ''), 'ffmpeg', 'bin', 'ffmpeg.exe'),
             os.path.join(os.path.expanduser('~'), 'ffmpeg', 'bin', 'ffmpeg.exe'),
         ]:
-            if os.path.isfile(path):
-                return path
+            if os.path.isfile(str(path)):
+                return str(path)
     return None
 
 
 def _find_ffprobe() -> Optional[str]:
-    """Find FFprobe executable."""
+    """Find FFprobe executable across engine_manager, app root, bin, and system PATH."""
+    try:
+        from engine_manager import find_engine_executable
+        found = find_engine_executable("ffprobe")
+        if found:
+            return found
+    except Exception:
+        pass
+
     try:
         result = subprocess.run(
             ["ffprobe", "-version"], capture_output=True, encoding="utf-8", errors="replace",
@@ -229,14 +273,19 @@ def _find_ffprobe() -> Optional[str]:
         pass
 
     if os.name == 'nt':
+        from pathlib import Path
+        import sys
+        app_root = Path(sys.executable).parent.resolve() if getattr(sys, "frozen", False) else Path(__file__).parent.resolve()
         for path in [
+            app_root / "bin" / "ffprobe.exe",
+            app_root / "ffprobe.exe",
             r"C:\ffmpeg\bin\ffprobe.exe",
             os.path.join(os.environ.get('PROGRAMFILES', ''), 'ffmpeg', 'bin', 'ffprobe.exe'),
             os.path.join(os.environ.get('LOCALAPPDATA', ''), 'ffmpeg', 'bin', 'ffprobe.exe'),
             os.path.join(os.path.expanduser('~'), 'ffmpeg', 'bin', 'ffprobe.exe'),
         ]:
-            if os.path.isfile(path):
-                return path
+            if os.path.isfile(str(path)):
+                return str(path)
     return None
 
 

@@ -49,35 +49,57 @@ FFMPEG_URLS = [
 def find_engine_executable(name: str) -> Optional[str]:
     """Find executable in ./bin, app root, internal dir, or system PATH."""
     ext = ".exe" if sys.platform == "win32" else ""
-    target = f"{name}{ext}"
+    target = f"{name}{ext}" if not name.endswith(ext) else name
 
-    # 1. Check APP_ROOT/bin and local candidate directories
-    candidates = [
-        APP_ROOT / "bin" / target,
-        APP_ROOT / target,
-        APP_DIR / "bin" / target,
-        APP_DIR / target,
+    # Target specific aliases (e.g. realcugan binary inside subfolder)
+    targets = [target]
+    if "cugan" in name.lower():
+        targets.extend([
+            f"realcugan/realcugan-ncnn-vulkan{ext}",
+            f"realcugan-ncnn-vulkan{ext}",
+            f"realcugan{ext}",
+        ])
+    elif "ffmpeg" in name.lower():
+        targets.append(f"ffmpeg{ext}")
+    elif "ffprobe" in name.lower():
+        targets.append(f"ffprobe{ext}")
+
+    # 1. Check candidate roots
+    candidate_roots = [
+        APP_ROOT / "bin",
+        APP_ROOT,
+        APP_DIR / "bin",
+        APP_DIR,
+        Path(os.environ.get("LOCALAPPDATA", "")) / "Urahara" / "bin",
     ]
-    for c in candidates:
-        if c.exists():
-            return str(c.resolve())
+
+    for root in candidate_roots:
+        for t in targets:
+            c = root / t
+            if c.is_file():
+                return str(c.resolve())
 
     # 2. Check system PATH
-    found = shutil.which(name)
-    if found:
-        return found
+    for t in targets:
+        stem = Path(t).stem
+        found = shutil.which(stem)
+        if found:
+            return found
 
     # 3. Check common Windows fallback paths
     if sys.platform == "win32":
-        common_paths = [
-            Path(r"C:\ffmpeg\bin") / target,
-            Path(os.environ.get("PROGRAMFILES", r"C:\Program Files")) / "ffmpeg" / "bin" / target,
-            Path(os.environ.get("LOCALAPPDATA", "")) / "ffmpeg" / "bin" / target,
-            Path(os.path.expanduser("~")) / "ffmpeg" / "bin" / target,
+        common_roots = [
+            Path(r"C:\ffmpeg\bin"),
+            Path(r"C:\realcugan"),
+            Path(os.environ.get("PROGRAMFILES", r"C:\Program Files")) / "ffmpeg" / "bin",
+            Path(os.environ.get("LOCALAPPDATA", "")) / "ffmpeg" / "bin",
+            Path(os.path.expanduser("~")) / "ffmpeg" / "bin",
         ]
-        for p in common_paths:
-            if p.exists():
-                return str(p.resolve())
+        for c_root in common_roots:
+            for t in targets:
+                p = c_root / Path(t).name
+                if p.is_file():
+                    return str(p.resolve())
 
     return None
 
@@ -113,9 +135,9 @@ def check_all_engines() -> Dict[str, Dict[str, Any]]:
     ffmpeg_ver = get_ffmpeg_version(ffmpeg_exe) if ffmpeg_exe else ""
 
     # Real-CUGAN
-    cugan_exe = BIN_DIR / "realcugan" / "realcugan-ncnn-vulkan.exe"
-    cugan_models = BIN_DIR / "realcugan" / "models-se"
-    realcugan_ok = cugan_exe.exists() and cugan_models.exists()
+    cugan_exe = find_engine_executable("realcugan")
+    cugan_models = Path(cugan_exe).parent / "models-se" if cugan_exe else None
+    realcugan_ok = bool(cugan_exe and os.path.isfile(cugan_exe) and cugan_models and cugan_models.exists())
 
     # Hardware GPU Detection (detects NVIDIA GPUs like GTX 1650 even without PyTorch)
     has_nvidia_gpu = False

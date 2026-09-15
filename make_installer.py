@@ -76,20 +76,20 @@ def main():
 
     print(f"\n✓ Executável Urahara.exe gerado com sucesso em: {exe_path}")
 
-    # Copiar bin/ (FFmpeg, FFprobe, Real-CUGAN) para dist/Urahara/bin
+    # Copiar bin/ (FFmpeg, FFprobe, Real-CUGAN) para dist/Urahara/bin e dist/Urahara/_internal/bin
     bin_src = APP_DIR / "bin"
     if bin_src.exists() and dist_folder.exists():
-        dist_bin = dist_folder / "bin"
-        dist_bin.mkdir(parents=True, exist_ok=True)
-        print("   📦 Copiando dependências de bin/ (FFmpeg, FFprobe, etc.) para dist/Urahara/bin...")
-        for item in bin_src.glob("*"):
-            target_item = dist_bin / item.name
-            if item.is_dir():
-                if target_item.exists():
-                    shutil.rmtree(target_item)
-                shutil.copytree(item, target_item)
-            else:
-                shutil.copy2(item, target_item)
+        for target_dir in [dist_folder / "bin", dist_folder / "_internal" / "bin"]:
+            target_dir.mkdir(parents=True, exist_ok=True)
+            print(f"   📦 Copiando dependências de bin/ para {target_dir.relative_to(APP_DIR)}...")
+            for item in bin_src.glob("*"):
+                dest = target_dir / item.name
+                if item.is_dir():
+                    if dest.exists():
+                        shutil.rmtree(dest)
+                    shutil.copytree(item, dest)
+                else:
+                    shutil.copy2(item, dest)
 
     # 2. Compile Inno Setup for Setup.exe
     print("\n[2/3] Compilando instalador Setup.exe com Inno Setup...")
