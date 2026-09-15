@@ -140,39 +140,57 @@ class VideoUpscalerApp(ctk.CTk):
         """Build the complete user interface."""
         # Top Brand & Quick Settings Bar
         self.top_bar = ctk.CTkFrame(self, fg_color="transparent")
-        self.top_bar.pack(fill="x", padx=16, pady=(6, 2))
+        self.top_bar.pack(fill="x", padx=16, pady=(8, 4))
+
+        brand_left = ctk.CTkFrame(self.top_bar, fg_color="transparent")
+        brand_left.pack(side="left")
+
+        # Green pulse indicator
+        ctk.CTkLabel(
+            brand_left,
+            text="●",
+            font=ctk.CTkFont(size=11),
+            text_color="#22c55e",
+        ).pack(side="left", padx=(0, 6))
 
         app_title_lbl = ctk.CTkLabel(
-            self.top_bar,
+            brand_left,
             text="URAHARA",
-            font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
+            font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
             text_color=COLORS["text_primary"],
         )
         app_title_lbl.pack(side="left")
 
+        ctk.CTkLabel(
+            brand_left,
+            text="STUDIO PRO",
+            font=ctk.CTkFont(family="Segoe UI", size=9, weight="bold"),
+            text_color=COLORS["text_muted"],
+        ).pack(side="left", padx=(6, 8))
+
         ver_lbl = ctk.CTkLabel(
-            self.top_bar,
+            brand_left,
             text=f"v{CURRENT_VERSION}",
             font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
-            text_color=COLORS["text_secondary"],
-            fg_color=COLORS["bg_card"],
-            corner_radius=4,
-            padx=6, pady=1,
+            text_color="#86efac",
+            fg_color="#14532d",
+            corner_radius=6,
+            padx=7, pady=2,
         )
-        ver_lbl.pack(side="left", padx=(8, 0))
+        ver_lbl.pack(side="left")
 
         # Quick Config button top right
         cfg_top_btn = ctk.CTkButton(
             self.top_bar,
             text="⚙️ Configurações & Motores",
-            font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
+            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
             fg_color=COLORS["bg_card"],
             hover_color=COLORS["bg_card_hover"],
             text_color=COLORS["text_primary"],
             border_width=1,
             border_color=COLORS["border"],
-            corner_radius=6,
-            height=24,
+            corner_radius=8,
+            height=28,
             command=lambda: self.tabview.set("⚙️  Configurações"),
         )
         cfg_top_btn.pack(side="right")
@@ -185,22 +203,31 @@ class VideoUpscalerApp(ctk.CTk):
             hover_color="#16a34a",
             text_color="#ffffff",
             corner_radius=6,
-            height=24,
+            height=26,
             command=lambda: (self.tabview.set("⚙️  Configurações"), open_download_page()),
         )
 
-        # Tab view for multi-tool
+        # Tab view for multi-tool with sleek capsule navigation
         self.tabview = ctk.CTkTabview(
-            self, fg_color=COLORS["bg_dark"],
-            segmented_button_fg_color=COLORS["bg_dark"],
-            segmented_button_selected_color=COLORS["bg_card"],
-            segmented_button_selected_hover_color=COLORS["bg_card_hover"],
-            segmented_button_unselected_color=COLORS["bg_dark"],
-            segmented_button_unselected_hover_color=COLORS["bg_card"],
-            text_color=COLORS["text_secondary"],
-            corner_radius=6,
+            self,
+            fg_color=COLORS["bg_dark"],
+            segmented_button_fg_color="#121215",
+            segmented_button_selected_color=COLORS["accent_primary"],
+            segmented_button_selected_hover_color="#15803d",
+            segmented_button_unselected_color="#121215",
+            segmented_button_unselected_hover_color="#1c1c21",
+            text_color="#ffffff",
+            text_color_disabled="#71717a",
+            corner_radius=10,
         )
         self.tabview.pack(fill="both", expand=True, padx=12, pady=(4, 12))
+        try:
+            self.tabview._segmented_button.configure(
+                font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+                corner_radius=8,
+            )
+        except Exception:
+            pass
 
         # ── Tab 1: Video Upscaler ──
         tab_upscale = self.tabview.add("⬆  Upscaling")

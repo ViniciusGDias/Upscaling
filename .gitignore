@@ -58,6 +58,8 @@ tmp/
 scratch/
 uploads/
 Videos/
+.agents/
+
 
 # Executáveis baixados em runtime
 bin/ffmpeg.exe

@@ -73,7 +73,11 @@ def find_engine_executable(name: str) -> Optional[str]:
 def get_ffmpeg_version(ffmpeg_path: str) -> str:
     """Retrieve FFmpeg version string."""
     try:
-        res = subprocess.run([ffmpeg_path, "-version"], capture_output=True, encoding="utf-8", errors="replace", timeout=5)
+        res = subprocess.run(
+            [ffmpeg_path, "-version"],
+            capture_output=True, encoding="utf-8", errors="replace", timeout=5,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+        )
         first_line = res.stdout.splitlines()[0] if res.stdout else ""
         return first_line.replace("ffmpeg version", "").strip().split()[0]
     except Exception:

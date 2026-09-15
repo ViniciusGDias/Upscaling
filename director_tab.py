@@ -298,33 +298,29 @@ class DirectorTab(ctk.CTkFrame):
 
         self.cut_mode_var = ctk.StringVar(value="context")
         self.cut_mode_cards = {}
+        self.cut_mode_badges = {}
+        self.cut_mode_titles = {}
 
         mode_defs = [
             {
                 "key": "context",
                 "title": "Contexto",
-                "badge": "ATUAL",
-                "badge_color": "#18181b",
-                "badge_text_color": "#a1a1aa",
+                "badge": "45s–2m",
                 "desc": "Vídeo com diálogos e narrativa. Perfeito para shorts que contam uma mini-história.",
                 "col": 0,
             },
             {
                 "key": "continuous",
                 "title": "Contínuo",
-                "badge": "NOVO",
-                "badge_color": "#18181b",
-                "badge_text_color": "#a1a1aa",
+                "badge": "30–90s",
                 "desc": "1 trecho contínuo, sem cortes internos — menos alucinação e falhas de fala. Refine depois na aba Refinador.",
                 "col": 1,
             },
             {
                 "key": "narrative_arc",
-                "title": "Arco Narrativo",
-                "badge": "NOVO",
-                "badge_color": "#18181b",
-                "badge_text_color": "#a1a1aa",
-                "desc": "Analisa 3 a 20 min do episódio e comprime num vídeo de 1–2 min contando a história completa.",
+                "title": "Mini-Filme (Arco 2–5m)",
+                "badge": "2–5 MIN",
+                "desc": "Identifica um bloco contextualizado e épico de 2 a 5 min (mini-filme com história completa) — ideal para tratar no Refinador.",
                 "col": 2,
             },
         ]
@@ -357,8 +353,8 @@ class DirectorTab(ctk.CTkFrame):
             lbl_badge = ctk.CTkLabel(
                 t_row, text=f" {m['badge']} ",
                 font=ctk.CTkFont(family="Segoe UI", size=9, weight="bold"),
-                text_color=m["badge_text_color"],
-                fg_color=m["badge_color"],
+                text_color="#a1a1aa",
+                fg_color="#18181b",
                 corner_radius=4, padx=5, pady=1,
                 cursor="hand2",
             )
@@ -374,6 +370,8 @@ class DirectorTab(ctk.CTkFrame):
             lbl_desc.pack(fill="both", expand=True)
 
             self.cut_mode_cards[m["key"]] = card_f
+            self.cut_mode_badges[m["key"]] = (lbl_badge, m["badge"])
+            self.cut_mode_titles[m["key"]] = lbl_title
 
             def _make_handler(k=m["key"]):
                 return lambda e: self._select_cut_mode(k)
@@ -394,18 +392,38 @@ class DirectorTab(ctk.CTkFrame):
     def _update_cut_mode_visuals(self):
         active = self.cut_mode_var.get()
         for k, card in self.cut_mode_cards.items():
+            badge_info = self.cut_mode_badges.get(k)
+            title_lbl = self.cut_mode_titles.get(k)
             if k == active:
                 card.configure(
-                    border_color=COLORS["border_active"],
-                    border_width=1,
-                    fg_color=COLORS["bg_card_hover"],
+                    border_color="#3b82f6",
+                    border_width=2,
+                    fg_color="#141c2b",
                 )
+                if badge_info:
+                    lbl, base = badge_info
+                    lbl.configure(
+                        text=f" ✓ ATIVO ({base}) ",
+                        fg_color="#2563eb",
+                        text_color="#ffffff",
+                    )
+                if title_lbl:
+                    title_lbl.configure(text_color="#60a5fa")
             else:
                 card.configure(
                     border_color=COLORS["border"],
                     border_width=1,
                     fg_color=COLORS["bg_dark"],
                 )
+                if badge_info:
+                    lbl, base = badge_info
+                    lbl.configure(
+                        text=f" {base} ",
+                        fg_color="#18181b",
+                        text_color="#71717a",
+                    )
+                if title_lbl:
+                    title_lbl.configure(text_color=COLORS["text_primary"])
 
     def _build_action_section(self):
         card = ctk.CTkFrame(self.scroll, fg_color="transparent")
@@ -1176,17 +1194,21 @@ class DirectorTab(ctk.CTkFrame):
                 self._log(f"✓ Corte pronto e transferido para o Refinador: {out_path}")
                 max_dur = self.current_video_info.duration if self.current_video_info else 0.0
                 start_sec, dur_sec, _, _, _ = parse_candidate_times(cand, max_duration=max_dur)
-                is_arc = dur_sec >= 180 or (hasattr(self, "cut_mode_var") and self.cut_mode_var.get() == "narrative_arc")
+                is_arc = dur_sec >= 120 or (hasattr(self, "cut_mode_var") and self.cut_mode_var.get() == "narrative_arc")
 
                 if self.main_app and hasattr(self.main_app, "refiner_tab"):
                     self.main_app.refiner_tab._load_video(out_path)
+                    if is_arc and hasattr(self.main_app.refiner_tab, "target_duration_var"):
+                        self.main_app.refiner_tab.target_duration_var.set("🎬 Tratar Mini-Filme / Resumo 50% (Até 2:30 min)")
+                        self.main_app.refiner_tab._on_setting_changed()
+
                     self.main_app.tabview.set("✂️  Refinador (Mastercut)")
                     if is_arc:
                         msg = (
-                            f"Arco Narrativo extraído ({format_time(dur_sec)}) e carregado no Refinador!\n\n"
+                            f"🎬 Mini-Filme / Arco extraído ({format_time(dur_sec)}) e carregado no Refinador!\n\n"
                             f"Arquivo: {os.path.basename(out_path)}\n\n"
-                            "💡 Próximo passo: na aba '✂️ Refinador (Mastercut)', clique em 'Criar Mastercut' "
-                            "para condensar este arco inteiro num vídeo dinâmico de 1 a 2 minutos com a história completa!"
+                            "💡 Opção 'Tratar Mini-Filme / Resumo 50%' pré-selecionada automaticamente!\n"
+                            "Clique em 'Gerar Mastercut' para condensar este arco num resumo cinematográfico de até 2:30 min com o suco da história!"
                         )
                     else:
                         msg = (

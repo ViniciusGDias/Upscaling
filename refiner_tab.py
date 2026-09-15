@@ -28,10 +28,10 @@ COLORS = {
     "bg_dark": "#09090b",
     "bg_card": "#111113",
     "bg_card_hover": "#18181b",
-    "accent_primary": "#e2e8f0",
-    "accent_secondary": "#94a3b8",
-    "accent_refiner": "#e2e8f0",
-    "accent_refiner_hover": "#a1a1aa",
+    "accent_primary": "#16a34a",
+    "accent_secondary": "#22c55e",
+    "accent_refiner": "#16a34a",
+    "accent_refiner_hover": "#15803d",
     "success": "#22c55e",
     "warning": "#f59e0b",
     "error": "#ef4444",
@@ -39,7 +39,7 @@ COLORS = {
     "text_secondary": "#71717a",
     "text_muted": "#3f3f46",
     "border": "#27272a",
-    "border_active": "#52525b",
+    "border_active": "#16a34a",
     "console_bg": "#050505",
     "console_text": "#a1a1aa",
 }
@@ -99,30 +99,23 @@ class RefinerMastercutTab(ctk.CTkFrame):
             font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
             text_color=COLORS["text_secondary"],
             fg_color=COLORS["bg_card"],
-            corner_radius=12,
-            padx=8, pady=3,
-        ).pack(side="left", padx=(8, 0), pady=(4, 0))
+            corner_radius=4, padx=6, pady=2,
+        ).pack(side="left", padx=(10, 0))
 
+        desc = (
+            "Condensa o vídeo bruto no 'Suco do Vídeo' de alta retenção (30s–60s) ou em Mini-Filmes (até 2:30 min).\n"
+            "Mapeia cada palavra e diálogo via IA Whisper para cortar pausas mortas com precisão cirúrgica sem mutilar falas."
+        )
         ctk.CTkLabel(
-            row, text=" 30s-60s ",
-            font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
+            header, text=desc,
+            font=ctk.CTkFont(family="Segoe UI", size=12),
             text_color=COLORS["text_secondary"],
-            fg_color=COLORS["bg_card"],
-            corner_radius=12,
-            padx=8, pady=3,
-        ).pack(side="left", padx=(6, 0), pady=(4, 0))
-
-        ctk.CTkLabel(
-            header,
-            text="Extraia 'O Suco do Vídeo' com IA antes do upscaling. Pré-visualize o corte e só faça upscaling se gostar!",
-            font=ctk.CTkFont(family="Segoe UI", size=13),
-            text_color=COLORS["text_secondary"],
-            anchor="w",
-        ).pack(fill="x", pady=(4, 0))
+            justify="left", anchor="w",
+        ).pack(fill="x", pady=(6, 0))
 
         ctk.CTkFrame(header, fg_color=COLORS["border"], height=1).pack(fill="x", pady=(10, 0))
 
-    # ── File Section ──────────────────────────────────────────────────────
+    # ── File Selection ────────────────────────────────────────────────────
 
     def _build_file_section(self):
         card = ctk.CTkFrame(
@@ -131,118 +124,99 @@ class RefinerMastercutTab(ctk.CTkFrame):
         )
         card.pack(fill="x", pady=(0, 10))
 
-        title_row = ctk.CTkFrame(card, fg_color="transparent")
-        title_row.pack(fill="x", padx=16, pady=(12, 6))
+        inner = ctk.CTkFrame(card, fg_color="transparent")
+        inner.pack(fill="x", padx=16, pady=14)
+
+        t_row = ctk.CTkFrame(inner, fg_color="transparent")
+        t_row.pack(fill="x", pady=(0, 8))
 
         ctk.CTkLabel(
-            title_row, text="📁  Vídeo Original para o Mastercut",
-            font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"),
+            t_row, text="Vídeo de Entrada",
+            font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
             text_color=COLORS["text_primary"], anchor="w",
         ).pack(side="left")
 
-        # Sync button with main tab
-        self.sync_btn = ctk.CTkButton(
-            title_row, text="🔄 Usar vídeo da aba Upscaling",
-            font=ctk.CTkFont(family="Segoe UI", size=11),
-            fg_color="transparent", hover_color=COLORS["bg_card_hover"],
+        sync_btn = ctk.CTkButton(
+            t_row, text="🔄 Sincronizar com Upscaling",
+            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+            fg_color=COLORS["bg_dark"], hover_color=COLORS["bg_card_hover"],
             border_width=1, border_color=COLORS["border"],
-            text_color=COLORS["text_secondary"],
-            height=26, command=self._sync_from_main_app,
+            text_color=COLORS["accent_refiner"],
+            height=26, corner_radius=6,
+            command=self._sync_from_main_app,
         )
-        self.sync_btn.pack(side="right")
+        sync_btn.pack(side="right")
 
-        input_row = ctk.CTkFrame(card, fg_color="transparent")
-        input_row.pack(fill="x", padx=16, pady=(0, 12))
+        f_row = ctk.CTkFrame(inner, fg_color="transparent")
+        f_row.pack(fill="x")
 
         self.file_entry = ctk.CTkEntry(
-            input_row,
-            placeholder_text="Selecione um vídeo longo ou episódio (ex: 20-30 min)...",
+            f_row,
+            placeholder_text="Selecione ou arraste um vídeo...",
             font=ctk.CTkFont(family="Segoe UI", size=12),
             fg_color=COLORS["bg_dark"], border_color=COLORS["border"],
             text_color=COLORS["text_primary"],
-            placeholder_text_color=COLORS["text_muted"],
-            height=38, corner_radius=8,
+            height=36, corner_radius=8,
         )
         self.file_entry.pack(side="left", fill="x", expand=True, padx=(0, 8))
 
-        ctk.CTkButton(
-            input_row, text="Buscar Vídeo",
+        browse_btn = ctk.CTkButton(
+            f_row, text="Buscar Vídeo",
             font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
             fg_color=COLORS["bg_dark"], hover_color=COLORS["bg_card_hover"],
             border_width=1, border_color=COLORS["border"],
             text_color=COLORS["text_primary"],
-            height=38, corner_radius=10,
+            height=36, corner_radius=8, width=110,
             command=self._browse_file,
-        ).pack(side="right")
-
-        # Context input box (optional anime / episode)
-        ctx_box = ctk.CTkFrame(card, fg_color="transparent")
-        ctx_box.pack(fill="x", padx=16, pady=(0, 12))
-
-        ctx_label_row = ctk.CTkFrame(ctx_box, fg_color="transparent")
-        ctx_label_row.pack(fill="x", pady=(0, 4))
-
-        ctk.CTkLabel(
-            ctx_label_row, text="🏷️  Anime, Série ou Episódio (Opcional):",
-            font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
-            text_color=COLORS["text_secondary"], anchor="w",
-        ).pack(side="left")
-
-        ctk.CTkLabel(
-            ctx_label_row, text="💡 Se informado, a IA foca nos personagens, golpes e frases lendárias daquele episódio!",
-            font=ctk.CTkFont(family="Segoe UI", size=10),
-            text_color=COLORS["text_muted"], anchor="w",
-        ).pack(side="left", padx=(8, 0))
-
-        self.context_entry = ctk.CTkEntry(
-            ctx_box,
-            placeholder_text="Ex: Bleach Ep 270 / Luta Ichigo vs Ulquiorra (se deixar vazio, a IA analisa só pelas falas)...",
-            font=ctk.CTkFont(family="Segoe UI", size=12),
-            fg_color=COLORS["bg_dark"], border_color=COLORS["border"],
-            text_color=COLORS["text_primary"],
-            placeholder_text_color=COLORS["text_muted"],
-            height=36, corner_radius=8,
         )
-        self.context_entry.pack(fill="x")
+        browse_btn.pack(side="right")
 
-    # ── Video Info Section ────────────────────────────────────────────────
+    # ── Video Info ────────────────────────────────────────────────────────
 
     def _build_info_section(self):
         self.info_card = ctk.CTkFrame(
             self.scroll, fg_color=COLORS["bg_card"],
             corner_radius=12, border_width=1, border_color=COLORS["border"],
         )
+        # Not packed initially, shown when video is loaded
 
-        grid = ctk.CTkFrame(self.info_card, fg_color="transparent")
-        grid.pack(fill="x", padx=16, pady=12)
+        inner = ctk.CTkFrame(self.info_card, fg_color="transparent")
+        inner.pack(fill="x", padx=16, pady=12)
+
+        ctk.CTkLabel(
+            inner, text="Informações do Vídeo",
+            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+            text_color=COLORS["text_secondary"], anchor="w",
+        ).pack(fill="x", pady=(0, 8))
+
+        grid = ctk.CTkFrame(inner, fg_color="transparent")
+        grid.pack(fill="x")
+        grid.grid_columnconfigure((0, 1, 2, 3), weight=1)
 
         self.info_labels = {}
-        items = [
-            ("Duração Original", "duration", "--:--"),
-            ("Resolução", "resolution", "--"),
-            ("FPS", "fps", "--"),
-            ("Tamanho", "size", "--"),
+        fields = [
+            ("duration", "⏱️ Duração", "00:00"),
+            ("resolution", "📐 Resolução", "—"),
+            ("fps", "🎞️ FPS", "—"),
+            ("size", "💾 Tamanho", "—"),
         ]
-        for col_idx, (label_text, key, default_val) in enumerate(items):
-            box = ctk.CTkFrame(grid, fg_color=COLORS["bg_dark"], corner_radius=8)
-            box.grid(row=0, column=col_idx, padx=4, sticky="ew")
-            grid.columnconfigure(col_idx, weight=1)
-
+        for col, (key, title, val) in enumerate(fields):
+            f = ctk.CTkFrame(grid, fg_color=COLORS["bg_dark"], corner_radius=8, border_width=1, border_color=COLORS["border"])
+            f.grid(row=0, column=col, sticky="nsew", padx=3)
             ctk.CTkLabel(
-                box, text=label_text,
+                f, text=title,
                 font=ctk.CTkFont(family="Segoe UI", size=10),
-                text_color=COLORS["text_muted"],
-            ).pack(pady=(6, 0))
-
+                text_color=COLORS["text_secondary"],
+            ).pack(pady=(6, 1))
             lbl = ctk.CTkLabel(
-                box, text=default_val,
-                font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
+                f, text=val,
+                font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
                 text_color=COLORS["text_primary"],
             )
             lbl.pack(pady=(0, 6))
             self.info_labels[key] = lbl
 
-    # ── Settings Section ──────────────────────────────────────────────────
+    # ── Settings ──────────────────────────────────────────────────────────
 
     def _build_settings_section(self):
         card = ctk.CTkFrame(
@@ -251,167 +225,164 @@ class RefinerMastercutTab(ctk.CTkFrame):
         )
         card.pack(fill="x", pady=(0, 10))
 
-        ctk.CTkLabel(
-            card, text="⚙️  Configurações do Mastercut",
-            font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"),
-            text_color=COLORS["text_primary"], anchor="w",
-        ).pack(fill="x", padx=16, pady=(12, 6))
-
-        # Mode explanation banner
-        banner = ctk.CTkFrame(card, fg_color=COLORS["bg_dark"], corner_radius=8)
-        banner.pack(fill="x", padx=16, pady=(0, 12))
-
-        b_row = ctk.CTkFrame(banner, fg_color="transparent")
-        b_row.pack(fill="x", padx=12, pady=10)
+        inner = ctk.CTkFrame(card, fg_color="transparent")
+        inner.pack(fill="x", padx=16, pady=14)
 
         ctk.CTkLabel(
-            b_row,
-            text="🧠 Opção 4: Mastercut Concentrado (O Suco do Vídeo)",
+            inner, text="Ajustes do Mastercut",
             font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
-            text_color=COLORS["accent_refiner"],
-            anchor="w",
-        ).pack(fill="x")
-
-        ctk.CTkLabel(
-            b_row,
-            text="O algoritmo mapeia as falas com Whisper, elimina silêncios mortos (>0.35s) e seleciona com IA os momentos de maior clímax, impacto e ação, condensando tudo com narrativa contínua e sem mutilação de falas.",
-            font=ctk.CTkFont(family="Segoe UI", size=11),
-            text_color=COLORS["text_secondary"],
-            wraplength=700, justify="left",
-            anchor="w",
-        ).pack(fill="x", pady=(4, 0))
-
-        # Selectors row: Mode & Target Duration
-        ctrls_row = ctk.CTkFrame(card, fg_color="transparent")
-        ctrls_row.pack(fill="x", padx=16, pady=(0, 10))
-
-        # Col 1: Mode (Intensity)
-        mode_box = ctk.CTkFrame(ctrls_row, fg_color="transparent")
-        mode_box.pack(side="left", fill="x", expand=True, padx=(0, 8))
-
-        ctk.CTkLabel(
-            mode_box, text="🎯  Intensidade / Modo de Refino:",
-            font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
             text_color=COLORS["text_primary"], anchor="w",
+        ).pack(fill="x", pady=(0, 12))
+
+        # Context (Anime / Series name)
+        ctx_row = ctk.CTkFrame(inner, fg_color="transparent")
+        ctx_row.pack(fill="x", pady=(0, 12))
+
+        ctk.CTkLabel(
+            ctx_row, text="Contexto / Nome da Obra (Opcional):",
+            font=ctk.CTkFont(family="Segoe UI", size=12),
+            text_color=COLORS["text_secondary"], anchor="w",
+        ).pack(fill="x", pady=(0, 4))
+
+        self.context_entry = ctk.CTkEntry(
+            ctx_row,
+            placeholder_text="Ex: Jujutsu Kaisen 2 Episódio 17, Bleach TYBW Ep 7...",
+            font=ctk.CTkFont(family="Segoe UI", size=12),
+            fg_color=COLORS["bg_dark"], border_color=COLORS["border"],
+            text_color=COLORS["text_primary"],
+            height=34, corner_radius=8,
+        )
+        self.context_entry.pack(fill="x")
+
+        # Refinement Aggressiveness Mode
+        mode_row = ctk.CTkFrame(inner, fg_color="transparent")
+        mode_row.pack(fill="x", pady=(0, 12))
+
+        ctk.CTkLabel(
+            mode_row, text="Intensidade de Refinamento:",
+            font=ctk.CTkFont(family="Segoe UI", size=12),
+            text_color=COLORS["text_secondary"], anchor="w",
         ).pack(fill="x", pady=(0, 4))
 
         self.refine_mode_var = ctk.StringVar(value="🟡 Equilibrado (Dinâmico - Padrão)")
         self.refine_mode_menu = ctk.CTkOptionMenu(
-            mode_box,
-            values=[
-                "🟢 Preservar Conteúdo (Anti-Silêncio / Sem Perdas)",
-                "🟡 Equilibrado (Dinâmico - Padrão)",
-                "🔴 Agressivo (O Suco Puro / Clímax)",
-            ],
+            mode_row,
             variable=self.refine_mode_var,
-            font=ctk.CTkFont(family="Segoe UI", size=11),
-            fg_color=COLORS["bg_dark"],
-            button_color=COLORS["border"],
+            values=[
+                "🟢 Preservar Conteúdo (Corta apenas silêncios mortos, mantém 100% dos diálogos)",
+                "🟡 Equilibrado (Dinâmico - Padrão: Ritmo acelerado sem perder essência)",
+                "🔴 Agressivo (Ultra-condensado: Picos emocionais e clímax máximo)",
+            ],
+            font=ctk.CTkFont(family="Segoe UI", size=12),
+            fg_color=COLORS["bg_dark"], button_color=COLORS["bg_dark"],
             button_hover_color=COLORS["bg_card_hover"],
+            dropdown_fg_color=COLORS["bg_card"], dropdown_hover_color=COLORS["bg_card_hover"],
+            dropdown_text_color=COLORS["text_primary"],
             text_color=COLORS["text_primary"],
-            height=34,
+            height=34, corner_radius=8,
             command=self._on_setting_changed,
         )
         self.refine_mode_menu.pack(fill="x")
 
-        # Col 2: Target Duration
-        dur_box = ctk.CTkFrame(ctrls_row, fg_color="transparent")
-        dur_box.pack(side="left", fill="x", expand=True, padx=(4, 4))
+        # Target Duration Target
+        dur_row = ctk.CTkFrame(inner, fg_color="transparent")
+        dur_row.pack(fill="x", pady=(0, 12))
 
         ctk.CTkLabel(
-            dur_box, text="⏱️  Duração Alvo do Mastercut:",
-            font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
-            text_color=COLORS["text_primary"], anchor="w",
+            dur_row, text="Duração Alvo do Mastercut:",
+            font=ctk.CTkFont(family="Segoe UI", size=12),
+            text_color=COLORS["text_secondary"], anchor="w",
         ).pack(fill="x", pady=(0, 4))
 
         self.target_duration_var = ctk.StringVar(value="Automático Inteligente (Recomendado)")
         self.target_duration_menu = ctk.CTkOptionMenu(
-            dur_box,
+            dur_row,
+            variable=self.target_duration_var,
             values=[
                 "Automático Inteligente (Recomendado)",
-                "Manter Máximo (45s - 55s para 1 min)",
-                "Padrão Shorts/Reels (35s - 50s)",
-                "Curto & Rápido (25s - 35s)",
+                "🎬 Tratar Mini-Filme / Resumo 50% (Até 2:30 min)",
+                "Manter Máximo de Conteúdo (~70-90s se vídeo for longo)",
+                "Padrão Shorts / Reels (~40s a 60s)",
+                "Curto & Rápido (~25s a 40s)",
             ],
-            variable=self.target_duration_var,
-            font=ctk.CTkFont(family="Segoe UI", size=11),
-            fg_color=COLORS["bg_dark"],
-            button_color=COLORS["border"],
+            font=ctk.CTkFont(family="Segoe UI", size=12),
+            fg_color=COLORS["bg_dark"], button_color=COLORS["bg_dark"],
             button_hover_color=COLORS["bg_card_hover"],
+            dropdown_fg_color=COLORS["bg_card"], dropdown_hover_color=COLORS["bg_card_hover"],
+            dropdown_text_color=COLORS["text_primary"],
             text_color=COLORS["text_primary"],
-            height=34,
+            height=34, corner_radius=8,
             command=self._on_setting_changed,
         )
         self.target_duration_menu.pack(fill="x")
 
-        # Col 3: Loop Structure
-        loop_box = ctk.CTkFrame(ctrls_row, fg_color="transparent")
-        loop_box.pack(side="left", fill="x", expand=True, padx=(4, 0))
+        # Loop Contextual Mode
+        loop_row = ctk.CTkFrame(inner, fg_color="transparent")
+        loop_row.pack(fill="x", pady=(0, 12))
 
         ctk.CTkLabel(
-            loop_box, text="🔁  Estrutura de Loop:",
-            font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
-            text_color=COLORS["text_primary"], anchor="w",
+            loop_row, text="Formato de Loop (Replay Automático):",
+            font=ctk.CTkFont(family="Segoe UI", size=12),
+            text_color=COLORS["text_secondary"], anchor="w",
         ).pack(fill="x", pady=(0, 4))
 
         self.loop_mode_var = ctk.StringVar(value="▶️ Sem Loop (Mastercut Direto)")
         self.loop_mode_menu = ctk.CTkOptionMenu(
-            loop_box,
+            loop_row,
+            variable=self.loop_mode_var,
             values=[
                 "▶️ Sem Loop (Mastercut Direto)",
-                "🔁 Com Loop Contextual (Replay Infinito)",
+                "🔁 Com Loop Contextual (Fatia clímax final e move para abertura em 0.0s)",
             ],
-            variable=self.loop_mode_var,
-            font=ctk.CTkFont(family="Segoe UI", size=11),
-            fg_color=COLORS["bg_dark"],
-            button_color=COLORS["border"],
+            font=ctk.CTkFont(family="Segoe UI", size=12),
+            fg_color=COLORS["bg_dark"], button_color=COLORS["bg_dark"],
             button_hover_color=COLORS["bg_card_hover"],
+            dropdown_fg_color=COLORS["bg_card"], dropdown_hover_color=COLORS["bg_card_hover"],
+            dropdown_text_color=COLORS["text_primary"],
             text_color=COLORS["text_primary"],
-            height=34,
+            height=34, corner_radius=8,
             command=self._on_setting_changed,
         )
         self.loop_mode_menu.pack(fill="x")
 
-        # Dynamic Duration Hint & Anti-Cut Shield Banner
-        self.hint_frame = ctk.CTkFrame(card, fg_color=COLORS["bg_dark"], corner_radius=8, border_width=1, border_color=COLORS["border"])
-        self.hint_frame.pack(fill="x", padx=16, pady=(0, 12))
-
-        h_inner = ctk.CTkFrame(self.hint_frame, fg_color="transparent")
-        h_inner.pack(fill="x", padx=12, pady=8)
-
-        self.hint_label = ctk.CTkLabel(
-            h_inner,
-            text="🛡️ Proteção Anti-Corte: Carregue um vídeo para ver a previsão exata de retenção e duração final.",
-            font=ctk.CTkFont(family="Segoe UI", size=11),
-            text_color=COLORS["text_secondary"],
-            wraplength=700, justify="left",
-            anchor="w",
-        )
-        self.hint_label.pack(fill="x")
-
-        # Checkboxes row
-        opts_row = ctk.CTkFrame(card, fg_color="transparent")
-        opts_row.pack(fill="x", padx=16, pady=(0, 14))
+        # Toggles row: Vocal Isolation + Anti-Copyright
+        toggles_row = ctk.CTkFrame(inner, fg_color="transparent")
+        toggles_row.pack(fill="x", pady=(4, 0))
 
         self.vocal_isolation_var = ctk.BooleanVar(value=True)
-        ctk.CTkCheckBox(
-            opts_row, text="Isolamento Vocal / Limpeza de Áudio (realça falas e remove ruídos)",
+        self.vocal_cb = ctk.CTkCheckBox(
+            toggles_row,
+            text="Isolamento Vocal Inteligente (Filtro passa-alta + redução de ruído)",
             variable=self.vocal_isolation_var,
-            font=ctk.CTkFont(family="Segoe UI", size=12),
-            text_color=COLORS["text_primary"],
+            font=ctk.CTkFont(family="Segoe UI", size=11),
             fg_color=COLORS["accent_primary"], hover_color=COLORS["accent_secondary"],
-        ).pack(side="left", padx=(0, 20))
+            border_color=COLORS["border"], corner_radius=4,
+        )
+        self.vocal_cb.pack(side="left", padx=(0, 16))
 
         self.anti_copyright_var = ctk.BooleanVar(value=False)
-        ctk.CTkCheckBox(
-            opts_row, text="Modo Anti-Copyright Sutil (micro-zoom + velocidade calibrada com sincronia perfeita)",
+        self.anti_copy_cb = ctk.CTkCheckBox(
+            toggles_row,
+            text="Micro-Aceleração Anti-Copyright (1.8% imperceptível)",
             variable=self.anti_copyright_var,
-            font=ctk.CTkFont(family="Segoe UI", size=12),
-            text_color=COLORS["text_primary"],
+            font=ctk.CTkFont(family="Segoe UI", size=11),
             fg_color=COLORS["accent_primary"], hover_color=COLORS["accent_secondary"],
-        ).pack(side="left")
+            border_color=COLORS["border"], corner_radius=4,
+        )
+        self.anti_copy_cb.pack(side="left")
 
-    # ── Output Destination Section ────────────────────────────────────────
+        # Duration & Anti-cut Guarantee Hint Label
+        self.hint_label = ctk.CTkLabel(
+            inner,
+            text="🛡️ Proteção Anti-Corte: Carregue um vídeo para ver a estimativa exata de retenção e duração final.",
+            font=ctk.CTkFont(family="Segoe UI", size=11, slant="italic"),
+            text_color="#10b981",
+            justify="left", anchor="w",
+            wraplength=700,
+        )
+        self.hint_label.pack(fill="x", pady=(10, 0))
+
+    # ── Output Section ────────────────────────────────────────────────────
 
     def _build_output_section(self):
         card = ctk.CTkFrame(
@@ -420,50 +391,50 @@ class RefinerMastercutTab(ctk.CTkFrame):
         )
         card.pack(fill="x", pady=(0, 10))
 
-        title_row = ctk.CTkFrame(card, fg_color="transparent")
-        title_row.pack(fill="x", padx=16, pady=(12, 6))
+        inner = ctk.CTkFrame(card, fg_color="transparent")
+        inner.pack(fill="x", padx=16, pady=14)
 
         ctk.CTkLabel(
-            title_row, text="💾  Destino / Onde Salvar o Mastercut",
-            font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"),
+            inner, text="Destino do Vídeo Refinado",
+            font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
             text_color=COLORS["text_primary"], anchor="w",
-        ).pack(side="left")
+        ).pack(fill="x", pady=(0, 8))
 
-        out_row = ctk.CTkFrame(card, fg_color="transparent")
-        out_row.pack(fill="x", padx=16, pady=(0, 14))
+        o_row = ctk.CTkFrame(inner, fg_color="transparent")
+        o_row.pack(fill="x")
 
         self.output_entry = ctk.CTkEntry(
-            out_row,
-            placeholder_text="Caminho de saída do Mastercut (padrão: mesma pasta do vídeo original)...",
+            o_row,
+            placeholder_text="Caminho do arquivo final será gerado automaticamente...",
             font=ctk.CTkFont(family="Segoe UI", size=12),
             fg_color=COLORS["bg_dark"], border_color=COLORS["border"],
             text_color=COLORS["text_primary"],
-            placeholder_text_color=COLORS["text_muted"],
-            height=38, corner_radius=8,
+            height=36, corner_radius=8,
         )
         self.output_entry.pack(side="left", fill="x", expand=True, padx=(0, 8))
 
-        ctk.CTkButton(
-            out_row, text="Escolher Destino",
+        browse_btn = ctk.CTkButton(
+            o_row, text="Salvar Como...",
             font=ctk.CTkFont(family="Segoe UI", size=12),
             fg_color=COLORS["bg_dark"], hover_color=COLORS["bg_card_hover"],
             border_width=1, border_color=COLORS["border"],
             text_color=COLORS["text_secondary"],
-            height=38, width=130, corner_radius=8,
+            height=36, corner_radius=8, width=110,
             command=self._browse_output,
-        ).pack(side="right")
+        )
+        browse_btn.pack(side="right")
 
-    # ── Action Section ────────────────────────────────────────────────────
+    # ── Action Buttons ────────────────────────────────────────────────────
 
     def _build_action_section(self):
         row = ctk.CTkFrame(self.scroll, fg_color="transparent")
         row.pack(fill="x", pady=(0, 10))
 
         self.generate_btn = ctk.CTkButton(
-            row, text="⚡  Gerar Mastercut Concentrado (30s-60s)",
+            row, text="⚡  Gerar Mastercut Concentrado",
             font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
             fg_color=COLORS["accent_primary"], hover_color=COLORS["accent_secondary"],
-            text_color="#09090b",
+            text_color="#ffffff",
             height=46, corner_radius=10,
             command=self._start_mastercut,
         )
@@ -488,16 +459,20 @@ class RefinerMastercutTab(ctk.CTkFrame):
             self.scroll, fg_color=COLORS["bg_card"],
             corner_radius=12, border_width=1, border_color=COLORS["border"],
         )
+        self.progress_card.pack(fill="x", pady=(4, 12))
 
         p_inner = ctk.CTkFrame(self.progress_card, fg_color="transparent")
-        p_inner.pack(fill="x", padx=16, pady=12)
+        p_inner.pack(fill="x", padx=16, pady=14)
+
+        header_p = ctk.CTkFrame(p_inner, fg_color="transparent")
+        header_p.pack(fill="x", pady=(0, 6))
 
         self.status_label = ctk.CTkLabel(
-            p_inner, text="Aguardando início...",
+            header_p, text="Aguardando início...",
             font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
             text_color=COLORS["text_primary"], anchor="w",
         )
-        self.status_label.pack(fill="x", pady=(0, 6))
+        self.status_label.pack(side="left", fill="x", expand=True)
 
         self.progress_bar = ctk.CTkProgressBar(
             p_inner, height=10, corner_radius=5,
@@ -506,11 +481,12 @@ class RefinerMastercutTab(ctk.CTkFrame):
         self.progress_bar.pack(fill="x", pady=(0, 8))
         self.progress_bar.set(0)
 
-        # Log box
+        # Log box - Terminal
         self.log_box = ctk.CTkTextbox(
-            p_inner, height=90, corner_radius=8,
+            p_inner, height=125, corner_radius=8,
             fg_color=COLORS["console_bg"], text_color=COLORS["console_text"],
             font=ctk.CTkFont(family="Consolas", size=11),
+            border_width=1, border_color=COLORS["border"],
         )
         self.log_box.pack(fill="x")
         self.log_box.configure(state="disabled")
@@ -621,6 +597,10 @@ class RefinerMastercutTab(ctk.CTkFrame):
                 cur_mode = self._get_refine_mode_key()
                 if cur_mode == "aggressive":
                     self.refine_mode_var.set("🟡 Equilibrado (Dinâmico - Padrão)")
+            elif info.duration >= 110.0:
+                # Long clip (>= 2m up to 5m, e.g. mini-movie/arc): suggest Tratar Mini-Filme if on default
+                if self.target_duration_var.get() == "Automático Inteligente (Recomendado)":
+                    self.target_duration_var.set("🎬 Tratar Mini-Filme / Resumo 50% (Até 2:30 min)")
 
             self._update_duration_hint()
 
@@ -640,6 +620,8 @@ class RefinerMastercutTab(ctk.CTkFrame):
 
     def _get_target_duration_key(self) -> str:
         val = self.target_duration_var.get() if hasattr(self, "target_duration_var") else ""
+        if "Mini-Filme" in val or "Resumo 50%" in val:
+            return "mini_movie"
         if "Manter Máximo" in val:
             return "max_retention"
         if "Padrão Shorts" in val:
@@ -668,7 +650,12 @@ class RefinerMastercutTab(ctk.CTkFrame):
         min_d, max_d = calculate_mastercut_bounds(dur, refine_mode=mode_key, target_duration_mode=dur_key)
         mode_name = "Preservar Conteúdo" if mode_key == "soft" else ("Agressivo" if mode_key == "aggressive" else "Equilibrado")
 
-        if dur <= 75.0:
+        if dur_key == "mini_movie":
+            msg = (
+                f"🎬 Previsão Tratar Mini-Filme ({format_time(dur)}): Condensará este arco para cerca de 50% ({min_d:.1f}s a {max_d:.1f}s, máx 2:30 min) "
+                "em 4 atos narrativos essenciais (Abertura, Tensão, Clímax e Desfecho), cortando tempos mortos e puxando o suco do vídeo!"
+            )
+        elif dur <= 75.0:
             if mode_key == "soft":
                 msg = (
                     f"🛡️ Previsão para este clipe ({format_time(dur)}): Modo {mode_name} manterá {min_d:.1f}s a {max_d:.1f}s (~85% do vídeo). "
@@ -755,6 +742,9 @@ class RefinerMastercutTab(ctk.CTkFrame):
         self.cancel_btn.configure(state="normal", text_color=COLORS["text_primary"])
         self.status_label.configure(text="Iniciando pipeline...")
         self.progress_bar.set(0.0)
+
+        if not self.progress_card.winfo_ismapped():
+            self.progress_card.pack(fill="x", pady=(4, 12))
 
         if self.result_card.winfo_ismapped():
             self.result_card.pack_forget()

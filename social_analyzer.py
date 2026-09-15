@@ -461,7 +461,10 @@ def get_video_info_fast(video_path: str) -> Dict[str, Any]:
             "-of", "json",
             video_path
         ]
-        res = subprocess.run(cmd, capture_output=True, encoding="utf-8", errors="replace", timeout=10)
+        res = subprocess.run(
+            cmd, capture_output=True, encoding="utf-8", errors="replace", timeout=10,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+        )
         if res.returncode == 0 and res.stdout:
             data = json.loads(res.stdout)
             streams = data.get("streams", [])
@@ -488,7 +491,10 @@ def get_video_info_fast(video_path: str) -> Dict[str, Any]:
             "-of", "csv=p=0",
             video_path
         ]
-        res_a = subprocess.run(cmd_a, capture_output=True, encoding="utf-8", errors="replace", timeout=5)
+        res_a = subprocess.run(
+            cmd_a, capture_output=True, encoding="utf-8", errors="replace", timeout=5,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+        )
         if res_a.returncode == 0 and "audio" in res_a.stdout.lower():
             info["has_audio"] = True
     except Exception:

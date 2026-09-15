@@ -587,6 +587,29 @@ SNIPER_TIMESTAMP_RULES = """
 4. NUNCA corte uma fala pela metade. Sempre que possível, comece no início de uma palavra e termine no fim de uma fala completa.
 """
 
+MINI_MOVIE_KNOWLEDGE_BASE = """
+[BASE DE CONHECIMENTO: MINI-FILMES & ARCOS NARRATIVOS (2 A 5 MINUTOS)]
+
+FORMATO MINI-FILME / RESUMO CINEMATOGRÁFICO:
+  • Este modo NÃO é para Shorts de 30-60 segundos.
+  • Este modo identifica blocos narrativos LONGOS de 2 a 5 minutos (120s a 300s) com início, desenvolvimento, clímax e desfecho dramático.
+  • Esse trecho será posteriormente enviado para a aba Refinador, onde será condensado no resumo perfeito de até 2:30 min.
+  • Por isso, o trecho bruto selecionado aqui PRECISA ter entre 2 e 5 minutos para conter todo o contexto da história!
+  • ⛔ QUALQUER CORTE MENOR QUE 2 MINUTOS (120s) É ESTITAMENTE PROIBIDO.
+"""
+
+MINI_MOVIE_TIMESTAMP_RULES = """
+[REGRAS DE TIMESTAMPS PARA MINI-FILME (2 A 5 MINUTOS)]
+1. DURAÇÃO OBRIGATÓRIA: Cada trecho DEVE ter NO MÍNIMO 2 MINUTOS (120s) e NO MÁXIMO 5 MINUTOS (300s).
+   ⛔ NUNCA sugira trechos de 30s, 45s, 1m ou 1m15s. Qualquer corte menor que 120 segundos é INVÁLIDO.
+2. CONTINUIDADE NARRATIVA COMPLETA:
+   - INÍCIO: O momento onde o conflito ou conversa começa a se desenhar (dê contexto!).
+   - DESENVOLVIMENTO: As provocações, revelações e troca de falas.
+   - CLÍMAX: O golpe, confissão ou revelação principal.
+   - DESFECHO: As consequências imediatas e reações dos personagens ao clímax.
+3. ANCORAGEM: Utilize os timestamps da transcrição para marcar o início e o fim desse arco contínuo.
+"""
+
 
 def build_candidates_prompt(
     mode: str,
@@ -632,24 +655,25 @@ TRECHOS JÁ GERADOS (TODOS PROIBIDOS):
 
     if cut_mode == "narrative_arc":
         cut_mode_rules = """
-[MODO DE CORTE: ARCO NARRATIVO — HISTÓRIA COMPLETA PARA COMPRESSÃO]
+[MODO DE CORTE: MINI-FILME / ARCO NARRATIVO (2 A 5 MINUTOS)]
 
-OBJETIVO: Identificar um bloco coeso de 3 a 20 minutos que contenha um arco dramático completo. Esse arco será depois comprimido num vídeo de 1 a 2 minutos na etapa de Mastercut.
+OBJETIVO: Identificar blocos contextualizados e épicos de 2 a 5 minutos (120 a 300 segundos) que funcionem como um MINI-FILME ou ARCO NARRATIVO COMPLETO.
+Esse trecho será condensado no Refinador para gerar um resumo épico de até 2:30 min.
 
-ESTRUTURA OBRIGATÓRIA DO ARCO ESCOLHIDO:
-  • ABERTURA: Evento que desencadeia o conflito central (não pode começar no meio de um diálogo sem contexto).
-  • DESENVOLVIMENTO: A tensão deve escalar progressivamente.
-  • CLÍMAX: Momento de pico claro — confronto decisivo, revelação, virada emocional.
-  • RESOLUÇÃO (opcional): Reação ou consequência imediata após o clímax.
+🚨 REGRA CRÍTICA DE DURAÇÃO (NÃO NEGOCIÁVEL):
+  • Duração mínima obrigatória: 2 minutos (120s).
+  • Duração máxima permitida: 5 minutos (300s).
+  • ⛔ CORTES DE 40s, 1 MINUTO OU 1m15s SÃO PROIBIDOS NESTE MODO E SERÃO REJEITADOS.
 
-CRITÉRIOS DE SELEÇÃO:
-  • Prefira arcos com conflito humano/emocional claro — são mais comprimiíveis sem perder sentido.
-  • O arco deve fazer sentido sozinho, mesmo sem o contexto do episódio completo.
-  • Duração mínima: 3 minutos. Duração máxima: 20 minutos.
+ESTRUTURA DO ARCO:
+  • Abertura contextualizada (setup do dilema/confronto)
+  • Escalada de tensão e diálogos marcantes
+  • Clímax épico central
+  • Desfecho e reações imediatas
 
 CAMPOS JSON:
-  • genre: mencione o tipo do arco (ex: "Arco Narrativo: Batalha Final e Sacrifício").
-  • description: descreva o arco em 2 frases — o que acontece e qual é o pico emocional.
+  • genre: "Mini-Filme / Arco Narrativo"
+  • description: Descreva o arco completo em 2 a 3 frases (o dilema inicial, o clímax e o impacto final).
 """
 
     elif cut_mode == "continuous":
@@ -696,9 +720,86 @@ REGRAS DE CONDENSAÇÃO (SEJA IMPIEDOSO):
   • Duração ideal: 45–90s. Até 2 minutos se a narrativa justificar.
 """
 
+    if cut_mode == "narrative_arc":
+        kb_block = MINI_MOVIE_KNOWLEDGE_BASE
+        rules_block = MINI_MOVIE_TIMESTAMP_RULES
+        json_example = """{
+  "candidates": [
+    {
+      "id": "corte_01",
+      "title": "Título épico do Mini-Filme / Arco Dramático",
+      "estimated_range": "08:30 -> 12:15",
+      "start_time": "08:30",
+      "end_time": "12:15",
+      "duration": "3m 45s",
+      "genre": "Mini-Filme / Arco Narrativo",
+      "quality_score": 9.5,
+      "viral_potential": "Altíssimo (Mini-Filme 3m 45s)",
+      "description": "Arco narrativo completo: do início da discussão até a revelação dramática e o desfecho emocionante.",
+      "quality_reasoning": "História completa que prende a atenção com 3m45s de duração ideal para refinamento."
+    }
+  ]
+}"""
+        if mode == "top3":
+            task_rules = f"""TAREFA: Você é um Diretor de Cinema e Curador Especialista em Arcos Narrativos e Mini-Filmes (2 a 5 minutos).
+Analise a transcrição de ponta a ponta e selecione rigorosamente os TOP 3 ARCOS NARRATIVOS DE 2 A 5 MINUTOS (120s a 300s).
 
-    if mode == "top3":
-        task_rules = f"""TAREFA: Você é um Diretor de Conteúdo e Editor Profissional especializado em cortes virais para TikTok, Reels e YouTube Shorts.
+🚨 REGRA DE DURAÇÃO (NÃO NEGOCIÁVEL):
+- CADA CORTE DEVE TER DURAÇÃO TOTAL ENTRE 2 MINUTOS (120s) E 5 MINUTOS (300s).
+- ⛔ NUNCA sugira trechos com menos de 2 minutos (ex: 40s, 1m, 1m15s são PROIBIDOS).
+- Exemplos de durações válidas: 08:30 -> 12:00 (3m 30s), 14:00 -> 17:30 (3m 30s), 19:15 -> 23:15 (4m 00s).
+
+{cut_mode_rules}
+{genre_rules}
+
+RETORNE EXATAMENTE 3 ARCOS NARRATIVOS, ordenados do mais épico para o menor."""
+        else:  # smart
+            task_rules = f"""TAREFA: Você é um Diretor de Cinema e Curador Sênior Especialista em Arcos Narrativos e Mini-Filmes (2 a 5 minutos).
+Sua missão: analisar a transcrição timestamp a timestamp e identificar todos os blocos dramáticos e arcos narrativos completos de 2 A 5 MINUTOS (120 A 300 SEGUNDOS).
+
+🚨 REGRA SUPREMA DE DURAÇÃO (INQUEBRÁVEL):
+- CADA CORTE DEVE TER DURAÇÃO TOTAL ENTRE 2 MINUTOS (120s) E 5 MINUTOS (300s).
+- ⛔ NUNCA sugira cortes com menos de 2 minutos (ex: 40s, 1m, 1m15s são PROIBIDOS e serão descartados).
+- ⛔ NUNCA sugira cortes com mais de 5 minutos (300s).
+- O trecho precisa conter a introdução do momento, os diálogos de construção, o clímax emocionante e as consequências imediatas.
+
+Exemplos de durações válidas para este modo:
+- 08:30 -> 12:00 (3m 30s)
+- 13:45 -> 17:15 (3m 30s)
+- 18:20 -> 22:50 (4m 30s)
+- 20:30 -> 23:10 (2m 40s)
+
+{cut_mode_rules}
+{genre_rules}
+
+=== PROCESSO DE ANÁLISE PARA MINI-FILMES ===
+1. Mapeie os grandes acontecimentos do episódio (batalhas, revelações, despedidas, sacrifícios).
+2. Para cada grande momento, expanda o bloco de tempo para trás (para incluir a motivação e os diálogos iniciais) e para a frente (para incluir o clímax e o impacto emocional), garantindo de 2 a 5 minutos por trecho.
+3. Retorne no mínimo 4 e até 6 arcos narrativos completos do episódio.
+4. Ordene do arco mais épico/impactante para o menor."""
+
+    else:
+        kb_block = VIRAL_KNOWLEDGE_BASE
+        rules_block = SNIPER_TIMESTAMP_RULES
+        json_example = """{
+  "candidates": [
+    {
+      "id": "corte_01",
+      "title": "Título atraente e instigante para o momento",
+      "estimated_range": "04:15 -> 06:30",
+      "start_time": "04:15",
+      "end_time": "06:30",
+      "duration": "2m 15s",
+      "genre": "Ação / Clímax",
+      "quality_score": 9,
+      "viral_potential": "Altíssimo (Nota 9/10)",
+      "description": "Explicação resumida do que acontece na cena.",
+      "quality_reasoning": "Justificativa crítica de por que esse trecho viraliza."
+    }
+  ]
+}"""
+        if mode == "top3":
+            task_rules = f"""TAREFA: Você é um Diretor de Conteúdo e Editor Profissional especializado em cortes virais para TikTok, Reels e YouTube Shorts.
 Analise a transcrição de ponta a ponta e selecione rigorosamente os TOP 3 momentos com maior potencial de viralizar deste episódio.
 
 {cut_mode_rules}
@@ -711,8 +812,8 @@ CRITÉRIOS DOS TOP 3:
 4. NOTA DE QUALIDADE (0 a 10): Notas 9-10 somente para cenas verdadeiramente históricas/épicas do episódio. Seja honesto.
 5. DIVERSIDADE: Não retorne três cenas do mesmo tipo. Misture ação com emoção ou comédia.
 6. RETORNE EXATAMENTE 3 CANDIDATOS, ordenados do maior potencial para o menor."""
-    else:  # smart
-        task_rules = f"""TAREFA: Você é um Editor Sênior de Conteúdo Viral com 10+ anos de experiência em TikTok, YouTube Shorts e Instagram Reels para animes, doramas e séries de ação.
+        else:  # smart
+            task_rules = f"""TAREFA: Você é um Editor Sênior de Conteúdo Viral com 10+ anos de experiência em TikTok, YouTube Shorts e Instagram Reels para animes, doramas e séries de ação.
 
 Sua missão: analisar a transcrição timestamp a timestamp e identificar com precisão cirúrgica todos os trechos com potencial de viralizar. Qualidade sobre quantidade. Honestidade sobre otimismo.
 
@@ -761,9 +862,9 @@ PASSO 5 — SELEÇÃO FINAL:
 
 CRITÉRIO DE DESEMPATE: Prefira cenas com FALA ICÔNICA ou REAÇÃO EXPRESSIVA — elas geram comentários e compartilhamentos."""
 
-    return f"""{VIRAL_KNOWLEDGE_BASE}{ctx_section}{dur_section}{excluded_section}{lore_section}
+    return f"""{kb_block}{ctx_section}{dur_section}{excluded_section}{lore_section}
 {task_rules}
-{SNIPER_TIMESTAMP_RULES}
+{rules_block}
 
 [TRANSCRIÇÃO DE ÁUDIO COM TIMESTAMPS DO VÍDEO]
 {transcript if transcript else "Transcrição indisponível. Baseie-se no lore do episódio e nos momentos clássicos."}
@@ -776,24 +877,97 @@ REGRAS OBRIGATÓRIAS:
 - Responda APENAS com o JSON, sem nenhum texto adicional.
 
 FORMATO JSON OBRIGATÓRIO:
-{{
-  "candidates": [
-    {{
-      "id": "corte_01",
-      "title": "Título atraente e instigante para o momento",
-      "estimated_range": "04:15 -> 06:30",
-      "start_time": "04:15",
-      "end_time": "06:30",
-      "duration": "2m 15s",
-      "genre": "Ação / Clímax",
-      "quality_score": 9,
-      "viral_potential": "Altíssimo (Nota 9/10)",
-      "description": "Explicação resumida do que acontece na cena.",
-      "quality_reasoning": "Justificativa crítica de por que esse trecho viraliza."
-    }}
-  ]
-}}
+{json_example}
 """
+
+
+def enforce_cut_mode_durations(
+    candidates: List[Dict[str, Any]],
+    cut_mode: str,
+    video_duration: float = 0.0,
+    on_log: Optional[Callable[[str], None]] = None,
+) -> List[Dict[str, Any]]:
+    """
+    Enforces strict cut_mode duration rules on candidates.
+    If cut_mode == 'narrative_arc' and a candidate duration < 120s,
+    intelligently expands the window around the climax scene so it spans 2.5 to 3.5 minutes.
+    """
+    if not candidates:
+        return []
+
+    for cand in candidates:
+        max_dur = video_duration if video_duration > 0 else 0.0
+        start_sec, dur_sec, _, _, _ = parse_candidate_times(cand, max_duration=max_dur)
+
+        if cut_mode == "narrative_arc":
+            # Must be strictly between 120s (2m) and 300s (5m)
+            if dur_sec < 120.0:
+                target_dur = 180.0  # 3 minutes default sweet spot
+                if max_dur > 0 and target_dur > max_dur:
+                    target_dur = max_dur
+
+                deficit = target_dur - dur_sec
+                expand_back = deficit * 0.50
+                expand_fwd = deficit * 0.50
+
+                new_start = max(0.0, start_sec - expand_back)
+                new_end = start_sec + dur_sec + expand_fwd
+
+                if max_dur > 0 and new_end > max_dur:
+                    new_end = max_dur
+                    new_start = max(0.0, new_end - target_dur)
+
+                new_dur = new_end - new_start
+                st_str = _seconds_to_time_str(new_start)
+                et_str = _seconds_to_time_str(new_end)
+                dur_str = f"{int(new_dur // 60)}m {int(new_dur % 60):02d}s"
+
+                cand["start_time"] = st_str
+                cand["end_time"] = et_str
+                cand["duration"] = dur_str
+                cand["estimated_range"] = f"{st_str} -> {et_str}"
+                cand.pop("time_range", None)
+                cand.pop("range", None)
+                cand.pop("timestamps", None)
+
+                genre = cand.get("genre", "")
+                if "Arco" not in genre and "Mini-Filme" not in genre:
+                    cand["genre"] = f"Mini-Filme / {genre}" if genre else "Mini-Filme / Arco Narrativo"
+
+                if on_log:
+                    title = cand.get("title", "Trecho")
+                    on_log(f"   * Trecho '{title}' expandido para formato Mini-Filme: {st_str} -> {et_str} ({dur_str})")
+
+            elif dur_sec > 300.0:
+                new_end = start_sec + 300.0
+                if max_dur > 0 and new_end > max_dur:
+                    new_end = max_dur
+                new_dur = new_end - start_sec
+                st_str = _seconds_to_time_str(start_sec)
+                et_str = _seconds_to_time_str(new_end)
+                dur_str = f"{int(new_dur // 60)}m {int(new_dur % 60):02d}s"
+
+                cand["end_time"] = et_str
+                cand["duration"] = dur_str
+                cand["estimated_range"] = f"{st_str} -> {et_str}"
+
+        elif cut_mode == "continuous":
+            if dur_sec > 90.0:
+                new_end = start_sec + 90.0
+                if max_dur > 0 and new_end > max_dur:
+                    new_end = max_dur
+                new_dur = new_end - start_sec
+                et_str = _seconds_to_time_str(new_end)
+                dur_str = f"{int(new_dur // 60)}m {int(new_dur % 60):02d}s" if new_dur >= 60 else f"{int(new_dur)}s"
+                cand["end_time"] = et_str
+        # Always ensure duration and estimated_range are clean and present
+        if not cand.get("duration"):
+            _, _, st_val, et_val, calc_dur = parse_candidate_times(cand, max_duration=max_dur)
+            cand["duration"] = calc_dur
+            if not cand.get("estimated_range"):
+                cand["estimated_range"] = f"{st_val} -> {et_val}"
+
+    return candidates
 
 
 def analyze_episode(
@@ -827,7 +1001,7 @@ def analyze_episode(
     cut_mode_label = {
         "context": "Contexto (Mini-História)",
         "continuous": "Contínuo (Sem cortes internos)",
-        "narrative_arc": "Arco Narrativo (3-20 min)"
+        "narrative_arc": "Mini-Filme / Arco Narrativo (2 a 5 min)"
     }.get(cut_mode, cut_mode)
 
     _prog(5, "Extraindo áudio do episódio...")
@@ -911,6 +1085,9 @@ def analyze_episode(
         else:
             candidates = []
 
+    # Enforce strict cut_mode bounds (e.g. 2-5m for narrative_arc)
+    candidates = enforce_cut_mode_durations(candidates, cut_mode=cut_mode, video_duration=video_duration, on_log=_log)
+
     _prog(100, "Concluído!")
     _log(f"✨ Concluído! {len(candidates)} candidatos identificados pelo Diretor.")
     return candidates, transcript, lore
@@ -979,6 +1156,9 @@ def analyze_episode_reroll(
                 candidates = []
         else:
             candidates = []
+
+    # Enforce strict cut_mode bounds (e.g. 2-5m for narrative_arc)
+    candidates = enforce_cut_mode_durations(candidates, cut_mode=cut_mode, video_duration=video_duration, on_log=_log)
 
     _prog(100, "Novos cortes gerados!")
     _log(f"✨ {len(candidates)} novos cortes alternativos identificados.")
@@ -1050,7 +1230,9 @@ def cut_clip_fast(
         "-map", "0:v:0",
         "-map", "0:a:0?",
         "-c", "copy",
-        "-sn",
+        "-sn", "-dn",
+        "-map_metadata", "-1",
+        "-map_chapters", "-1",
         "-avoid_negative_ts", "make_zero",
         output_path,
         "-y"
@@ -1079,9 +1261,12 @@ def cut_clip_fast(
         "-c:v", "libx264",
         "-preset", "ultrafast",
         "-crf", "18",
+        "-pix_fmt", "yuv420p",
         "-c:a", "aac",
         "-b:a", "192k",
-        "-sn",
+        "-sn", "-dn",
+        "-map_metadata", "-1",
+        "-map_chapters", "-1",
         "-avoid_negative_ts", "make_zero",
         output_path,
         "-y"

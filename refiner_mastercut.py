@@ -34,6 +34,18 @@ def _get_ffmpeg_bin(cmd: str = "ffmpeg") -> str:
     return cmd
 
 
+def _get_silent_subprocess_kwargs() -> dict:
+    """Returns kwargs for subprocess to prevent console window flashing on Windows."""
+    kwargs = {}
+    if os.name == "nt" or sys.platform.startswith("win"):
+        kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+        si = subprocess.STARTUPINFO()
+        si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        si.wShowWindow = 0  # SW_HIDE
+        kwargs["startupinfo"] = si
+    return kwargs
+
+
 def _run_ffmpeg_with_nvenc_fallback(cmd: list, timeout: int = 600, on_log=None) -> subprocess.CompletedProcess:
     """
     Run FFmpeg command with h264_nvenc hardware acceleration first.
@@ -44,8 +56,9 @@ def _run_ffmpeg_with_nvenc_fallback(cmd: list, timeout: int = 600, on_log=None) 
         on_log(f"[FFmpeg] Executando: {cmd_str[:120]}...")
 
     result = None
+    silent_kw = _get_silent_subprocess_kwargs()
     try:
-        result = subprocess.run(cmd, capture_output=True, encoding="utf-8", errors="replace", timeout=timeout)
+        result = subprocess.run(cmd, capture_output=True, encoding="utf-8", errors="replace", timeout=timeout, **silent_kw)
     except Exception as e:
         if on_log:
             on_log(f"[FFmpeg] Exceção na tentativa NVENC: {e}")
@@ -78,7 +91,7 @@ def _run_ffmpeg_with_nvenc_fallback(cmd: list, timeout: int = 600, on_log=None) 
                 out_target = fallback_cmd.pop()
                 fallback_cmd.extend(["-pix_fmt", "yuv420p", out_target])
 
-            result = subprocess.run(fallback_cmd, capture_output=True, encoding="utf-8", errors="replace", timeout=timeout)
+            result = subprocess.run(fallback_cmd, capture_output=True, encoding="utf-8", errors="replace", timeout=timeout, **silent_kw)
             if result.returncode == 0 and on_log:
                 on_log("✓ Sucesso com fallback libx264 (CPU)!")
     return result
@@ -94,7 +107,7 @@ def get_video_duration(video_path: str) -> float:
             "-of", "csv=p=0",
             str(video_path)
         ]
-        res = subprocess.run(cmd, capture_output=True, encoding="utf-8", errors="replace", timeout=15)
+        res = subprocess.run(cmd, capture_output=True, encoding="utf-8", errors="replace", timeout=15, **_get_silent_subprocess_kwargs())
         if res.returncode == 0 and res.stdout.strip():
             return float(res.stdout.strip())
     except Exception:
@@ -113,7 +126,7 @@ def check_video_has_audio(video_path: str) -> bool:
             "-of", "csv=p=0",
             str(video_path)
         ]
-        res = subprocess.run(cmd, capture_output=True, encoding="utf-8", errors="replace", timeout=10)
+        res = subprocess.run(cmd, capture_output=True, encoding="utf-8", errors="replace", timeout=10, **_get_silent_subprocess_kwargs())
         return "audio" in res.stdout.lower()
     except Exception:
         return False
@@ -204,7 +217,7 @@ def detect_speech_segments(video_path: str, on_progress=None, on_log=None):
             "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le",
             temp_wav_path
         ]
-        subprocess.run(cmd_audio, capture_output=True, timeout=120)
+        subprocess.run(cmd_audio, capture_output=True, timeout=120, **_get_silent_subprocess_kwargs())
 
         # 1. Try Groq Whisper API (whisper-large-v3-turbo, ultra fast & accurate)
         groq_raw = os.getenv("GROQ_API_KEY", "").strip()
@@ -341,7 +354,7 @@ def detect_visual_action_blocks(video_path: str, on_log=None):
             "-vf", "fps=3,select='gt(scene,0.20)',showinfo",
             "-f", "null", "-"
         ]
-        res = subprocess.run(cmd, capture_output=True, encoding="utf-8", errors="replace", timeout=20)
+        res = subprocess.run(cmd, capture_output=True, encoding="utf-8", errors="replace", timeout=20, **_get_silent_subprocess_kwargs())
         scene_times = []
         for line in res.stderr.splitlines():
             if 'pts_time:' in line:
@@ -473,7 +486,13 @@ def calculate_mastercut_bounds(
     v_dur = max(5.0, float(video_duration))
 
     # User explicit duration presets
-    if target_duration_mode == "max_retention":
+    if target_duration_mode == "mini_movie":
+        # Tratar Mini-Filme: reduz para aproximadamente a metade (~50%), com teto estrito de 150s (2:30 min)
+        target_half = v_dur * 0.50
+        max_d = min(150.0, max(45.0, target_half + 8.0))
+        min_d = max(30.0, min(max_d - 12.0, target_half - 12.0))
+        return round(min_d, 1), round(max_d, 1)
+    elif target_duration_mode == "max_retention":
         min_d = max(18.0, v_dur * 0.78)
         max_d = min(v_dur, max(min_d + 3.0, v_dur * 0.95))
         return round(min_d, 1), round(max_d, 1)
@@ -588,6 +607,13 @@ Use esse conhecimento de anime/série para identificar com precisão os personag
         "aggressive": "AGRESSIVO / O SUCO PURO. Condensa para extrair apenas o clímax absoluto e momentos mais eletrizantes.",
     }
     mode_guide = mode_descriptions.get(refine_mode, mode_descriptions["balanced"])
+    if target_duration_mode == "mini_movie":
+        mode_guide = (
+            f"RESUMO MINI-FILME / RECAP NARRATIVO (~50% do clipe, máx 2:30 min). "
+            f"Condense este arco de {video_duration:.1f}s num Mini-Filme cinematográfico de {min_dur:.1f}s a {max_dur:.1f}s, "
+            "estruturado em 4 atos: 1. Contexto/Início -> 2. Escalada de conflito e réplicas -> 3. Clímax de pico -> 4. Desfecho e reações. "
+            "Corte apenas tempos mortos e gorduras, preservando o sentido e o suco da história!"
+        )
 
     loop_instruction = ""
     if enable_loop:
@@ -595,6 +621,19 @@ Use esse conhecimento de anime/série para identificar com precisão os personag
 5. **ESTRUTURA DE LOOP CONTEXTUAL (REPLAY PERFEITO PARA SHORTS/REELS/TIKTOK)**:
    - Este vídeo será montado com Loop Contextual Infinito.
    - O desfecho/clímax final (últimos 3s a 5s) deve ter uma fala marcante ou clímax coeso que possa servir de abertura/gancho e conectar o final do clipe de volta com o início!
+"""
+
+    mini_movie_instruction = ""
+    if target_duration_mode == "mini_movie":
+        mini_movie_instruction = f"""
+🎬 **DIRETRIZ ESPECIAL: TRATAR MINI-FILME (RESUMO CINEMATOGRÁFICO NARRATIVO)**:
+- Você está condensando um arco completo de {video_duration:.1f}s em um MINI-FILME de {min_dur:.1f}s a {max_dur:.1f}s (cerca da metade do tempo original, sem passar de 2m30s).
+- O resultado deve parecer um resumo profissional de cinema ("Recap/Short Film") com fluxo perfeito:
+  1. **ATO 1 - ABERTURA & CONTEXTO (~15% a 20%)**: A frase ou momento que inicia o conflito (o espectador deve entender quem está em cena e o que está em jogo).
+  2. **ATO 2 - ESCALADA & CONFRONTO (~25% a 30%)**: Os melhores momentos de tensão, troca de falas e início da ação.
+  3. **ATO 3 - CLÍMAX EXPLOSIVO (~30% a 35%)**: O ápice do confronto, revelação chocante ou momento de maior impacto.
+  4. **ATO 4 - DESFECHO & REAÇÃO (~15% a 20%)**: As consequências do clímax, reação de impacto e fechamento da cena.
+- **CORTE AS GORDURAS**: Silêncios prolongados, caminhadas vazias e encaradas estáticas devem ser cortados. Mantenha os momentos de fala, ação e reações com ritmo acelerado e imersivo.
 """
 
     prompt = f"""Você é o EDITOR CHEFE SUPREMO DE CINEMA E CONTEÚDO VIRAL.
@@ -624,6 +663,7 @@ DADOS DO VÍDEO BRUTO:
    - NÃO corte diálogos no meio, não tire réplicas entre personagens e não descarte reações épicas.
    - Mantenha a narrativa coesa, com início/gancho, conflito/desenvolvimento e clímax.
 4. **DIVISÃO DINÂMICA**: Divida a timeline em múltiplos cortes cirúrgicos (3 a 7 segmentos) que juntos preencham a duração entre {min_dur:.1f}s e {max_dur:.1f}s.
+{mini_movie_instruction}
 {loop_instruction}
 Retorne EXCLUSIVAMENTE um objeto JSON no seguinte formato (sem comentários, apenas JSON puro):
 {{
@@ -1191,7 +1231,7 @@ def render_mastercut_video(
         probe_res = subprocess.run(
             [ffprobe_bin, "-v", "error", "-select_streams", "v:0",
              "-show_entries", "stream=width,height", "-of", "csv=p=0:s=x", str(source_path)],
-            capture_output=True, encoding="utf-8", errors="replace", timeout=10
+            capture_output=True, encoding="utf-8", errors="replace", timeout=10, **_get_silent_subprocess_kwargs()
         )
         if probe_res.returncode == 0:
             parts = probe_res.stdout.strip().split("x")
@@ -1245,7 +1285,11 @@ def render_mastercut_video(
             ffmpeg_bin, "-y", "-i", str(source_path),
             "-filter_complex", filter_str,
             "-map", "[outv]", "-map", "[outa]",
+            "-sn", "-dn",
+            "-map_metadata", "-1",
+            "-map_chapters", "-1",
             "-c:v", "h264_nvenc", "-preset", "p4", "-cq", "18",
+            "-pix_fmt", "yuv420p",
             "-c:a", "aac", "-b:a", "192k",
             "-movflags", "+faststart",
             str(output_path)
@@ -1259,7 +1303,11 @@ def render_mastercut_video(
             ffmpeg_bin, "-y", "-i", str(source_path),
             "-filter_complex", filter_str,
             "-map", "[outv]",
+            "-sn", "-dn",
+            "-map_metadata", "-1",
+            "-map_chapters", "-1",
             "-c:v", "h264_nvenc", "-preset", "p4", "-cq", "18",
+            "-pix_fmt", "yuv420p",
             "-an", "-movflags", "+faststart",
             str(output_path)
         ]

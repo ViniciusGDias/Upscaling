@@ -12,7 +12,7 @@ import requests
 import threading
 from typing import Dict, Any, Optional, Callable
 
-CURRENT_VERSION = "1.0.1"
+CURRENT_VERSION = "1.0.2"
 APP_NAME = "Urahara"
 GITHUB_REPO = "ViniciusGDias/Upscaling"
 GITHUB_RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"

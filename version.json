@@ -3,17 +3,17 @@
   "name": "Urahara",
   "release_date": "2026-09-14",
   "changelog": [
-    "Nova opção de Loop Contextual vs Sem Loop no Refinador (Mastercut com replay infinito >100% retenção).",
-    "Correção definitiva de dessincronização labial no modo Anti-Copyright do Upscaler (tom com duração 100% idêntica).",
-    "Sincronização estrita frame-a-frame de áudio e vídeo com tempo zero no Refinador.",
+    "Novo modo Mini-Filme no Diretor IA: cortes contextuais de até 5 minutos com retenção máxima.",
+    "Novo modo Tratar Mini-Filme no Refinador: resumo inteligente e contextual em 50% (máx 2:30 min).",
+    "Correção de faixas e metadados fantasmas no FFmpeg: elimina divergência de duração exibida nos players.",
+    "Nova interface moderna Dark Pro com abas estilo cápsula e realce verde Kisuke Urahara.",
+    "Processamento silencioso em segundo plano: nenhuma tela preta ou terminal piscando durante a edição.",
+    "Terminal de progresso e log de eventos restaurado e visível em tempo real no Refinador.",
+    "Opção de Loop Contextual vs Sem Loop no Refinador (Mastercut com replay contínuo).",
+    "Correção definitiva de dessincronização labial e áudio no modo Anti-Copyright.",
     "Instalador ultra-leve (~213 MB) com inicialização instantânea.",
     "Motores opcionais sob demanda (Real-CUGAN 4K e FFmpeg instaláveis em 1 clique).",
-    "Suporte nativo a placas NVIDIA GTX 1650 (CTranslate2 e Vulkan sem estouro de VRAM).",
-    "Rotacionador resiliente de IA com tolerância a picos temporários (503) e chave Groq.",
-    "Identificação inteligente de personagens presentes no corte no Analisador de YouTube Shorts.",
-    "Suporte total a emojis e caracteres especiais em nomes de arquivos no Upscaler e Refinador.",
-    "Auto-correção de offset de episódio e fallback resiliente garantido no Mastercut.",
-    "Tema visual verde Kisuke Urahara aplicado em todas as ferramentas."
+    "Suporte nativo a placas NVIDIA GTX 1650 (CTranslate2 e Vulkan sem estouro de VRAM)."
   ],
   "download_url": "https://github.com/ViniciusGDias/Upscaling/releases/latest"
 }
