@@ -154,6 +154,38 @@ ANTI_COPYRIGHT_OPTIONS = {
     }
 }
 
+# Opções de Melhoria e Masterização de Áudio (Elimina som abafado, padrão estúdio/podcast)
+AUDIO_ENHANCE_OPTIONS = {
+    "Nenhum (Áudio Original)": None,
+    "Voz de Estúdio (Clareza & Sem Abafamento)": (
+        "highpass=f=80,"
+        "equalizer=f=250:t=q:w=1.2:g=-1.5,"
+        "equalizer=f=3200:t=q:w=1.5:g=3.5,"
+        "equalizer=f=11000:t=q:w=1.2:g=3.0,"
+        "afftdn=nr=8:nf=-35,"
+        "dynaudnorm=f=100:p=0.92:m=6.0"
+    ),
+    "Voz Cinema & Presença (Graves Quentes + Nitidez)": (
+        "highpass=f=70,"
+        "equalizer=f=120:t=q:w=1.5:g=2.5,"
+        "equalizer=f=3500:t=q:w=1.4:g=3.0,"
+        "equalizer=f=10000:t=q:w=1.2:g=2.0,"
+        "dynaudnorm=f=120:p=0.95:m=7.0"
+    ),
+    "Nivelamento Dinâmico / Podcast (Equalizado)": (
+        "highpass=f=80,"
+        "dynaudnorm=f=150:p=0.90:m=10.0"
+    ),
+    "Remaster Total (Limpeza + Brilho + Anti-Ruído)": (
+        "highpass=f=85,"
+        "equalizer=f=300:t=q:w=1.0:g=-2.0,"
+        "equalizer=f=3200:t=q:w=1.5:g=4.0,"
+        "equalizer=f=12000:t=q:w=1.0:g=3.5,"
+        "afftdn=nr=10:nf=-32,"
+        "dynaudnorm=f=90:p=0.94:m=8.0"
+    ),
+}
+
 
 
 def compute_target_dimensions(
@@ -411,6 +443,7 @@ class VideoUpscaler:
         color_filter: str | None = None,
         denoise_filter: str | None = None,
         anti_copyright: str = "Nenhum",
+        audio_enhance: str = "Nenhum (Áudio Original)",
         on_progress: Optional[Callable[[float, str], None]] = None,
         on_complete: Optional[Callable[[bool, str], None]] = None,
         on_log: Optional[Callable[[str], None]] = None,
@@ -577,12 +610,20 @@ class VideoUpscaler:
                         "-preset", cpu_preset
                     ]
 
-                # Apply Anti-Copyright audio filter if selected
+                # Apply Audio Filters (Anti-Copyright and/or Studio Enhancement)
+                audio_filters = []
                 if ac_options and ac_options.get("audio"):
+                    audio_filters.append(ac_options["audio"])
+                if audio_enhance and AUDIO_ENHANCE_OPTIONS.get(audio_enhance):
+                    audio_filters.append(AUDIO_ENHANCE_OPTIONS[audio_enhance])
+                    _log(f"Melhoria de Áudio: {audio_enhance}")
+
+                if audio_filters:
+                    af_string = ",".join(audio_filters)
                     cmd.extend([
                         "-c:a", "aac",
                         "-b:a", "320k",
-                        "-af", ac_options["audio"]
+                        "-af", af_string
                     ])
                 else:
                     cmd.extend([
@@ -775,6 +816,7 @@ class VideoUpscaler:
         color_filter: str | None = None,
         denoise_filter: str | None = None,
         anti_copyright: str = "Nenhum",
+        audio_enhance: str = "Nenhum (Áudio Original)",
     ):
         """Preview the video with the selected filters applied using ffplay."""
         if not self.ffplay_path:
@@ -848,9 +890,15 @@ class VideoUpscaler:
         if vf_string:
             cmd.extend(["-vf", vf_string])
 
-        # Anti-Copyright Audio Filter for preview
+        # Audio Filter for preview (Anti-Copyright + Audio Enhancement)
+        audio_filters = []
         if ac_options and ac_options.get("audio"):
-            cmd.extend(["-af", ac_options["audio"]])
+            audio_filters.append(ac_options["audio"])
+        if audio_enhance and AUDIO_ENHANCE_OPTIONS.get(audio_enhance):
+            audio_filters.append(AUDIO_ENHANCE_OPTIONS[audio_enhance])
+
+        if audio_filters:
+            cmd.extend(["-af", ",".join(audio_filters)])
 
         try:
             subprocess.Popen(

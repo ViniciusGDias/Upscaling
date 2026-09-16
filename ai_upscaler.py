@@ -475,6 +475,7 @@ class AIVideoUpscaler:
         denoise_filter: Optional[str] = None,
         anti_copyright_filter: Optional[str] = None,
         anti_copyright_audio: Optional[str] = None,
+        audio_enhance_filter: Optional[str] = None,
         on_progress: Optional[Callable[[float, str], None]] = None,
         on_complete: Optional[Callable[[bool, str], None]] = None,
         on_log: Optional[Callable[[str], None]] = None,
@@ -816,8 +817,14 @@ class AIVideoUpscaler:
                     "-c:v", "copy",
                 ]
 
+                audio_filters = []
                 if anti_copyright_audio:
-                    audio_cmd += ["-c:a", "aac", "-b:a", "320k", "-af", anti_copyright_audio]
+                    audio_filters.append(anti_copyright_audio)
+                if audio_enhance_filter:
+                    audio_filters.append(audio_enhance_filter)
+
+                if audio_filters:
+                    audio_cmd += ["-c:a", "aac", "-b:a", "320k", "-af", ",".join(audio_filters)]
                 else:
                     audio_cmd += ["-c:a", "copy"]
 

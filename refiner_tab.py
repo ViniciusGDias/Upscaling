@@ -352,7 +352,7 @@ class RefinerMastercutTab(ctk.CTkFrame):
         self.vocal_isolation_var = ctk.BooleanVar(value=True)
         self.vocal_cb = ctk.CTkCheckBox(
             toggles_row,
-            text="Isolamento Vocal Inteligente (Filtro passa-alta + redução de ruído)",
+            text="Clareza Vocal de Estúdio (Sem abafamento + Redução de ruído)",
             variable=self.vocal_isolation_var,
             font=ctk.CTkFont(family="Segoe UI", size=11),
             fg_color=COLORS["accent_primary"], hover_color=COLORS["accent_secondary"],

@@ -48,6 +48,7 @@ from upscaler import (
     format_time,
     ENCODERS,
     ANTI_COPYRIGHT_OPTIONS,
+    AUDIO_ENHANCE_OPTIONS,
     # AI Upscaling
     AI_MODELS,
     AIVideoUpscaler,
@@ -662,16 +663,28 @@ class VideoUpscalerApp(ctk.CTk):
         enhance_grid.columnconfigure(1, weight=1)
         enhance_grid.columnconfigure(2, weight=1)
 
-        # ── Row 3: YouTube/Anti-Copyright ──
-        ac_label = ctk.CTkLabel(card, text="🛡️ Segurança (Burlar Direitos Autorais)", font=ctk.CTkFont(size=13, weight="bold"), text_color=COLORS["warning"], anchor="w")
+        # ── Row 3: YouTube/Anti-Copyright & Audio Enhancement ──
+        ac_label = ctk.CTkLabel(card, text="🛡️ Segurança Anti-Copyright & Áudio de Estúdio", font=ctk.CTkFont(size=13, weight="bold"), text_color=COLORS["warning"], anchor="w")
         ac_label.pack(fill="x", padx=16, pady=(10, 4))
         
-        ac_frame = ctk.CTkFrame(card, fg_color="transparent")
-        ac_frame.pack(fill="x", padx=16, pady=(0, 14))
+        ac_grid = ctk.CTkFrame(card, fg_color="transparent")
+        ac_grid.pack(fill="x", padx=16, pady=(0, 14))
+        ac_grid.columnconfigure(0, weight=1)
+        ac_grid.columnconfigure(1, weight=1)
         
-        ctk.CTkLabel(ac_frame, text="Filtro Invisível", font=ctk.CTkFont(size=12), text_color=COLORS["text_secondary"]).pack(anchor="w", pady=(0, 4))
+        # Col 0: Anti-Copyright
+        ac_col = ctk.CTkFrame(ac_grid, fg_color="transparent")
+        ac_col.grid(row=0, column=0, sticky="ew", padx=(0, 6))
+        ctk.CTkLabel(ac_col, text="Proteção Anti-Copyright (Vídeo & Áudio)", font=ctk.CTkFont(size=12), text_color=COLORS["text_secondary"]).pack(anchor="w", pady=(0, 4))
         self.anti_copyright_var = ctk.StringVar(value=list(ANTI_COPYRIGHT_OPTIONS.keys())[0])
-        ctk.CTkOptionMenu(ac_frame, values=list(ANTI_COPYRIGHT_OPTIONS.keys()), variable=self.anti_copyright_var, font=ctk.CTkFont(size=12), height=36, corner_radius=8).pack(fill="x")
+        ctk.CTkOptionMenu(ac_col, values=list(ANTI_COPYRIGHT_OPTIONS.keys()), variable=self.anti_copyright_var, font=ctk.CTkFont(size=12), height=36, corner_radius=8).pack(fill="x")
+
+        # Col 1: Audio Enhancement
+        ae_col = ctk.CTkFrame(ac_grid, fg_color="transparent")
+        ae_col.grid(row=0, column=1, sticky="ew", padx=(6, 0))
+        ctk.CTkLabel(ae_col, text="🎙️ Melhoria de Áudio (Qualidade Estúdio)", font=ctk.CTkFont(size=12), text_color=COLORS["text_secondary"]).pack(anchor="w", pady=(0, 4))
+        self.audio_enhance_var = ctk.StringVar(value=list(AUDIO_ENHANCE_OPTIONS.keys())[0])
+        ctk.CTkOptionMenu(ae_col, values=list(AUDIO_ENHANCE_OPTIONS.keys()), variable=self.audio_enhance_var, font=ctk.CTkFont(size=12), height=36, corner_radius=8).pack(fill="x")
 
         # ── Preview: computed target dimensions ──
         self.dims_preview_label = ctk.CTkLabel(
@@ -1229,6 +1242,7 @@ class VideoUpscalerApp(ctk.CTk):
         denoise_key = self.denoise_var.get()
         denoise_filter = DENOISE_OPTIONS[denoise_key]
         anti_copyright = self.anti_copyright_var.get()
+        audio_enhance = self.audio_enhance_var.get()
 
         orig_w = self.current_video.width if self.current_video else 0
         orig_h = self.current_video.height if self.current_video else 0
@@ -1249,6 +1263,7 @@ class VideoUpscalerApp(ctk.CTk):
             color_filter=color_filter,
             denoise_filter=denoise_filter,
             anti_copyright=anti_copyright,
+            audio_enhance=audio_enhance,
         )
 
         if success:
@@ -1303,6 +1318,7 @@ class VideoUpscalerApp(ctk.CTk):
         denoise_key = self.denoise_var.get()
         denoise_filter = DENOISE_OPTIONS[denoise_key]
         anti_copyright = self.anti_copyright_var.get()
+        audio_enhance = self.audio_enhance_var.get()
 
         # Compute target dimensions
         orig_w = self.current_video.width if self.current_video else 0
@@ -1345,6 +1361,7 @@ class VideoUpscalerApp(ctk.CTk):
         self._log(f"Estilo Cor:  {color_key}")
         self._log(f"Limpeza:     {denoise_key}")
         self._log(f"Anti-Copyr.: {anti_copyright}")
+        self._log(f"Melh. Áudio: {audio_enhance}")
         if not self._ai_mode:
             self._log(f"Algoritmo:   {algorithm}")
             self._log(f"Encoder:     {encoder_key}")
@@ -1407,6 +1424,9 @@ class VideoUpscalerApp(ctk.CTk):
                 ac_video_filter = ac_options.get("video")
                 ac_audio_filter = ac_options.get("audio")
 
+            # Resolve audio enhancement filter
+            ae_filter = AUDIO_ENHANCE_OPTIONS.get(audio_enhance)
+
             self.ai_upscaler.upscale(
                 input_path=input_path,
                 output_path=output_path,
@@ -1422,6 +1442,7 @@ class VideoUpscalerApp(ctk.CTk):
                 denoise_filter=denoise_filter,
                 anti_copyright_filter=ac_video_filter,
                 anti_copyright_audio=ac_audio_filter,
+                audio_enhance_filter=ae_filter,
                 on_progress=self._on_progress,
                 on_complete=self._on_complete,
                 on_log=self._on_log,
@@ -1445,6 +1466,7 @@ class VideoUpscalerApp(ctk.CTk):
                 color_filter=color_filter,
                 denoise_filter=denoise_filter,
                 anti_copyright=anti_copyright,
+                audio_enhance=audio_enhance,
                 on_progress=self._on_progress,
                 on_complete=self._on_complete,
                 on_log=self._on_log,

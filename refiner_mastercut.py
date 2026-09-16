@@ -1286,7 +1286,15 @@ def render_mastercut_video(
         audio_post_filters += f",atempo={speed_factor}"
 
     if vocal_isolation:
-        audio_post_filters += ",highpass=f=80,lowpass=f=7500,afftdn=nr=14:nf=-25"
+        # Clareza Vocal de Estúdio: elimina o abafamento, restaura o brilho da voz e remove ruído de fundo
+        audio_post_filters += (
+            ",highpass=f=80"
+            ",equalizer=f=250:t=q:w=1.2:g=-1.5"
+            ",equalizer=f=3200:t=q:w=1.5:g=3.5"
+            ",equalizer=f=11000:t=q:w=1.2:g=3.0"
+            ",afftdn=nr=8:nf=-35"
+            ",dynaudnorm=f=100:p=0.92:m=6.0"
+        )
 
     # Sincronização labial estrita: elimina qualquer delay ou buffer de latência de atempo/afftdn
     audio_post_filters += ",aresample=async=1000:first_pts=0"
