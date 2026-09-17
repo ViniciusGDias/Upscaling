@@ -1293,7 +1293,7 @@ def render_mastercut_video(
             ",equalizer=f=3200:t=q:w=1.5:g=3.5"
             ",equalizer=f=11000:t=q:w=1.2:g=3.0"
             ",afftdn=nr=8:nf=-35"
-            ",dynaudnorm=f=100:p=0.92:m=6.0"
+            ",dynaudnorm=f=100:p=0.92:m=6.0:b=1"
         )
 
     # Sincronização labial estrita: elimina qualquer delay ou buffer de latência de atempo/afftdn

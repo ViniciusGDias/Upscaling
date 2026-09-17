@@ -163,18 +163,28 @@ AUDIO_ENHANCE_OPTIONS = {
         "equalizer=f=3200:t=q:w=1.5:g=3.5,"
         "equalizer=f=11000:t=q:w=1.2:g=3.0,"
         "afftdn=nr=8:nf=-35,"
-        "dynaudnorm=f=100:p=0.92:m=6.0"
+        "dynaudnorm=f=100:p=0.92:m=6.0:b=1"
+    ),
+    "Isolar Voz & Atenuar Música (Clareza + Sem BGM)": (
+        "stereotools=mlev=1.4:slev=0.08,"
+        "highpass=f=95,"
+        "lowpass=f=11500,"
+        "equalizer=f=350:t=q:w=2.0:g=-4.5,"
+        "equalizer=f=3000:t=q:w=1.4:g=5.0,"
+        "equalizer=f=10000:t=q:w=1.2:g=3.0,"
+        "afftdn=nr=10:nf=-35,"
+        "dynaudnorm=f=120:g=15:p=0.95:m=8.0:b=1"
     ),
     "Voz Cinema & Presença (Graves Quentes + Nitidez)": (
         "highpass=f=70,"
         "equalizer=f=120:t=q:w=1.5:g=2.5,"
         "equalizer=f=3500:t=q:w=1.4:g=3.0,"
         "equalizer=f=10000:t=q:w=1.2:g=2.0,"
-        "dynaudnorm=f=120:p=0.95:m=7.0"
+        "dynaudnorm=f=120:p=0.95:m=7.0:b=1"
     ),
     "Nivelamento Dinâmico / Podcast (Equalizado)": (
         "highpass=f=80,"
-        "dynaudnorm=f=150:p=0.90:m=10.0"
+        "dynaudnorm=f=150:p=0.90:m=10.0:b=1"
     ),
     "Remaster Total (Limpeza + Brilho + Anti-Ruído)": (
         "highpass=f=85,"
@@ -182,7 +192,7 @@ AUDIO_ENHANCE_OPTIONS = {
         "equalizer=f=3200:t=q:w=1.5:g=4.0,"
         "equalizer=f=12000:t=q:w=1.0:g=3.5,"
         "afftdn=nr=10:nf=-32,"
-        "dynaudnorm=f=90:p=0.94:m=8.0"
+        "dynaudnorm=f=90:p=0.94:m=8.0:b=1"
     ),
 }
 
