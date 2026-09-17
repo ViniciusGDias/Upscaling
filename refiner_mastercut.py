@@ -1225,6 +1225,7 @@ def render_mastercut_video(
     segments: list,
     output_path: str,
     vocal_isolation: bool = True,
+    demucs_isolation: bool = False,
     anti_copyright: bool = False,
     enable_loop: bool = False,
     on_progress=None,
@@ -1350,6 +1351,40 @@ def render_mastercut_video(
         err_msg = res.stderr[-400:] if res and res.stderr else "Erro desconhecido"
         raise RuntimeError(f"FFmpeg falhou ao renderizar Mastercut: {err_msg}")
 
+    # Demucs AI full background music / piano removal
+    if demucs_isolation and out_file.exists() and out_file.stat().st_size > 0:
+        if on_log:
+            on_log("🤖 Isolando voz com IA Demucs (Meta AI)... Deletando piano, trilha e instrumental do corte...")
+        if on_progress:
+            on_progress(0.90, "Isolando voz com IA Demucs...")
+        import tempfile
+        temp_vocals = os.path.join(tempfile.gettempdir(), f"mastercut_demucs_{os.getpid()}_{int(time.time())}.wav")
+        from upscaler import run_demucs_vocal_isolation
+        ok_d = run_demucs_vocal_isolation(str(output_path), temp_vocals, on_log=on_log)
+        if ok_d and os.path.exists(temp_vocals):
+            tmp_fixed = str(output_path) + ".demucs_clean.mp4"
+            cmd_merge = [
+                ffmpeg_bin, "-y",
+                "-i", str(output_path),
+                "-i", temp_vocals,
+                "-map", "0:v:0",
+                "-map", "1:a:0",
+                "-c:v", "copy",
+                "-c:a", "aac", "-b:a", "320k",
+                "-af", "highpass=f=80,equalizer=f=250:t=q:w=1.2:g=-1.5,equalizer=f=3200:t=q:w=1.5:g=3.5,equalizer=f=11000:t=q:w=1.2:g=3.0,dynaudnorm=f=100:p=0.92:m=6.0:b=1",
+                "-movflags", "+faststart",
+                tmp_fixed
+            ]
+            res_m = subprocess.run(cmd_merge, capture_output=True)
+            if res_m.returncode == 0 and os.path.exists(tmp_fixed):
+                shutil.move(tmp_fixed, str(output_path))
+                if on_log:
+                    on_log("✓ Instrumental e piano 100% deletados! Apenas a voz cristalina de estúdio foi mantida.")
+            try:
+                os.remove(temp_vocals)
+            except Exception:
+                pass
+
     final_dur = get_video_duration(str(out_file))
     final_size_mb = out_file.stat().st_size / (1024 * 1024)
     time_saved_pct = round((1 - (final_dur / video_duration)) * 100, 1) if video_duration > 0 else 0
@@ -1394,6 +1429,7 @@ class MastercutPipeline:
         output_path: str,
         video_context: str = "",
         vocal_isolation: bool = True,
+        demucs_isolation: bool = False,
         anti_copyright: bool = False,
         refine_mode: str = "balanced",
         target_duration_mode: str = "auto",
@@ -1470,6 +1506,7 @@ class MastercutPipeline:
                 segments=segments,
                 output_path=output_path,
                 vocal_isolation=vocal_isolation,
+                demucs_isolation=demucs_isolation,
                 anti_copyright=anti_copyright,
                 enable_loop=enable_loop,
                 on_progress=on_progress,

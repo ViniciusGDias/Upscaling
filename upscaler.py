@@ -9,6 +9,11 @@ import os
 import re
 import json
 import threading
+import shutil
+import tempfile
+import time
+import sys
+from pathlib import Path
 from dataclasses import dataclass
 from typing import Callable, Optional
 
@@ -157,6 +162,13 @@ ANTI_COPYRIGHT_OPTIONS = {
 # Opções de Melhoria e Masterização de Áudio (Elimina som abafado, padrão estúdio/podcast)
 AUDIO_ENHANCE_OPTIONS = {
     "Nenhum (Áudio Original)": None,
+    "🤖 IA Demucs: Isolar Só Voz (Remove 100% Piano/Música)": (
+        "highpass=f=80,"
+        "equalizer=f=250:t=q:w=1.2:g=-1.5,"
+        "equalizer=f=3200:t=q:w=1.5:g=3.5,"
+        "equalizer=f=11000:t=q:w=1.2:g=3.0,"
+        "dynaudnorm=f=100:p=0.92:m=6.0:b=1"
+    ),
     "Voz de Estúdio (Clareza & Sem Abafamento)": (
         "highpass=f=80,"
         "equalizer=f=250:t=q:w=1.2:g=-1.5,"
@@ -195,6 +207,72 @@ AUDIO_ENHANCE_OPTIONS = {
         "dynaudnorm=f=90:p=0.94:m=8.0:b=1"
     ),
 }
+
+
+def run_demucs_vocal_isolation(
+    input_path: str,
+    output_wav: str,
+    on_log: Optional[Callable[[str], None]] = None
+) -> bool:
+    """
+    Executes Demucs vocal isolation script using system Python (accelerated by CUDA).
+    Returns True if successfully generated output_wav.
+    """
+    candidates_py = [
+        shutil.which("python"),
+        shutil.which("py"),
+        os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs", "Python", "Python311", "python.exe"),
+        sys.executable if not getattr(sys, "frozen", False) else None,
+    ]
+    py_bin = None
+    for c in candidates_py:
+        if c and os.path.isfile(str(c)):
+            py_bin = str(c)
+            break
+    
+    if not py_bin:
+        if on_log:
+            on_log("⚠️ Python com Demucs não encontrado no sistema.")
+        return False
+
+    base_dirs = [
+        os.path.dirname(os.path.abspath(__file__)),
+        os.path.dirname(sys.executable),
+        os.path.join(os.path.dirname(sys.executable), "_internal"),
+    ]
+    script_path = None
+    for b in base_dirs:
+        candidate = os.path.join(b, "isolate_vocals_demucs.py")
+        if os.path.isfile(candidate):
+            script_path = candidate
+            break
+    
+    if not script_path:
+        if on_log:
+            on_log("⚠️ isolate_vocals_demucs.py não encontrado.")
+        return False
+
+    cmd = [py_bin, script_path, input_path, output_wav]
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        )
+        for line in proc.stdout:
+            line = line.strip()
+            if line and on_log and not line.startswith("[PROGRESS]"):
+                on_log(line)
+        proc.wait()
+        return proc.returncode == 0 and os.path.exists(output_wav)
+    except Exception as e:
+        if on_log:
+            on_log(f"✕ Erro ao executar Demucs: {e}")
+        return False
 
 
 
@@ -620,6 +698,21 @@ class VideoUpscaler:
                         "-preset", cpu_preset
                     ]
 
+                # Demucs AI vocal isolation if requested
+                demucs_vocals_path = None
+                if audio_enhance and "Demucs" in audio_enhance:
+                    _log("🤖 Isolando voz com IA Demucs (Meta AI)... Deletando piano, trilha e instrumental...")
+                    if on_progress:
+                        on_progress(0, "Isolando voz com IA Demucs...")
+                    temp_dir = tempfile.gettempdir()
+                    demucs_vocals_path = os.path.join(temp_dir, f"demucs_vocals_{os.getpid()}_{int(time.time())}.wav")
+                    success = run_demucs_vocal_isolation(input_path, demucs_vocals_path, on_log=_log)
+                    if not success or not os.path.exists(demucs_vocals_path):
+                        _log("⚠️ Demucs não completou a extração, utilizando áudio original.")
+                        demucs_vocals_path = None
+                    else:
+                        _log("✓ Voz isolada com sucesso por IA! Aplicando masterização de estúdio...")
+
                 # Apply Audio Filters (Anti-Copyright and/or Studio Enhancement)
                 audio_filters = []
                 if ac_options and ac_options.get("audio"):
@@ -628,7 +721,17 @@ class VideoUpscaler:
                     audio_filters.append(AUDIO_ENHANCE_OPTIONS[audio_enhance])
                     _log(f"Melhoria de Áudio: {audio_enhance}")
 
-                if audio_filters:
+                if demucs_vocals_path:
+                    # Insert demucs_vocals_path as second input
+                    i_idx = cmd.index(input_path)
+                    cmd.insert(i_idx + 1, "-i")
+                    cmd.insert(i_idx + 2, demucs_vocals_path)
+                    cmd.extend(["-map", "0:v:0", "-map", "1:a:0"])
+                    if audio_filters:
+                        cmd.extend(["-c:a", "aac", "-b:a", "320k", "-af", ",".join(audio_filters)])
+                    else:
+                        cmd.extend(["-c:a", "aac", "-b:a", "320k"])
+                elif audio_filters:
                     af_string = ",".join(audio_filters)
                     cmd.extend([
                         "-c:a", "aac",

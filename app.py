@@ -1443,6 +1443,7 @@ class VideoUpscalerApp(ctk.CTk):
                 anti_copyright_filter=ac_video_filter,
                 anti_copyright_audio=ac_audio_filter,
                 audio_enhance_filter=ae_filter,
+                audio_enhance_key=audio_enhance,
                 on_progress=self._on_progress,
                 on_complete=self._on_complete,
                 on_log=self._on_log,

@@ -352,18 +352,29 @@ class RefinerMastercutTab(ctk.CTkFrame):
         self.vocal_isolation_var = ctk.BooleanVar(value=True)
         self.vocal_cb = ctk.CTkCheckBox(
             toggles_row,
-            text="Clareza Vocal de Estúdio (Sem abafamento + Redução de ruído)",
+            text="Clareza Vocal de Estúdio",
             variable=self.vocal_isolation_var,
             font=ctk.CTkFont(family="Segoe UI", size=11),
             fg_color=COLORS["accent_primary"], hover_color=COLORS["accent_secondary"],
             border_color=COLORS["border"], corner_radius=4,
         )
-        self.vocal_cb.pack(side="left", padx=(0, 16))
+        self.vocal_cb.pack(side="left", padx=(0, 12))
+
+        self.demucs_isolation_var = ctk.BooleanVar(value=False)
+        self.demucs_cb = ctk.CTkCheckBox(
+            toggles_row,
+            text="🤖 Isolar Só Voz com IA (Remove 100% Música/Piano)",
+            variable=self.demucs_isolation_var,
+            font=ctk.CTkFont(family="Segoe UI", size=11),
+            fg_color=COLORS["accent_primary"], hover_color=COLORS["accent_secondary"],
+            border_color=COLORS["border"], corner_radius=4,
+        )
+        self.demucs_cb.pack(side="left", padx=(0, 12))
 
         self.anti_copyright_var = ctk.BooleanVar(value=False)
         self.anti_copy_cb = ctk.CTkCheckBox(
             toggles_row,
-            text="Micro-Aceleração Anti-Copyright (1.8% imperceptível)",
+            text="Micro-Aceleração Anti-Copyright (1.8%)",
             variable=self.anti_copyright_var,
             font=ctk.CTkFont(family="Segoe UI", size=11),
             fg_color=COLORS["accent_primary"], hover_color=COLORS["accent_secondary"],
@@ -762,10 +773,13 @@ class RefinerMastercutTab(ctk.CTkFrame):
         self._log(f"Loop:    {'🔁 Com Loop Contextual (Replay Infinito)' if enable_loop else '▶️ Sem Loop (Mastercut Direto)'}")
 
         vocal_iso = self.vocal_isolation_var.get()
+        demucs_iso = self.demucs_isolation_var.get()
         anti_copy = self.anti_copyright_var.get()
         video_ctx = self.context_entry.get().strip() if hasattr(self, 'context_entry') else ""
         if video_ctx:
             self._log(f"Contexto: {video_ctx}")
+        if demucs_iso:
+            self._log("🤖 Isolamento com IA Demucs: ATIVADO (Removerá 100% do instrumental)")
 
         def _worker():
             try:
@@ -774,6 +788,7 @@ class RefinerMastercutTab(ctk.CTkFrame):
                     output_path=self.output_path,
                     video_context=video_ctx,
                     vocal_isolation=vocal_iso,
+                    demucs_isolation=demucs_iso,
                     anti_copyright=anti_copy,
                     refine_mode=refine_mode,
                     target_duration_mode=target_dur,

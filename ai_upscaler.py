@@ -476,6 +476,7 @@ class AIVideoUpscaler:
         anti_copyright_filter: Optional[str] = None,
         anti_copyright_audio: Optional[str] = None,
         audio_enhance_filter: Optional[str] = None,
+        audio_enhance_key: Optional[str] = None,
         on_progress: Optional[Callable[[float, str], None]] = None,
         on_complete: Optional[Callable[[bool, str], None]] = None,
         on_log: Optional[Callable[[str], None]] = None,
@@ -806,14 +807,28 @@ class AIVideoUpscaler:
                     return
 
                 # ── Step 5: Merge audio ─────────────────────────────────────
-                _log("🔊 Mesclando áudio original...")
+                _log("🔊 Mesclando áudio...")
                 if on_progress:
                     on_progress(97, "Mesclando áudio...")
+
+                audio_source = input_path
+                demucs_vocals_path = None
+                if audio_enhance_key and "Demucs" in audio_enhance_key:
+                    _log("🤖 Isolando voz com IA Demucs (Meta AI)... Deletando piano, trilha e instrumental...")
+                    temp_dir = tempfile.gettempdir()
+                    demucs_vocals_path = os.path.join(temp_dir, f"demucs_ai_{os.getpid()}_{int(time.time())}.wav")
+                    from upscaler import run_demucs_vocal_isolation
+                    ok_demucs = run_demucs_vocal_isolation(input_path, demucs_vocals_path, on_log=_log)
+                    if ok_demucs and os.path.exists(demucs_vocals_path):
+                        audio_source = demucs_vocals_path
+                        _log("✓ Voz isolada com sucesso por IA! Mesclando no vídeo final...")
+                    else:
+                        _log("⚠️ Demucs não completou a extração, utilizando áudio original.")
 
                 audio_cmd = [
                     ffmpeg,
                     "-i", tmp_video,
-                    "-i", input_path,
+                    "-i", audio_source,
                     "-c:v", "copy",
                 ]
 
@@ -826,7 +841,10 @@ class AIVideoUpscaler:
                 if audio_filters:
                     audio_cmd += ["-c:a", "aac", "-b:a", "320k", "-af", ",".join(audio_filters)]
                 else:
-                    audio_cmd += ["-c:a", "copy"]
+                    if demucs_vocals_path:
+                        audio_cmd += ["-c:a", "aac", "-b:a", "320k"]
+                    else:
+                        audio_cmd += ["-c:a", "copy"]
 
                 audio_cmd += [
                     "-map", "0:v:0",
@@ -839,6 +857,11 @@ class AIVideoUpscaler:
                     audio_cmd, capture_output=True,
                     creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
                 )
+                if demucs_vocals_path and os.path.exists(demucs_vocals_path):
+                    try:
+                        os.remove(demucs_vocals_path)
+                    except Exception:
+                        pass
                 if result.returncode != 0:
                     # Fallback: use video without audio
                     _log("⚠ Erro ao mesclar áudio — salvando sem áudio...")
