@@ -84,10 +84,19 @@ def isolate_vocals(
                 "-y",
                 str(extracted_wav)
             ]
+            startupinfo = None
+            creationflags = 0
+            if os.name == "nt":
+                creationflags = subprocess.CREATE_NO_WINDOW
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                startupinfo.wShowWindow = subprocess.SW_HIDE
+
             res = subprocess.run(
                 cmd_extract,
                 capture_output=True,
-                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+                startupinfo=startupinfo,
+                creationflags=creationflags,
             )
             if res.returncode != 0 or not extracted_wav.exists():
                 _log(f"Erro ao extrair áudio com FFmpeg: {res.stderr.decode('utf-8', errors='ignore')[-300:]}")

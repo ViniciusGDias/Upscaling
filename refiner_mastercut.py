@@ -11,6 +11,7 @@ import time
 import re
 import tempfile
 import subprocess
+import shutil
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -1375,7 +1376,20 @@ def render_mastercut_video(
                 "-movflags", "+faststart",
                 tmp_fixed
             ]
-            res_m = subprocess.run(cmd_merge, capture_output=True)
+            startupinfo = None
+            creationflags = 0
+            if os.name == "nt":
+                creationflags = subprocess.CREATE_NO_WINDOW
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                startupinfo.wShowWindow = subprocess.SW_HIDE
+
+            res_m = subprocess.run(
+                cmd_merge,
+                capture_output=True,
+                startupinfo=startupinfo,
+                creationflags=creationflags
+            )
             if res_m.returncode == 0 and os.path.exists(tmp_fixed):
                 shutil.move(tmp_fixed, str(output_path))
                 if on_log:

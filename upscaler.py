@@ -219,9 +219,11 @@ def run_demucs_vocal_isolation(
     Returns True if successfully generated output_wav.
     """
     candidates_py = [
+        shutil.which("pythonw"),
+        os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs", "Python", "Python311", "pythonw.exe"),
         shutil.which("python"),
-        shutil.which("py"),
         os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs", "Python", "Python311", "python.exe"),
+        shutil.which("py"),
         sys.executable if not getattr(sys, "frozen", False) else None,
     ]
     py_bin = None
@@ -253,6 +255,14 @@ def run_demucs_vocal_isolation(
         return False
 
     cmd = [py_bin, script_path, input_path, output_wav]
+    startupinfo = None
+    creationflags = 0
+    if os.name == "nt":
+        creationflags = subprocess.CREATE_NO_WINDOW
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        startupinfo.wShowWindow = subprocess.SW_HIDE
+
     try:
         proc = subprocess.Popen(
             cmd,
@@ -261,7 +271,8 @@ def run_demucs_vocal_isolation(
             text=True,
             encoding="utf-8",
             errors="replace",
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+            startupinfo=startupinfo,
+            creationflags=creationflags,
         )
         for line in proc.stdout:
             line = line.strip()
