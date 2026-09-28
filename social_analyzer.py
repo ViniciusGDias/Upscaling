@@ -469,40 +469,54 @@ def extract_hook_thumbnail(
     video_path: str,
     output_path: Optional[str] = None,
     timestamp_sec: float = 1.5,
-    ffmpeg_bin: str = "ffmpeg"
+    ffmpeg_bin: str = "ffmpeg",
+    overlay_text: str = "",
+    crop_mode: str = "center",
+    pan_x: float = 0.5,
+    text_position: str = "top",
+    text_style: str = "yellow"
 ) -> Optional[str]:
     """
-    Extrai frame de alta qualidade (1080x1920) no ápice do gancho (ex: 1.5s)
-    para ser utilizado como Capa / Thumbnail de alto CTR no YouTube Shorts e Instagram Reels.
+    Extrai frame de alta qualidade rigorosamente em 9:16 (1080x1920)
+    para ser utilizado como Capa / Thumbnail de alto CTR no YouTube Shorts e Instagram Reels,
+    com opções de enquadramento (corte no personagem ou blur) e tipografia viral.
     """
     if not video_path or not os.path.exists(video_path):
         return None
     try:
-        p = Path(video_path)
-        if not output_path:
-            output_path = str(p.parent / f"{p.stem}_capa_hook.jpg")
-
-        import subprocess
-        cmd = [
-            ffmpeg_bin, "-y",
-            "-ss", f"{timestamp_sec:.2f}",
-            "-i", str(video_path),
-            "-vframes", "1",
-            "-q:v", "2",
-            str(output_path)
-        ]
-        flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
-        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=flags)
-        if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
-            return output_path
-
-        # Fallback para 0.5s se 1.5s ultrapassar duração
-        cmd[2] = "0.50"
-        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=flags)
-        if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
-            return output_path
+        from thumbnail_studio import generate_shorts_thumbnail_pipeline
+        return generate_shorts_thumbnail_pipeline(
+            video_path=video_path,
+            output_path=output_path,
+            timestamp_sec=timestamp_sec,
+            crop_mode=crop_mode,
+            pan_x=pan_x,
+            overlay_text=overlay_text,
+            text_position=text_position,
+            text_style=text_style,
+            ffmpeg_bin=ffmpeg_bin
+        )
     except Exception:
-        pass
+        # Fallback para extração direta via ffmpeg
+        try:
+            p = Path(video_path)
+            if not output_path:
+                output_path = str(p.parent / f"{p.stem}_capa_hook.jpg")
+            import subprocess
+            cmd = [
+                ffmpeg_bin, "-y",
+                "-ss", f"{timestamp_sec:.2f}",
+                "-i", str(video_path),
+                "-vframes", "1",
+                "-q:v", "2",
+                str(output_path)
+            ]
+            flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+            subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=flags)
+            if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+                return output_path
+        except Exception:
+            pass
     return None
 
 
@@ -756,11 +770,13 @@ def analyze_instagram_video(
     data["_transcript"] = transcript
     data["_enriched_context"] = enriched_context
 
-    # Extrai frame de capa para Thumbnail de Alto CTR (1080x1920)
-    thumb_path = extract_hook_thumbnail(video_path, ffmpeg_bin=ffmpeg_bin)
+    # Extrai frame de capa para Thumbnail de Alto CTR (1080x1920) com título do gancho
+    first_title = data.get("title") or data.get("hook_text") or ""
+    thumb_path = extract_hook_thumbnail(video_path, ffmpeg_bin=ffmpeg_bin, overlay_text=first_title)
     if thumb_path:
         data["_thumbnail_path"] = thumb_path
         data["_thumbnail_sec"] = 1.5
+        data["_thumbnail_text"] = first_title
         _log(f"🖼️ [Thumbnail Hook CTR] Capa 1080x1920 extraída com sucesso: {os.path.basename(thumb_path)}")
 
     if ai_cache and data and not data.get("parse_error") and ("hook_analysis" in data or "suggested_captions" in data):
@@ -930,23 +946,26 @@ def analyze_yt_shorts_video(
     data["_transcript"] = transcript
     data["_enriched_context"] = enriched_context
 
-    # Extrai frame de capa para Thumbnail de Alto CTR (1080x1920)
-    thumb_path = extract_hook_thumbnail(video_path, ffmpeg_bin=ffmpeg_bin)
+    # Identifica o melhor título para a capa 9:16
+    titles = data.get("titles", [])
+    chosen_title = ""
+    if titles and isinstance(titles, list):
+        first_t = titles[0]
+        chosen_title = first_t.get("title", "") if isinstance(first_t, dict) else str(first_t)
+    if not chosen_title:
+        chosen_title = data.get("title", "")
+
+    # Extrai frame de capa para Thumbnail de Alto CTR (1080x1920) já com o título 9:16
+    thumb_path = extract_hook_thumbnail(video_path, ffmpeg_bin=ffmpeg_bin, overlay_text=chosen_title)
     if thumb_path:
         data["_thumbnail_path"] = thumb_path
         data["_thumbnail_sec"] = 1.5
+        data["_thumbnail_text"] = chosen_title
         _log(f"🖼️ [Thumbnail Hook CTR] Capa 1080x1920 extraída com sucesso: {os.path.basename(thumb_path)}")
 
     if ai_cache and data and not data.get("parse_error") and ("video_analysis" in data or "optimization" in data):
         ai_cache.set(video_path, "yt_shorts_analysis", data)
         # Salva metadados virais para compartilhamento
-        titles = data.get("titles", [])
-        chosen_title = ""
-        if titles and isinstance(titles, list):
-            first_t = titles[0]
-            chosen_title = first_t.get("title", "") if isinstance(first_t, dict) else str(first_t)
-        if not chosen_title:
-            chosen_title = data.get("title", "")
         viral_info = {
             "title": chosen_title,
             "tags": data.get("tags", []),

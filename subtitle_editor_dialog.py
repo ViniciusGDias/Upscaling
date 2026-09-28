@@ -8,9 +8,11 @@ Permite ao usuario:
 - Continuar a renderizacao diretamente com 1 clique!
 """
 
+import os
 import customtkinter as ctk
 import icon_manager
 import subtitle_preview_helper
+from video_preview_player import VideoPreviewPlayer
 from typing import List, Dict, Any, Callable, Optional
 from subtitle_corrector import correct_phrase, load_dictionary, add_correction_term
 from censorship_manager import censor_text, mask_word, add_custom_profanity, load_custom_profanity
@@ -126,17 +128,20 @@ class SubtitleEditorDialog(ctk.CTkToplevel):
         current_style: str = "dynamic_animax",
         current_pop: Any = "Esmaecer Suave (Anime Clássico)",
         video_duration: Optional[float] = None,
+        video_path: Optional[str] = None,
         **kwargs
     ):
         super().__init__(parent, **kwargs)
         self.title("Revisão de Legendas & Nomes de Anime")
-        self.geometry("860x720")
-        self.minsize(740, 560)
+        self.geometry("900x780")
+        self.minsize(780, 600)
         self.configure(fg_color=COLORS["bg_dark"])
 
         self.on_confirm = on_confirm
         self.items = [dict(it) for it in items]
         self.video_duration = video_duration
+        self.video_path = video_path
+        self.preview_player: Optional[VideoPreviewPlayer] = None
         self.rows = []
 
         self.transient(parent)
@@ -147,7 +152,6 @@ class SubtitleEditorDialog(ctk.CTkToplevel):
 
     def _build_ui(self, current_style: str, current_pop: Any):
         self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(2, weight=1)
 
         # 1. Header Frame
         header = ctk.CTkFrame(self, fg_color=COLORS["bg_card"], corner_radius=10)
@@ -308,14 +312,42 @@ class SubtitleEditorDialog(ctk.CTkToplevel):
         )
         self.lbl_censor_status.pack(side="left", padx=8)
 
-        # 3. Subtitles Scrollable List
-        self.scroll_frame = ctk.CTkScrollableFrame(self, fg_color=COLORS["bg_card"], corner_radius=10)
-        self.scroll_frame.grid(row=2, column=0, padx=16, pady=8, sticky="nsew")
-        self.scroll_frame.grid_columnconfigure(1, weight=1)
+        # 3. Player de Vídeo Embutido (Opcional, quando disponível)
+        current_row = 2
+        if self.video_path and os.path.exists(self.video_path):
+            player_frame = ctk.CTkFrame(self, fg_color=COLORS["bg_card"], corner_radius=10, border_width=1, border_color=COLORS["border"])
+            player_frame.grid(row=current_row, column=0, padx=16, pady=(4, 6), sticky="ew")
+            player_frame.grid_columnconfigure(0, weight=1)
 
-        # 4. Action / Footer Bar
+            p_head = ctk.CTkFrame(player_frame, fg_color="transparent")
+            p_head.pack(fill="x", padx=12, pady=(6, 2))
+            ctk.CTkLabel(
+                p_head,
+                text="🎬 Player de Vídeo — Clique em ▶ em qualquer fala abaixo para sincronizar:",
+                font=ctk.CTkFont(size=11, weight="bold"),
+                text_color=COLORS["accent"]
+            ).pack(side="left")
+
+            self.preview_player = VideoPreviewPlayer(
+                player_frame,
+                video_path=self.video_path,
+                max_width=360,
+                max_height=180
+            )
+            self.preview_player.pack(pady=(0, 6))
+            current_row += 1
+
+        self.grid_rowconfigure(current_row, weight=1)
+
+        # 4. Subtitles Scrollable List
+        self.scroll_frame = ctk.CTkScrollableFrame(self, fg_color=COLORS["bg_card"], corner_radius=10)
+        self.scroll_frame.grid(row=current_row, column=0, padx=16, pady=8, sticky="nsew")
+        self.scroll_frame.grid_columnconfigure(1, weight=1)
+        current_row += 1
+
+        # 5. Action / Footer Bar
         footer = ctk.CTkFrame(self, fg_color="transparent")
-        footer.grid(row=3, column=0, padx=16, pady=(4, 16), sticky="ew")
+        footer.grid(row=current_row, column=0, padx=16, pady=(4, 16), sticky="ew")
         footer.grid_columnconfigure(3, weight=1)
 
         # Seletor de Efeitos Visuais (Esmaecer, Pop, Slide, Fixo)
@@ -408,7 +440,22 @@ class SubtitleEditorDialog(ctk.CTkToplevel):
         time_frame = ctk.CTkFrame(top_row, fg_color="transparent")
         time_frame.grid(row=0, column=0, padx=6, pady=2)
 
-        start_v = ctk.StringVar(value=sec_to_str(float(it.get("start", 0.0))))
+        start_sec_val = float(it.get("start", 0.0))
+        if self.preview_player:
+            btn_play_seg = ctk.CTkButton(
+                time_frame,
+                text="▶",
+                width=26,
+                height=26,
+                fg_color="#18181b",
+                hover_color="#27272a",
+                text_color="#10b981",
+                font=ctk.CTkFont(size=11, weight="bold"),
+                command=lambda s=start_sec_val: self.preview_player.seek_seconds(s)
+            )
+            btn_play_seg.pack(side="left", padx=(0, 4))
+
+        start_v = ctk.StringVar(value=sec_to_str(start_sec_val))
         end_v = ctk.StringVar(value=sec_to_str(float(it.get("end", 0.0))))
 
         s_entry = ctk.CTkEntry(time_frame, textvariable=start_v, width=64, height=28,
@@ -760,3 +807,11 @@ class SubtitleEditorDialog(ctk.CTkToplevel):
         self.destroy()
         if self.on_confirm:
             self.on_confirm(final_items, selected_style_key, selected_effect)
+
+    def destroy(self):
+        if hasattr(self, "preview_player") and self.preview_player:
+            try:
+                self.preview_player.stop()
+            except Exception:
+                pass
+        super().destroy()

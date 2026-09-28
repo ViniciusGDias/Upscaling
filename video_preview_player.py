@@ -278,6 +278,13 @@ class VideoPreviewPlayer(ctk.CTkFrame):
         self.pause()
         self._show_frame_at(0)
 
+    def seek_seconds(self, sec: float):
+        """Pula para um segundo específico do vídeo."""
+        if self._cap is None or not self._cap.isOpened() or self._fps <= 0:
+            return
+        frame_idx = max(0, min(int(sec * self._fps), self._total_frames - 1))
+        self._show_frame_at(frame_idx)
+
     def _play_loop(self):
         if not self._is_playing:
             return

@@ -3,7 +3,9 @@
   "name": "Urahara",
   "release_date": "2026-09-28",
   "changelog": [
-    "Gerador & Editor de Thumbnail do Shorts (1080x1920): Prévia visual direta na tela, seletor de segundo/frame exato, copiar para área de transferência e salvar em 1 clique.",
+    "Mini-Player de Vídeo Integrado no Studio & Revisor de Legendas: Assista e sincronize as falas em tempo real com controle de linha do tempo e scrub frame-a-frame.",
+    "Correção Anti-Tela Preta na Análise de YouTube Shorts & Instagram Reels: Card de carregamento animado em tempo real e tratamento de erros com recuperação de 1 clique.",
+    "Thumbnail Studio 9:16 para YouTube Shorts: Enquadramento com foco no personagem, blur lateral, tipografia viral e safe zones.",
     "6 Modos Especializados no Diretor IA: Contínuo (30-75s), Contexto In Media Res (45-90s), Mini-Filme (2-5m), Série em Partes (1, 2, 3), Corte Dinâmico e Duelo Verbal & Revelação.",
     "Blindagem de Títulos com Descrição de Cena: Títulos virais compostos ricos com identificação explícita de personagens e ação dramática em toda a interface.",
     "Otimização Extrema de Tokens (0 Tokens em Reuso): Cache persistente instantâneo para cortes e transcrições já analisadas.",

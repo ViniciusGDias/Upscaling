@@ -384,8 +384,6 @@ class YTShortsAnalyzerTab(ctk.CTkFrame):
             if hasattr(self, "preview_player"):
                 self.preview_player.load_video(path)
             self._log(f"Vídeo carregado: {path} ({info['resolution']}, {info['duration_str']})")
-            # Extrai e exibe automaticamente a Capa/Thumbnail no painel direito
-            self.after(100, self._on_quick_extract_thumb)
 
     def _start_analysis(self, force_refresh: bool = False):
         path = self.file_entry.get().strip()
@@ -401,6 +399,7 @@ class YTShortsAnalyzerTab(ctk.CTkFrame):
 
         self.is_analyzing = True
         self.btn_analyze.configure(state="disabled", text="Analisando Shorts...")
+        self._show_loading_state()
         category = self.opt_category.get().lower()
         anime = self.ent_anime.get().strip()
         character = self.ent_character.get().strip()
@@ -422,7 +421,19 @@ class YTShortsAnalyzerTab(ctk.CTkFrame):
                 self.after(0, lambda: self._render_results(res))
                 self.after(0, lambda: self._update_cache_badge(path))
             except Exception as e:
-                self._log(f"[ERRO] Erro na análise: {str(e)}")
+                err_msg = str(e)
+                self._log(f"[ERRO] Erro na análise: {err_msg}")
+                self.after(0, lambda: self._render_error_card(
+                    error_msg=err_msg,
+                    raw_response=(
+                        f"Falha de conexão ou processamento com a IA:\n{err_msg}\n\n"
+                        f"Possíveis causas:\n"
+                        f"• Rate Limit (429) do Gemini ou falta de cota temporária no provedor.\n"
+                        f"• Conexão oscilando durante a chamada de API.\n"
+                        f"• Resposta incompleta do modelo.\n\n"
+                        f"Clique abaixo para limpar o cache corrompido e tentar novamente."
+                    )
+                ))
             finally:
                 self.after(0, self._finish_analysis)
 
@@ -463,6 +474,8 @@ class YTShortsAnalyzerTab(ctk.CTkFrame):
             pass
         _copy_text_to_clipboard(self, title_text)
         self._log(f"✓ Título A/B selecionado e copiado: {title_text}")
+        if hasattr(self, "_on_apply_title_to_thumb"):
+            self._on_apply_title_to_thumb(title_text)
 
     def _copy_to_clipboard(self, text: str, btn: ctk.CTkButton, original_text: str = "Copiar"):
         _copy_text_to_clipboard(self, text)
@@ -529,63 +542,147 @@ class YTShortsAnalyzerTab(ctk.CTkFrame):
         except Exception as e:
             self._log(f"Erro ao adaptar para Instagram: {e}")
 
+    def _show_loading_state(self):
+        """Exibe card de carregamento com animação enquanto a IA processa o vídeo."""
+        for w in self.right_scroll.winfo_children():
+            try:
+                w.destroy()
+            except Exception:
+                pass
+
+        card = ctk.CTkFrame(self.right_scroll, fg_color=COLOR_CARD, corner_radius=10, border_width=1, border_color="#8b5cf6")
+        card.pack(fill="x", padx=12, pady=40)
+
+        ctk.CTkLabel(
+            card,
+            text="",
+            image=icon_manager.get_icon("sparkle", size=(36, 36), color="#a78bfa")
+        ).pack(pady=(24, 10))
+
+        ctk.CTkLabel(
+            card,
+            text="IA Analisando Vídeo para YouTube Shorts...",
+            font=ctk.CTkFont(family="Segoe UI", size=15, weight="bold"),
+            text_color="#ffffff"
+        ).pack(pady=(0, 6))
+
+        ctk.CTkLabel(
+            card,
+            text="Avaliando ganchos de retenção 0-3s, títulos virais de alto CTR,\ntags, legendas dinâmicas e thumbnail vertical 9:16...",
+            font=ctk.CTkFont(size=12),
+            text_color="#a1a1aa",
+            justify="center"
+        ).pack(pady=(0, 16))
+
+        self.analysis_pbar = ctk.CTkProgressBar(card, mode="indeterminate", height=6, progress_color="#8b5cf6")
+        self.analysis_pbar.pack(fill="x", padx=36, pady=(0, 12))
+        self.analysis_pbar.start()
+
+        ctk.CTkLabel(
+            card,
+            text="Tempo estimado: 10 a 25 segundos • Gemini 2.5 / 3.0",
+            font=ctk.CTkFont(family="Consolas", size=10),
+            text_color="#71717a"
+        ).pack(pady=(0, 20))
+
+    def _render_error_card(self, error_msg: str, raw_response: str = ""):
+        """Renderiza card de erro seguro com botões de recuperação para nunca deixar a tela preta."""
+        for w in self.right_scroll.winfo_children():
+            try:
+                w.destroy()
+            except Exception:
+                pass
+
+        err_box = ctk.CTkFrame(self.right_scroll, fg_color=COLOR_CARD, corner_radius=10, border_width=1, border_color="#ef4444")
+        err_box.pack(fill="x", padx=10, pady=20)
+
+        ctk.CTkLabel(
+            err_box,
+            text="⚠️ Falha na Análise de IA ou Comunicação com Servidor",
+            text_color="#ef4444",
+            font=ctk.CTkFont(weight="bold", size=14)
+        ).pack(pady=(16, 6), padx=14)
+
+        ctk.CTkLabel(
+            err_box,
+            text="Não foi possível obter ou processar os dados gerados pela IA no momento.\nO cache problemático foi limpo automaticamente.",
+            font=ctk.CTkFont(size=12),
+            text_color="#d4d4d8",
+            justify="center"
+        ).pack(pady=(0, 14), padx=14)
+
+        btn_retry_row = ctk.CTkFrame(err_box, fg_color="transparent")
+        btn_retry_row.pack(pady=(0, 14))
+
+        ctk.CTkButton(
+            btn_retry_row,
+            text="🔄 Limpar Cache & Gerar Novamente",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            fg_color="#ef4444",
+            hover_color="#dc2626",
+            height=34,
+            command=self._clear_cache_and_reanalyze
+        ).pack(side="left", padx=6)
+
+        ctk.CTkButton(
+            btn_retry_row,
+            text="🧹 Limpar Cache Apenas",
+            font=ctk.CTkFont(size=12),
+            fg_color="#27272a",
+            hover_color="#3f3f46",
+            height=34,
+            command=self._clear_cache_for_video
+        ).pack(side="left", padx=6)
+
+        raw = raw_response or error_msg or "Sem detalhes técnicos."
+        tb = ctk.CTkTextbox(err_box, height=140, font=ctk.CTkFont(family="Consolas", size=11))
+        tb.pack(fill="x", padx=14, pady=(0, 14))
+        tb.insert("1.0", raw)
+        tb.configure(state="disabled")
+
     def _render_results(self, data: dict):
         for w in self.right_scroll.winfo_children():
-            w.destroy()
+            try:
+                w.destroy()
+            except Exception:
+                pass
 
         if not data or ("video_analysis" not in data and "optimization" not in data) or data.get("parse_error"):
-            err_box = ctk.CTkFrame(self.right_scroll, fg_color=COLOR_CARD, corner_radius=8, border_width=1, border_color="#ef4444")
-            err_box.pack(fill="x", padx=10, pady=10)
-
-            ctk.CTkLabel(
-                err_box,
-                text="⚠️ Não foi possível processar a resposta da IA (Formato Incompleto ou Truncado)",
-                text_color="#ef4444",
-                font=ctk.CTkFont(weight="bold", size=13)
-            ).pack(pady=(12, 6), padx=10)
-
-            ctk.CTkLabel(
-                err_box,
-                text="O cache com erro já foi removido automaticamente. Clique abaixo para gerar novamente:",
-                font=ctk.CTkFont(size=12),
-                text_color="#d4d4d8"
-            ).pack(pady=(0, 10), padx=10)
-
-            btn_retry_row = ctk.CTkFrame(err_box, fg_color="transparent")
-            btn_retry_row.pack(pady=(0, 12))
-
-            ctk.CTkButton(
-                btn_retry_row,
-                text="🔄 Limpar Cache & Gerar Novamente",
-                font=ctk.CTkFont(size=12, weight="bold"),
-                fg_color="#ef4444",
-                hover_color="#dc2626",
-                height=32,
-                command=self._clear_cache_and_reanalyze
-            ).pack(side="left", padx=5)
-
-            ctk.CTkButton(
-                btn_retry_row,
-                text="Limpar Cache",
-                font=ctk.CTkFont(size=12),
-                fg_color="#27272a",
-                hover_color="#3f3f46",
-                height=32,
-                command=self._clear_cache_for_video
-            ).pack(side="left", padx=5)
-
-            # Resposta crua
             raw = str(data.get("raw_response", data) if data else "Resposta vazia da API")
-            tb = ctk.CTkTextbox(err_box, height=180, font=ctk.CTkFont(family="Consolas", size=11))
-            tb.pack(fill="x", padx=12, pady=(0, 12))
-            tb.insert("1.0", raw)
-            tb.configure(state="disabled")
+            err_msg = data.get("error_msg", "Formato de resposta incompleto ou truncado") if isinstance(data, dict) else str(data)
+            self._render_error_card(err_msg, raw_response=raw)
             return
 
+        try:
+            self._render_results_content(data)
+        except Exception as e:
+            self._log(f"[ERRO] Erro ao renderizar resultados: {e}")
+            self._render_error_card(f"Erro visual ao montar interface: {e}")
+
+    def _render_results_content(self, data: dict):
         # ── Card de Capa de Alto CTR (1080x1920) ──
         thumb_path = data.get("_thumbnail_path")
+        if not thumb_path or not os.path.exists(thumb_path):
+            vid_p = self.file_entry.get().strip() or getattr(self, "video_path", "")
+            if vid_p and os.path.exists(vid_p):
+                from social_analyzer import extract_hook_thumbnail
+                from upscaler import find_ffmpeg
+                ff = find_ffmpeg() or "ffmpeg"
+                titles = data.get("titles", [])
+                t_first = ""
+                if titles and isinstance(titles, list):
+                    item = titles[0]
+                    t_first = item.get("title", "") if isinstance(item, dict) else str(item)
+                thumb_path = extract_hook_thumbnail(vid_p, ffmpeg_bin=ff, overlay_text=t_first)
+                data["_thumbnail_path"] = thumb_path
+                data["_thumbnail_text"] = t_first
+
         if thumb_path and os.path.exists(thumb_path):
-            self._render_thumbnail_card(thumb_path, timestamp_sec=float(data.get("_thumbnail_sec", 1.5)))
+            self._render_thumbnail_card(
+                thumb_path,
+                timestamp_sec=float(data.get("_thumbnail_sec", 1.5)),
+                overlay_text=data.get("_thumbnail_text", "")
+            )
 
         # ── Card de Sincronização Cruzada (Postar no Instagram Reels) ──
         repurpose_card = ctk.CTkFrame(self.right_scroll, fg_color="#1e1b4b", corner_radius=10, border_width=1, border_color="#6366f1")
@@ -1011,7 +1108,7 @@ class YTShortsAnalyzerTab(ctk.CTkFrame):
     # ── Métodos de Criação e Interação com Thumbnail do Shorts (1080x1920) ──
 
     def _on_quick_extract_thumb(self):
-        """Dispara extração rápida de frame avulso para thumbnail a partir do painel esquerdo."""
+        """Dispara extração de thumbnail a partir do botão no painel esquerdo."""
         video_path = self.file_entry.get().strip() if hasattr(self, "file_entry") else ""
         if not video_path or not os.path.exists(video_path):
             messagebox.showwarning("Aviso", "Por favor, selecione um arquivo de vídeo válido primeiro.")
@@ -1023,36 +1120,129 @@ class YTShortsAnalyzerTab(ctk.CTkFrame):
         except Exception:
             sec = 1.5
 
+        # Se já tiver análise com títulos, usa o título 1; senão gera limpo
+        title = ""
+        if hasattr(self, "analysis_data") and isinstance(self.analysis_data, dict):
+            titles = self.analysis_data.get("titles", [])
+            if titles:
+                t = titles[0]
+                title = t.get("title", "") if isinstance(t, dict) else str(t)
+
         if hasattr(self, "placeholder_frame") and self.placeholder_frame.winfo_ismapped():
             self.placeholder_frame.pack_forget()
 
-        self._reextract_thumb(sec)
+        self._reextract_thumb(timestamp_sec=sec, overlay_text=title)
 
-    def _reextract_thumb(self, timestamp_sec: float):
-        """Extrai um novo frame do vídeo no segundo exato e atualiza o card na interface."""
+    def _on_apply_title_to_thumb(self, title_text: str):
+        """Aplica automaticamente o título clicado no A/B Testing para a miniatura."""
+        if hasattr(self, "thumb_ent_text") and self.thumb_ent_text.winfo_exists():
+            self.thumb_ent_text.delete(0, "end")
+            self.thumb_ent_text.insert(0, title_text)
+            self._trigger_thumb_update()
+
+    def _on_thumb_time_preset(self, s_val: float):
+        if hasattr(self, "thumb_time_field") and self.thumb_time_field.winfo_exists():
+            self.thumb_time_field.delete(0, "end")
+            self.thumb_time_field.insert(0, f"{s_val:.2f}")
+        self._trigger_thumb_update()
+
+    def _trigger_thumb_update(self):
+        """Coleta parâmetros dos seletores da miniatura e reexecuta geração em 9:16."""
         video_path = self.file_entry.get().strip() if hasattr(self, "file_entry") else ""
         if not video_path or not os.path.exists(video_path):
             messagebox.showwarning("Aviso", "Selecione um vídeo primeiro.")
             return
 
-        if hasattr(self, "btn_extract_thumb"):
-            self.btn_extract_thumb.configure(state="disabled", text="Extraindo...")
+        try:
+            sec = float(self.thumb_time_field.get().replace("s", "").strip())
+        except Exception:
+            sec = getattr(self, "_current_thumb_sec", 1.5)
+
+        crop_label = self.thumb_seg_crop.get() if hasattr(self, "thumb_seg_crop") else "Centro"
+        crop_vals_map = {
+            "Centro": "center",
+            "Esquerda": "left",
+            "Direita": "right",
+            "Desfoque 9:16": "blur_canvas",
+            "Pan Manual": "pan"
+        }
+        crop_mode = crop_vals_map.get(crop_label, "center")
+        pan_x = float(self.thumb_slider_pan.get()) if hasattr(self, "thumb_slider_pan") else 0.5
+
+        overlay_text = self.thumb_ent_text.get().strip() if hasattr(self, "thumb_ent_text") else ""
+
+        style_label = self.thumb_seg_style.get() if hasattr(self, "thumb_seg_style") else "Amarelo Viral"
+        inv_style = {"Amarelo Viral": "yellow", "Branco Bold": "white", "Faixa Vermelha": "badge"}
+        text_style = inv_style.get(style_label, "yellow")
+
+        pos_label = self.thumb_seg_pos.get() if hasattr(self, "thumb_seg_pos") else "Topo (Safe Zone)"
+        inv_pos = {"Topo (Safe Zone)": "top", "Centro": "center"}
+        text_position = inv_pos.get(pos_label, "top")
+
+        self._reextract_thumb(
+            timestamp_sec=sec,
+            crop_mode=crop_mode,
+            pan_x=pan_x,
+            overlay_text=overlay_text,
+            text_position=text_position,
+            text_style=text_style
+        )
+
+    def _reextract_thumb(
+        self,
+        timestamp_sec: float = 1.5,
+        crop_mode: str = "center",
+        pan_x: float = 0.5,
+        overlay_text: str = "",
+        text_position: str = "top",
+        text_style: str = "yellow"
+    ):
+        """Gera ou atualiza uma capa 9:16 (1080x1920) e atualiza o card na interface."""
+        video_path = self.file_entry.get().strip() if hasattr(self, "file_entry") else ""
+        if not video_path or not os.path.exists(video_path):
+            messagebox.showwarning("Aviso", "Selecione um vídeo primeiro.")
+            return
+
+        if hasattr(self, "btn_update_thumb") and self.btn_update_thumb.winfo_exists():
+            self.btn_update_thumb.configure(state="disabled", text="Gerando 9:16...")
+        if hasattr(self, "btn_extract_thumb") and self.btn_extract_thumb.winfo_exists():
+            self.btn_extract_thumb.configure(state="disabled", text="Gerando...")
 
         def _worker():
             try:
-                from social_analyzer import extract_hook_thumbnail
+                from thumbnail_studio import generate_shorts_thumbnail_pipeline
                 from upscaler import find_ffmpeg
                 ff_bin = find_ffmpeg() or "ffmpeg"
                 p = Path(video_path)
-                out_path = str(p.parent / f"{p.stem}_capa_thumb_{int(timestamp_sec*100):04d}ms.jpg")
-                res = extract_hook_thumbnail(video_path, output_path=out_path, timestamp_sec=timestamp_sec, ffmpeg_bin=ff_bin)
+                out_path = str(p.parent / f"{p.stem}_capa_shorts_1080x1920.jpg")
+                res = generate_shorts_thumbnail_pipeline(
+                    video_path=video_path,
+                    output_path=out_path,
+                    timestamp_sec=timestamp_sec,
+                    crop_mode=crop_mode,
+                    pan_x=pan_x,
+                    overlay_text=overlay_text,
+                    text_position=text_position,
+                    text_style=text_style,
+                    ffmpeg_bin=ff_bin
+                )
 
                 def _ui():
-                    if hasattr(self, "btn_extract_thumb"):
+                    if hasattr(self, "btn_update_thumb") and self.btn_update_thumb.winfo_exists():
+                        self.btn_update_thumb.configure(state="normal", text="🔄 Atualizar Capa")
+                    if hasattr(self, "btn_extract_thumb") and self.btn_extract_thumb.winfo_exists():
                         self.btn_extract_thumb.configure(state="normal", text="Gerar Thumb")
                     if res and os.path.exists(res):
-                        self._render_thumbnail_card(res, timestamp_sec=timestamp_sec)
-                        self._log(f"🖼️ [THUMBNAIL] Capa 1080x1920 gerada no tempo {timestamp_sec:.2f}s: {os.path.basename(res)}")
+                        self._render_thumbnail_card(
+                            res,
+                            timestamp_sec=timestamp_sec,
+                            crop_mode=crop_mode,
+                            pan_x=pan_x,
+                            overlay_text=overlay_text,
+                            text_position=text_position,
+                            text_style=text_style
+                        )
+                        self._log(f"🖼️ [THUMBNAIL 9:16] Capa gerada ({crop_mode}, {timestamp_sec:.2f}s): {os.path.basename(res)}")
                     else:
                         self._log(f"[ERRO] Falha ao extrair frame no tempo {timestamp_sec:.2f}s")
                         messagebox.showerror("Erro", f"Não foi possível extrair o frame no tempo {timestamp_sec:.2f}s.")
@@ -1060,47 +1250,66 @@ class YTShortsAnalyzerTab(ctk.CTkFrame):
                 self.after(0, _ui)
             except Exception as e:
                 def _err():
-                    if hasattr(self, "btn_extract_thumb"):
+                    if hasattr(self, "btn_update_thumb") and self.btn_update_thumb.winfo_exists():
+                        self.btn_update_thumb.configure(state="normal", text="🔄 Atualizar Capa")
+                    if hasattr(self, "btn_extract_thumb") and self.btn_extract_thumb.winfo_exists():
                         self.btn_extract_thumb.configure(state="normal", text="Gerar Thumb")
                     self._log(f"[ERRO] Erro ao gerar thumbnail: {e}")
                 self.after(0, _err)
 
         threading.Thread(target=_worker, daemon=True).start()
 
-    def _render_thumbnail_card(self, thumb_path: str, timestamp_sec: float = 1.5):
-        """Renderiza card visual interativo com preview real da imagem, presets de tempo e botões de ação."""
+    def _render_thumbnail_card(
+        self,
+        thumb_path: str,
+        timestamp_sec: float = 1.5,
+        crop_mode: str = "center",
+        pan_x: float = 0.5,
+        overlay_text: str = "",
+        text_position: str = "top",
+        text_style: str = "yellow"
+    ):
+        """Renderiza estúdio interativo de capa 1080x1920 com enquadramento no personagem e tipografia viral."""
         if not thumb_path or not os.path.exists(thumb_path):
             return
 
-        # Esconde placeholder se estiver visível
+        self._current_thumb_path = thumb_path
+        self._current_thumb_sec = timestamp_sec
+        self._current_crop_mode = crop_mode
+        self._current_pan_x = pan_x
+        self._current_overlay_text = overlay_text
+        self._current_text_position = text_position
+        self._current_text_style = text_style
+
+        # Esconde placeholder
         if hasattr(self, "placeholder_frame") and self.placeholder_frame.winfo_ismapped():
             self.placeholder_frame.pack_forget()
 
-        # Remove card anterior se já estiver renderizado para atualizar a imagem
+        # Remove card anterior se existir
         if hasattr(self, "_active_thumb_card") and self._active_thumb_card and self._active_thumb_card.winfo_exists():
             try:
                 self._active_thumb_card.destroy()
             except Exception:
                 pass
 
-        thumb_card = ctk.CTkFrame(self.right_scroll, fg_color="#181308", corner_radius=12, border_width=1, border_color="#f59e0b")
+        thumb_card = ctk.CTkFrame(self.right_scroll, fg_color="#141108", corner_radius=12, border_width=1, border_color="#f59e0b")
         thumb_card.pack(fill="x", padx=5, pady=(0, 10))
         self._active_thumb_card = thumb_card
 
-        # Top row: Título e Badge
+        # Header do Card
         top_row = ctk.CTkFrame(thumb_card, fg_color="transparent")
         top_row.pack(fill="x", padx=14, pady=(10, 8))
 
         ctk.CTkLabel(
             top_row,
-            text="🖼️ Capa de Alto CTR (1080x1920 Vertical) para YouTube Shorts:",
+            text="🖼️ Estúdio de Thumbnails YouTube Shorts (1080x1920 Vertical 9:16)",
             font=ctk.CTkFont(size=13, weight="bold"),
             text_color="#fbbf24"
         ).pack(side="left")
 
         ctk.CTkLabel(
             top_row,
-            text=f" ⏱️ Segundo: {timestamp_sec:.2f}s ",
+            text=f" ⏱️ {timestamp_sec:.2f}s | 📐 1080x1920 ",
             font=ctk.CTkFont(size=10, weight="bold"),
             text_color="#09090b",
             fg_color="#f59e0b",
@@ -1110,73 +1319,215 @@ class YTShortsAnalyzerTab(ctk.CTkFrame):
         content_row = ctk.CTkFrame(thumb_card, fg_color="transparent")
         content_row.pack(fill="x", padx=14, pady=(0, 12))
 
-        # Preview Visual Vertical (9:16) da Imagem
-        preview_frame = ctk.CTkFrame(content_row, fg_color="#09090b", corner_radius=8, border_width=1, border_color="#78350f")
-        preview_frame.pack(side="left", padx=(0, 14))
+        # Coluna Esquerda: Preview Visual Vertical 9:16 (140x248)
+        left_preview = ctk.CTkFrame(content_row, fg_color="transparent")
+        left_preview.pack(side="left", padx=(0, 14), anchor="n")
+
+        preview_frame = ctk.CTkFrame(left_preview, fg_color="#09090b", corner_radius=8, border_width=1, border_color="#78350f")
+        preview_frame.pack()
 
         try:
             pil_img = Image.open(thumb_path)
-            # Preview vertical proporcional: 120 x 213 (formato 9:16)
-            ctk_img = ctk.CTkImage(light_image=pil_img, dark_image=pil_img, size=(120, 213))
+            # Preview proporcional vertical 9:16 (140 x 248)
+            ctk_img = ctk.CTkImage(light_image=pil_img, dark_image=pil_img, size=(140, 248))
             img_lbl = ctk.CTkLabel(preview_frame, text="", image=ctk_img, corner_radius=6)
-            img_lbl.image = ctk_img  # Mantém referência para não ser coletado
-            img_lbl.pack(padx=4, pady=4)
+            img_lbl.image = ctk_img
+            img_lbl.pack(padx=3, pady=3)
         except Exception:
-            ctk.CTkLabel(preview_frame, text="Prévia\nIndisponível", width=120, height=213, text_color="#71717a").pack(padx=4, pady=4)
+            ctk.CTkLabel(preview_frame, text="Prévia\nIndisponível", width=140, height=248, text_color="#71717a").pack(padx=3, pady=3)
 
-        # Controles e Informações ao lado da imagem
+        ctk.CTkLabel(
+            left_preview,
+            text="Formato Oficial 9:16\n1080 x 1920 px",
+            font=ctk.CTkFont(size=9, weight="bold"),
+            text_color="#a1a1aa",
+            justify="center"
+        ).pack(pady=(4, 0))
+
+        # Coluna Direita: Controles Completos
         ctrl_frame = ctk.CTkFrame(content_row, fg_color="transparent")
         ctrl_frame.pack(side="left", fill="both", expand=True)
 
+        # 1. Título / Texto na Capa
         ctk.CTkLabel(
             ctrl_frame,
-            text="Esta é a imagem recomendada para atrair cliques (CTR) no feed do YouTube Shorts.\n"
-                 "Você pode enviar diretamente como miniatura no YouTube Studio ou escolher outro frame:",
-            font=ctk.CTkFont(size=11),
-            text_color="#d4d4d8",
-            justify="left", anchor="w"
-        ).pack(fill="x", pady=(0, 8))
+            text="✍️ Título / Texto na Capa (Alto CTR):",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            text_color="#fbbf24"
+        ).pack(anchor="w", pady=(0, 2))
 
-        # Seletor e Presets de Tempo
+        # Dropdown de Títulos Rápidos da IA
+        titles_opts = []
+        titles_map = {}
+        if hasattr(self, "analysis_data") and isinstance(self.analysis_data, dict):
+            raw_titles = self.analysis_data.get("titles", [])
+            for idx, t in enumerate(raw_titles[:5]):
+                t_str = t.get("title", "") if isinstance(t, dict) else str(t)
+                if t_str:
+                    label = f"🏆 Título {idx+1}: {t_str[:38]}..."
+                    titles_opts.append(label)
+                    titles_map[label] = t_str
+            hook_sugg = self.analysis_data.get("optimization", {}).get("suggested_hook", "")
+            if hook_sugg:
+                label_hook = f"🪝 Gancho 0-3s: {hook_sugg[:38]}..."
+                titles_opts.append(label_hook)
+                titles_map[label_hook] = hook_sugg
+
+        titles_opts.append("✏️ Personalizado (Digitar abaixo)")
+        titles_opts.append("🚫 Sem Texto (Apenas Imagem)")
+
+        def _on_dropdown_title_selected(choice: str):
+            if choice == "🚫 Sem Texto (Apenas Imagem)":
+                self.thumb_ent_text.delete(0, "end")
+            elif choice in titles_map:
+                self.thumb_ent_text.delete(0, "end")
+                self.thumb_ent_text.insert(0, titles_map[choice])
+            self._trigger_thumb_update()
+
+        initial_choice = titles_opts[0] if titles_opts else "✏️ Personalizado"
+        self.thumb_opt_title = ctk.CTkOptionMenu(
+            ctrl_frame,
+            values=titles_opts,
+            height=26,
+            font=ctk.CTkFont(size=10),
+            command=_on_dropdown_title_selected
+        )
+        self.thumb_opt_title.pack(fill="x", pady=(0, 4))
+        self.thumb_opt_title.set(initial_choice)
+
+        self.thumb_ent_text = ctk.CTkEntry(
+            ctrl_frame,
+            height=30,
+            font=ctk.CTkFont(size=11, weight="bold"),
+            placeholder_text="Digite a frase de impacto para a capa..."
+        )
+        self.thumb_ent_text.pack(fill="x", pady=(0, 8))
+        if overlay_text:
+            self.thumb_ent_text.insert(0, overlay_text)
+        elif initial_choice in titles_map:
+            self.thumb_ent_text.insert(0, titles_map[initial_choice])
+
+        # 2. Enquadramento e Foco no Personagem
+        crop_row_lbl = ctk.CTkFrame(ctrl_frame, fg_color="transparent")
+        crop_row_lbl.pack(fill="x", pady=(0, 2))
+        ctk.CTkLabel(
+            crop_row_lbl,
+            text="🎯 Enquadramento / Foco no Personagem (9:16):",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            text_color="#d4d4d8"
+        ).pack(side="left")
+
+        crop_labels = ["Centro", "Esquerda", "Direita", "Desfoque 9:16", "Pan Manual"]
+        crop_vals_map = {
+            "Centro": "center",
+            "Esquerda": "left",
+            "Direita": "right",
+            "Desfoque 9:16": "blur_canvas",
+            "Pan Manual": "pan"
+        }
+        inv_crop_map = {v: k for k, v in crop_vals_map.items()}
+
+        # Slider de Pan Manual (declarado antes da função do segmented)
+        pan_frame = ctk.CTkFrame(ctrl_frame, fg_color="#18181b", corner_radius=6)
+        lbl_pan = ctk.CTkLabel(pan_frame, text=f"Posição Horizontal: {int(pan_x*100)}%", font=ctk.CTkFont(size=10))
+        lbl_pan.pack(side="left", padx=8)
+
+        def _on_slider(val):
+            lbl_pan.configure(text=f"Posição Horizontal: {int(val*100)}%")
+
+        self.thumb_slider_pan = ctk.CTkSlider(
+            pan_frame,
+            from_=0.0, to=1.0,
+            number_of_steps=20,
+            command=_on_slider,
+            height=16
+        )
+        self.thumb_slider_pan.set(pan_x)
+        self.thumb_slider_pan.pack(side="right", fill="x", expand=True, padx=8, pady=4)
+
+        def _on_crop_change(label: str):
+            if label == "Pan Manual":
+                pan_frame.pack(fill="x", pady=(2, 6))
+            else:
+                pan_frame.pack_forget()
+            self._trigger_thumb_update()
+
+        self.thumb_seg_crop = ctk.CTkSegmentedButton(
+            ctrl_frame,
+            values=crop_labels,
+            height=26,
+            font=ctk.CTkFont(size=10, weight="bold"),
+            command=_on_crop_change
+        )
+        self.thumb_seg_crop.pack(fill="x", pady=(0, 4))
+        self.thumb_seg_crop.set(inv_crop_map.get(crop_mode, "Centro"))
+        if crop_mode == "pan":
+            pan_frame.pack(fill="x", pady=(2, 6))
+
+        # 3. Estilo e Posição do Texto
+        style_pos_row = ctk.CTkFrame(ctrl_frame, fg_color="transparent")
+        style_pos_row.pack(fill="x", pady=(4, 8))
+
+        style_col = ctk.CTkFrame(style_pos_row, fg_color="transparent")
+        style_col.pack(side="left", fill="x", expand=True, padx=(0, 4))
+        ctk.CTkLabel(style_col, text="Estilo:", font=ctk.CTkFont(size=10, weight="bold"), text_color="#a1a1aa").pack(anchor="w")
+        self.thumb_seg_style = ctk.CTkSegmentedButton(
+            style_col,
+            values=["Amarelo Viral", "Branco Bold", "Faixa Vermelha"],
+            height=24, font=ctk.CTkFont(size=9, weight="bold"),
+            command=lambda _: self._trigger_thumb_update()
+        )
+        self.thumb_seg_style.pack(fill="x")
+        style_map = {"yellow": "Amarelo Viral", "white": "Branco Bold", "badge": "Faixa Vermelha"}
+        self.thumb_seg_style.set(style_map.get(text_style, "Amarelo Viral"))
+
+        pos_col = ctk.CTkFrame(style_pos_row, fg_color="transparent")
+        pos_col.pack(side="right", fill="x", expand=True, padx=(4, 0))
+        ctk.CTkLabel(pos_col, text="Posição do Texto:", font=ctk.CTkFont(size=10, weight="bold"), text_color="#a1a1aa").pack(anchor="w")
+        self.thumb_seg_pos = ctk.CTkSegmentedButton(
+            pos_col,
+            values=["Topo (Safe Zone)", "Centro"],
+            height=24, font=ctk.CTkFont(size=9, weight="bold"),
+            command=lambda _: self._trigger_thumb_update()
+        )
+        self.thumb_seg_pos.pack(fill="x")
+        pos_map = {"top": "Topo (Safe Zone)", "center": "Centro"}
+        self.thumb_seg_pos.set(pos_map.get(text_position, "Topo (Safe Zone)"))
+
+        # 4. Seletor de Segundo / Frame
         time_row = ctk.CTkFrame(ctrl_frame, fg_color="transparent")
-        time_row.pack(fill="x", pady=(0, 10))
+        time_row.pack(fill="x", pady=(0, 8))
 
-        ctk.CTkLabel(time_row, text="Trocar segundo:", font=ctk.CTkFont(size=11, weight="bold"), text_color="#a1a1aa").pack(side="left", padx=(0, 6))
+        ctk.CTkLabel(time_row, text="Segundo do vídeo:", font=ctk.CTkFont(size=10, weight="bold"), text_color="#a1a1aa").pack(side="left", padx=(0, 6))
 
         for s_val in [0.5, 1.5, 3.0, 5.0]:
-            btn_preset = ctk.CTkButton(
-                time_row, text=f"{s_val}s", width=44, height=24,
+            ctk.CTkButton(
+                time_row, text=f"{s_val}s", width=42, height=24,
                 font=ctk.CTkFont(size=10, weight="bold"),
                 fg_color="#d97706" if abs(s_val - timestamp_sec) < 0.1 else "#27272a",
                 hover_color="#b45309",
-                command=lambda s=s_val: self._reextract_thumb(s)
-            )
-            btn_preset.pack(side="left", padx=2)
+                command=lambda s=s_val: self._on_thumb_time_preset(s)
+            ).pack(side="left", padx=2)
 
-        custom_ent = ctk.CTkEntry(time_row, width=54, height=24, font=ctk.CTkFont(size=10), justify="center")
-        custom_ent.insert(0, f"{timestamp_sec:.1f}")
-        custom_ent.pack(side="left", padx=(6, 2))
+        self.thumb_time_field = ctk.CTkEntry(time_row, width=54, height=24, font=ctk.CTkFont(size=10), justify="center")
+        self.thumb_time_field.insert(0, f"{timestamp_sec:.2f}")
+        self.thumb_time_field.pack(side="left", padx=(6, 4))
 
-        def _on_apply_custom():
-            try:
-                v = float(custom_ent.get().replace("s", "").strip())
-                self._reextract_thumb(v)
-            except Exception:
-                pass
-
-        ctk.CTkButton(
-            time_row, text="Aplicar", width=55, height=24,
+        # Botão Aplicar Atualização
+        self.btn_update_thumb = ctk.CTkButton(
+            time_row, text="🔄 Atualizar Capa", width=120, height=24,
             font=ctk.CTkFont(size=10, weight="bold"),
-            fg_color="#3f3f46", hover_color="#52525b",
-            command=_on_apply_custom
-        ).pack(side="left", padx=2)
+            fg_color="#f59e0b", hover_color="#d97706", text_color="#09090b",
+            command=self._trigger_thumb_update
+        )
+        self.btn_update_thumb.pack(side="right")
 
-        # Botões de Ação Direta
+        # 5. Linha de Ações Finais (Copiar / Salvar / Ver)
         act_row = ctk.CTkFrame(ctrl_frame, fg_color="transparent")
-        act_row.pack(fill="x", pady=(4, 0))
+        act_row.pack(fill="x", pady=(2, 0))
 
         ctk.CTkButton(
-            act_row, text="Copiar Imagem", width=120, height=30,
+            act_row, text="Copiar Imagem", width=125, height=30,
             image=icon_manager.get_icon("copy", size=(13, 13), color="#09090b"), compound="left",
             font=ctk.CTkFont(size=11, weight="bold"),
             fg_color="#fbbf24", hover_color="#f59e0b", text_color="#09090b",
@@ -1192,7 +1543,7 @@ class YTShortsAnalyzerTab(ctk.CTkFrame):
         ).pack(side="left", padx=(0, 6))
 
         ctk.CTkButton(
-            act_row, text="Ver Imagem", width=105, height=30,
+            act_row, text="Ver Imagem", width=100, height=30,
             image=icon_manager.get_icon("image", size=(13, 13), color="#ffffff"), compound="left",
             font=ctk.CTkFont(size=11),
             fg_color="#27272a", hover_color="#3f3f46",
@@ -1200,7 +1551,7 @@ class YTShortsAnalyzerTab(ctk.CTkFrame):
         ).pack(side="left", padx=(0, 6))
 
         ctk.CTkButton(
-            act_row, text="Abrir Pasta", width=100, height=30,
+            act_row, text="Abrir Pasta", width=95, height=30,
             image=icon_manager.get_icon("folder", size=(13, 13), color="#ffffff"), compound="left",
             font=ctk.CTkFont(size=11),
             fg_color="#27272a", hover_color="#3f3f46",

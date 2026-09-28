@@ -21,6 +21,7 @@ import subtitle_preview_helper
 from subtitle_editor_dialog import SubtitleEditorDialog, STYLE_KEY_MAP, STYLE_OPTIONS, EFFECT_OPTIONS, EFFECT_KEY_MAP
 from subtitle_corrector import apply_corrections_to_items, correct_phrase
 from censorship_editor_dialog import CensorshipEditorDialog
+from video_preview_player import VideoPreviewPlayer
 from video_trimmer import (
     parse_time_to_seconds,
     format_seconds_to_time,
@@ -388,9 +389,39 @@ class StudioPipelineTab(ctk.CTkFrame):
         self._build_step_toggle(steps_frame, 1, 2, "Watermarks", "@ANIMAX_97 (62px)\n+ Foto perfil circular", self.include_watermark, "#f59e0b")
         self._build_step_toggle(steps_frame, 1, 3, "CTA Bar", "Barra de Inscrição\n'Se inscreve no canal'", self.include_cta, "#22c55e")
 
-        # Subtitle Style & Review Bar
+        # Row 2: Player de Vídeo Embutido (Acima das legendas para conferência)
+        player_container = ctk.CTkFrame(steps_frame, fg_color=COLORS["bg_dark"], corner_radius=10, border_width=1, border_color=COLORS["border"])
+        player_container.grid(row=2, column=0, columnspan=4, padx=16, pady=(6, 8), sticky="ew")
+        player_container.grid_columnconfigure(0, weight=1)
+
+        p_header = ctk.CTkFrame(player_container, fg_color="transparent")
+        p_header.grid(row=0, column=0, padx=14, pady=(8, 2), sticky="ew")
+        p_header.grid_columnconfigure(0, weight=1)
+
+        ctk.CTkLabel(
+            p_header,
+            text="🎬 Player de Vídeo (Conferência de Legendas & Cortes):",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            text_color=COLORS["accent_secondary"]
+        ).grid(row=0, column=0, sticky="w")
+
+        ctk.CTkLabel(
+            p_header,
+            text="Assista ao vídeo e confira as falas em tempo real",
+            font=ctk.CTkFont(size=10),
+            text_color=COLORS["text_secondary"]
+        ).grid(row=0, column=1, sticky="e")
+
+        self.preview_player = VideoPreviewPlayer(
+            player_container,
+            max_width=440,
+            max_height=240
+        )
+        self.preview_player.grid(row=1, column=0, padx=10, pady=(2, 10))
+
+        # Row 3: Subtitle Style & Review Bar
         sub_bar = ctk.CTkFrame(steps_frame, fg_color=COLORS["bg_dark"], corner_radius=8)
-        sub_bar.grid(row=2, column=0, columnspan=4, padx=16, pady=(6, 8), sticky="ew")
+        sub_bar.grid(row=3, column=0, columnspan=4, padx=16, pady=(6, 8), sticky="ew")
         sub_bar.grid_columnconfigure(0, weight=1)
 
         ctk.CTkCheckBox(
@@ -468,9 +499,9 @@ class StudioPipelineTab(ctk.CTkFrame):
         # Inicializa o preview da legenda
         self._on_style_changed()
 
-        # Music section
+        # Row 4: Music section
         music_frame = ctk.CTkFrame(steps_frame, fg_color=COLORS["bg_dark"], corner_radius=8)
-        music_frame.grid(row=3, column=0, columnspan=4, padx=16, pady=(4, 14), sticky="ew")
+        music_frame.grid(row=4, column=0, columnspan=4, padx=16, pady=(4, 14), sticky="ew")
         music_frame.grid_columnconfigure(2, weight=1)
 
         # Linha 0: Toggle + Arquivo MP3 + Botao
@@ -608,9 +639,9 @@ class StudioPipelineTab(ctk.CTkFrame):
         )
         self.ducking_hint_label.grid(row=0, column=2, padx=(8, 0), sticky="w")
 
-        # Row 4: Protecao Anti-Strike & Censura Inteligente (Anime Shield 2026)
+        # Row 5: Protecao Anti-Strike & Censura Inteligente (Anime Shield 2026)
         safety_frame = ctk.CTkFrame(steps_frame, fg_color=COLORS["bg_dark"], corner_radius=8)
-        safety_frame.grid(row=4, column=0, columnspan=4, padx=16, pady=(4, 14), sticky="ew")
+        safety_frame.grid(row=5, column=0, columnspan=4, padx=16, pady=(4, 14), sticky="ew")
         safety_frame.grid_columnconfigure((0, 1), weight=1)
 
         # Header do Shield
@@ -814,13 +845,18 @@ class StudioPipelineTab(ctk.CTkFrame):
                         self._log(f"[CACHE] Título viral importado automaticamente: {viral_m['title']}")
             except Exception:
                 pass
+
+            if hasattr(self, "preview_player"):
+                self.preview_player.load_video(p)
         else:
             self.original_video_duration = 0.0
-            if hasattr(self, 'cache_status_badge'):
+            if hasattr(self, "cache_status_badge"):
                 self.cache_status_badge.configure(
                     text="[CACHE 24H: PRONTO]",
                     text_color=COLORS["accent_secondary"]
                 )
+            if hasattr(self, "preview_player"):
+                self.preview_player.stop()
         self._update_trim_summary()
 
     def _update_trim_summary(self):
@@ -1218,7 +1254,8 @@ class StudioPipelineTab(ctk.CTkFrame):
                     on_confirm=lambda items, s_key, pop: self._on_subtitles_approved(work_video, items, s_key, pop),
                     current_style=curr_style_key,
                     current_pop=curr_pop,
-                    video_duration=video_dur if video_dur > 0 else None
+                    video_duration=video_dur if video_dur > 0 else None,
+                    video_path=work_video
                 ))
             except Exception as e:
                 self._log(f"Erro na revisao: {e}")
