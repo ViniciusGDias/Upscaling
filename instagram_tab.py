@@ -62,10 +62,9 @@ class InstagramAnalyzerTab(ctk.CTkFrame):
         self.grid_columnconfigure(1, weight=6)
         self.grid_rowconfigure(0, weight=1)
 
-        # ── Coluna Esquerda: Controles ──
-        left_frame = ctk.CTkFrame(self, fg_color=COLOR_BG_DARK, corner_radius=8, border_width=1, border_color=COLOR_CARD_BORDER)
+        # ── Coluna Esquerda: Controles Scrolláveis ──
+        left_frame = ctk.CTkScrollableFrame(self, fg_color=COLOR_BG_DARK, corner_radius=8, border_width=1, border_color=COLOR_CARD_BORDER)
         left_frame.grid(row=0, column=0, sticky="nsew", padx=(5, 5), pady=5)
-        left_frame.grid_columnconfigure(0, weight=1)
 
         # Cabeçalho
         header_frame = ctk.CTkFrame(left_frame, fg_color="transparent")
@@ -152,6 +151,52 @@ class InstagramAnalyzerTab(ctk.CTkFrame):
         # Mini-Player Embutido para Prévia
         self.preview_player = VideoPreviewPlayer(file_box, max_width=320, max_height=180)
         self.preview_player.pack(fill="x", pady=(0, 6))
+
+        # ── AÇÃO RÁPIDA: Capa / Thumbnail do Reels (1080x1920) ──
+        thumb_btn_frame = ctk.CTkFrame(left_frame, fg_color="#181308", corner_radius=8, border_width=1, border_color="#f59e0b")
+        thumb_btn_frame.pack(fill="x", padx=15, pady=(4, 6))
+
+        tb_top = ctk.CTkFrame(thumb_btn_frame, fg_color="transparent")
+        tb_top.pack(fill="x", padx=10, pady=(6, 2))
+
+        ctk.CTkLabel(
+            tb_top, text="📸 Gerador de Capa Reels (1080x1920):",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            text_color="#fbbf24"
+        ).pack(side="left")
+
+        tb_row = ctk.CTkFrame(thumb_btn_frame, fg_color="transparent")
+        tb_row.pack(fill="x", padx=10, pady=(0, 6))
+
+        ctk.CTkLabel(tb_row, text="Frame no segundo:", font=ctk.CTkFont(size=11), text_color="#d4d4d8").pack(side="left")
+
+        self.thumb_time_entry = ctk.CTkEntry(tb_row, width=54, height=28, font=ctk.CTkFont(size=11), justify="center")
+        self.thumb_time_entry.insert(0, "1.5s")
+        self.thumb_time_entry.pack(side="left", padx=(6, 8))
+
+        self.btn_extract_thumb = ctk.CTkButton(
+            tb_row, text="Gerar Capa", width=115, height=28,
+            image=icon_manager.get_icon("image", size=(14, 14), color="#09090b"), compound="left",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            fg_color="#f59e0b", hover_color="#d97706", text_color="#09090b",
+            command=self._on_quick_extract_thumb
+        )
+        self.btn_extract_thumb.pack(side="left")
+
+        # ── Botão de Ação Principal: Analisar para Instagram ──
+        self.btn_analyze = ctk.CTkButton(
+            left_frame,
+            text="Analisar para Instagram Reels",
+            image=icon_manager.get_icon("sparkle", size=(16, 16), color="#09090b"), compound="left",
+            font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"),
+            height=40,
+            fg_color="#10b981",
+            hover_color="#059669",
+            text_color="#09090b",
+            corner_radius=6,
+            command=self._start_analysis
+        )
+        self.btn_analyze.pack(fill="x", padx=15, pady=(4, 8))
 
         # Obra / Anime / Dorama (Opcional - busca via API)
         work_box = ctk.CTkFrame(left_frame, fg_color="transparent")
@@ -255,48 +300,7 @@ class InstagramAnalyzerTab(ctk.CTkFrame):
         )
         self.chk_force_refresh.pack(side="right", pady=4)
 
-        # Botão de Ação Principal
-        self.btn_analyze = ctk.CTkButton(
-            left_frame,
-            text="Analisar para Instagram",
-            image=icon_manager.get_icon("sparkle", size=(16, 16), color="#ffffff"), compound="left",
-            font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
-            height=38,
-            fg_color="#18181b",
-            hover_color="#27272a",
-            border_width=1,
-            border_color="#52525b",
-            text_color="#fafafa",
-            corner_radius=6,
-            command=self._start_analysis
-        )
-        self.btn_analyze.pack(fill="x", padx=15, pady=(10, 6))
 
-        # Ação Rápida de Thumbnail do Reels (1080x1920)
-        thumb_btn_frame = ctk.CTkFrame(left_frame, fg_color="#181308", corner_radius=8, border_width=1, border_color="#f59e0b")
-        thumb_btn_frame.pack(fill="x", padx=15, pady=(0, 8))
-
-        tb_row = ctk.CTkFrame(thumb_btn_frame, fg_color="transparent")
-        tb_row.pack(fill="x", padx=10, pady=6)
-
-        ctk.CTkLabel(
-            tb_row, text="📸 Capa Reels:",
-            font=ctk.CTkFont(size=11, weight="bold"),
-            text_color="#fbbf24"
-        ).pack(side="left")
-
-        self.thumb_time_entry = ctk.CTkEntry(tb_row, width=52, height=26, font=ctk.CTkFont(size=11), justify="center")
-        self.thumb_time_entry.insert(0, "1.5s")
-        self.thumb_time_entry.pack(side="left", padx=4)
-
-        self.btn_extract_thumb = ctk.CTkButton(
-            tb_row, text="Gerar Capa", width=105, height=26,
-            image=icon_manager.get_icon("image", size=(13, 13), color="#09090b"), compound="left",
-            font=ctk.CTkFont(size=11, weight="bold"),
-            fg_color="#f59e0b", hover_color="#d97706", text_color="#09090b",
-            command=self._on_quick_extract_thumb
-        )
-        self.btn_extract_thumb.pack(side="right")
 
         # Log
         ctk.CTkLabel(left_frame, text="Log", font=ctk.CTkFont(size=10, weight="bold"), text_color="#3f3f46").pack(anchor="w", padx=15, pady=(4, 2))
@@ -325,16 +329,16 @@ class InstagramAnalyzerTab(ctk.CTkFrame):
 
         ctk.CTkLabel(
             self.placeholder_frame,
-            text="Central de Inteligência Instagram Reels",
+            text="Central de Inteligência & Capas Instagram Reels",
             font=ctk.CTkFont(family="Segoe UI", size=16, weight="bold"),
             text_color="#fafafa"
         ).pack(pady=(0, 6))
 
         ctk.CTkLabel(
             self.placeholder_frame,
-            text="Selecione um corte ou episódio e clique em 'Analisar para Instagram'\npara gerar ganchos virais, copies otimizadas para DMs/Saves, hashtags e capa.",
+            text="Selecione um corte de vídeo para extrair a Capa 1080x1920 imediatamente\nou clique em 'Analisar para Instagram' para ganchos virais, copies e hashtags.",
             font=ctk.CTkFont(family="Segoe UI", size=12),
-            text_color="#71717a",
+            text_color="#a1a1aa",
             justify="center"
         ).pack()
 
@@ -397,6 +401,8 @@ class InstagramAnalyzerTab(ctk.CTkFrame):
             if hasattr(self, "preview_player"):
                 self.preview_player.load_video(path)
             self._log(f"Vídeo carregado: {path} ({info['resolution']}, {info['duration_str']})")
+            # Extrai e exibe automaticamente a Capa/Thumbnail no painel direito
+            self.after(100, self._on_quick_extract_thumb)
 
     def _start_analysis(self, force_refresh: bool = False):
         path = self.file_entry.get().strip()
