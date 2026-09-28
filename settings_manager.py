@@ -8,15 +8,35 @@ import os
 import re
 import json
 import requests
+import sys
 from pathlib import Path
 from typing import Dict, Any, List, Tuple, Optional
 from dotenv import load_dotenv
 
-ENV_PATH = Path(__file__).parent / ".env"
+def get_env_path() -> Path:
+    """Find .env path robustly whether running as script or compiled PyInstaller binary."""
+    if getattr(sys, "frozen", False):
+        exe_dir = Path(sys.executable).parent
+        if (exe_dir / ".env").exists():
+            return exe_dir / ".env"
+        if (exe_dir.parent.parent / ".env").exists():
+            return exe_dir.parent.parent / ".env"
+        if (exe_dir.parent / ".env").exists():
+            return exe_dir.parent / ".env"
+        return exe_dir / ".env"
+    file_env = Path(__file__).parent / ".env"
+    if file_env.exists():
+        return file_env
+    cwd_env = Path.cwd() / ".env"
+    if cwd_env.exists():
+        return cwd_env
+    return file_env
+
+ENV_PATH = get_env_path()
 
 AVAILABLE_GEMINI_MODELS = [
+    ("gemini-3.8-flash", "Gemini 3.8 Flash (Mais Novo / Rápido / Grátis)"),
     ("gemini-3.6-flash", "Gemini 3.6 Flash (Mais Estável & Rápido)"),
-    ("gemini-3.8-flash", "Gemini 3.8 Flash (Mais Novo / Grátis)"),
     ("gemini-3.7-flash", "Gemini 3.7 Flash (Grátis)"),
     ("gemini-3.5-flash", "Gemini 3.5 Flash (Grátis)"),
     ("gemini-flash-lite-latest", "Gemini Flash Lite (Ultra Rápido / 500 RPD)"),
@@ -27,8 +47,12 @@ AVAILABLE_GEMINI_MODELS = [
 
 def load_app_settings() -> Dict[str, Any]:
     """Load settings from .env file."""
+    global ENV_PATH
+    ENV_PATH = get_env_path()
     if ENV_PATH.exists():
         load_dotenv(ENV_PATH, override=True)
+    else:
+        load_dotenv(override=False)
 
     gemini_raw = os.getenv("GEMINI_API_KEY", "")
     # Format gemini keys as one per line for the UI textarea
@@ -100,6 +124,8 @@ def save_app_settings(
         os.environ["CHECK_UPDATES_ON_STARTUP"] = "true" if check_updates else "false"
 
         # Read existing .env if present to preserve other keys
+        global ENV_PATH
+        ENV_PATH = get_env_path()
         env_lines = []
         if ENV_PATH.exists():
             with open(ENV_PATH, "r", encoding="utf-8") as f:
@@ -223,3 +249,11 @@ def test_openrouter_connection(api_key: str) -> Tuple[bool, str]:
         return False, f"OpenRouter retornou HTTP {resp.status_code}"
     except Exception as e:
         return False, f"Falha ao conectar com OpenRouter: {e}"
+
+
+# Auto-load on import so os.environ is ready across all modules
+try:
+    load_app_settings()
+except Exception:
+    pass
+

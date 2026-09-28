@@ -17,6 +17,15 @@ from director_ai import (
 )
 from metadata_enricher import get_enriched_context_for_prompt
 
+COPY_TEMPLATES = {
+    "Padrão": "",
+    "Anime / Geek Épico": "Tom épico e empolgante para público otaku/geek, destacando momentos icônicos, falas de impacto e poder dos personagens.",
+    "Dorama / Emocional": "Conexão emocional profunda, foco na química entre personagens, momentos de tensão dramática e romance.",
+    "Curiosidade / Mistério": "Gera curiosidade irresistível com perguntas intrigantes no início e promessa de revelação chocante.",
+    "CTA Agressivo / Engajamento": "Foco em bater recordes de comentários e compartilhamentos via DM, provocando o público com opiniões polarizadoras.",
+    "Humor / Relatable": "Tom descontraído de meme e identificação imediata ('Acontece com todo mundo', 'Quem nunca fez isso?').",
+}
+
 INSTAGRAM_CONTEXT = """
 Você é o maior especialista mundial em conteúdo viral para o Instagram (Reels, Feed e Stories). Você possui conhecimento profundo sobre:
 1. ALGORITMO DO INSTAGRAM:
@@ -71,25 +80,151 @@ Você conhece TODOS os doramas populares, seus arcos emocionais, e sabe identifi
 """
 
 
+def _repair_truncated_json(text: str) -> Optional[Dict[str, Any]]:
+    """
+    Tenta reparar e fechar de forma resiliente JSONs truncados ou cortados pela IA
+    (quando atinge limite de tokens ou falha de conexão).
+    """
+    if not text or not isinstance(text, str):
+        return None
+    s = text.strip()
+    first_brace = s.find("{")
+    if first_brace == -1:
+        return None
+    s = s[first_brace:]
+
+    # 1. Tentar parse direto
+    try:
+        return json.loads(s)
+    except Exception:
+        pass
+
+    # 2. Tentar cortar a partir da última chave fechada
+    last_brace = s.rfind("}")
+    if last_brace != -1:
+        try:
+            return json.loads(s[:last_brace + 1])
+        except Exception:
+            pass
+
+    # 3. Balanceamento de aspas e colchetes/chaves
+    stack = []
+    in_string = False
+    escape = False
+    clean_chars = []
+
+    for ch in s:
+        if escape:
+            clean_chars.append(ch)
+            escape = False
+            continue
+        if ch == '\\':
+            clean_chars.append(ch)
+            escape = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            clean_chars.append(ch)
+            continue
+        clean_chars.append(ch)
+        if not in_string:
+            if ch in ('{', '['):
+                stack.append('}' if ch == '{' else ']')
+            elif ch in ('}', ']'):
+                if stack and stack[-1] == ch:
+                    stack.pop()
+
+    repaired = "".join(clean_chars)
+    if in_string:
+        repaired += '"'
+
+    # Remove vírgulas órfãs no final ou chaves incompletas como `,"campo":` ou `,"campo"`
+    repaired = re.sub(r',\s*$', '', repaired)
+    repaired = re.sub(r',\s*"(?:[^"\\]|\\.)*"\s*:\s*$', '', repaired)
+    repaired = re.sub(r',\s*"(?:[^"\\]|\\.)*"\s*$', '', repaired)
+    repaired = re.sub(r':\s*$', ': null', repaired)
+
+    # Fecha colchetes e chaves pendentes
+    closing = "".join(reversed(stack))
+    try:
+        res = json.loads(repaired + closing)
+        if isinstance(res, dict) and len(res) > 0:
+            return res
+    except Exception:
+        pass
+
+    # 4. Backtracking progressivo até o último nó estrutural válido
+    cur = repaired
+    for _ in range(25):
+        last_cut = max(cur.rfind(','), cur.rfind('}'), cur.rfind(']'))
+        if last_cut <= 0:
+            break
+        cur = cur[:last_cut].rstrip()
+        if cur.endswith(','):
+            cur = cur[:-1].rstrip()
+
+        stk = []
+        in_s = False
+        esc = False
+        for c in cur:
+            if esc:
+                esc = False
+                continue
+            if c == '\\':
+                esc = True
+                continue
+            if c == '"':
+                in_s = not in_s
+                continue
+            if not in_s:
+                if c in ('{', '['):
+                    stk.append('}' if c == '{' else ']')
+                elif c in ('}', ']'):
+                    if stk and stk[-1] == c:
+                        stk.pop()
+
+        attempt = cur + ('"' if in_s else "") + "".join(reversed(stk))
+        try:
+            res = json.loads(attempt)
+            if isinstance(res, dict) and len(res) > 0:
+                return res
+        except Exception:
+            continue
+
+    return None
+
+
 def _parse_ai_json(text: str) -> Dict[str, Any]:
-    """Parse JSON from AI response robustly."""
+    """Parse JSON from AI response robustly with auto-repair for truncated output."""
     if not text:
         return {}
     clean = text.strip()
     if "```json" in clean:
-        clean = clean.split("```json")[1].split("```")[0].strip()
+        clean = clean.split("```json", 1)[1]
+        if "```" in clean:
+            clean = clean.split("```", 1)[0]
     elif "```" in clean:
-        clean = clean.split("```")[1].split("```")[0].strip()
+        clean = clean.split("```", 1)[1]
+        if "```" in clean:
+            clean = clean.split("```", 1)[0]
+    clean = clean.strip()
 
     try:
         return json.loads(clean)
     except Exception:
+        repaired = _repair_truncated_json(clean)
+        if repaired and isinstance(repaired, dict):
+            return repaired
+
         match = re.search(r'\{.*\}', clean, re.DOTALL)
         if match:
             try:
                 return json.loads(match.group(0))
             except Exception:
-                pass
+                repaired = _repair_truncated_json(match.group(0))
+                if repaired and isinstance(repaired, dict):
+                    return repaired
+
     return {"raw_response": text, "parse_error": True}
 
 
@@ -98,7 +233,8 @@ def build_instagram_analysis_prompt(
     work_name: str = "",
     enriched_context: str = "",
     transcript: str = "",
-    language_en: bool = False
+    language_en: bool = False,
+    language: str = "pt"
 ) -> str:
     """Build prompt for Instagram Reels analysis with rich pop culture / anime API grounding."""
     ctx_parts = []
@@ -110,11 +246,14 @@ def build_instagram_analysis_prompt(
         ctx_parts.append(enriched_context)
 
     ctx_instruction = "\n" + "\n".join(ctx_parts) + "\n" if ctx_parts else ""
-    lang_instruction = (
-        "IMPORTANT: Write all analysis, captions, and text strictly in ENGLISH."
-        if language_en else
-        "Sua resposta e análise devem ser escritas inteiramente em PORTUGUÊS DO BRASIL."
-    )
+
+    lang_lower = (language or "pt").lower()
+    if language_en or lang_lower in ("en", "english", "ingles", "inglês"):
+        lang_instruction = "IMPORTANT: Write all analysis, captions, and text strictly in ENGLISH."
+    elif lang_lower in ("es", "spanish", "espanhol", "español"):
+        lang_instruction = "IMPORTANTE: Escribe todo el análisis, leyendas (captions) y textos estrictamente en ESPAÑOL."
+    else:
+        lang_instruction = "Sua resposta e análise devem ser escritas inteiramente em PORTUGUÊS DO BRASIL."
 
     return f"""{INSTAGRAM_CONTEXT}
 TAREFA: Analise o vídeo com base na transcrição de falas, no contexto da obra e nos metadados fornecidos e entregue uma estratégia completa de otimização para viralizar no Instagram Reels.
@@ -137,6 +276,7 @@ Responda EXATAMENTE neste formato JSON:
     "optimization": {{
         "viral_score": 85,
         "viral_score_explanation": "Explicação detalhada da nota baseada no algoritmo do Instagram Reels",
+        "hook_grade": "EXCELENTE / BOM / ATENCAO / FRACO",
         "hook_quality": "Análise crítica do gancho nos primeiros 2 segundos",
         "suggested_hook": "Sugestão de gancho visual/verbal muito mais magnético",
         "loop_strategy": "Instrução exata de como fazer o vídeo ter um loop invisível",
@@ -178,9 +318,11 @@ def build_yt_shorts_analysis_prompt(
     anime: str = "",
     scene_type: str = "",
     category: str = "anime",
+    context: str = "",
     enriched_context: str = "",
     transcript: str = "",
-    language_en: bool = False
+    language_en: bool = False,
+    language: str = "pt"
 ) -> str:
     """Build prompt for YouTube Shorts analysis with rich pop culture / anime API grounding."""
     cat_lower = (category or "").strip().lower()
@@ -206,15 +348,19 @@ def build_yt_shorts_analysis_prompt(
         ctx_parts.append(f"{work_label}: {anime}")
     if scene_type:
         ctx_parts.append(f"Tipo de cena: {scene_type}")
+    if context:
+        ctx_parts.append(f"Contexto Adicional do Criador: {context}")
     if enriched_context:
         ctx_parts.append(enriched_context)
     ctx_instruction = "\nContexto extra fornecido:\n" + "\n".join(ctx_parts) if ctx_parts else ""
 
-    lang_instruction = (
-        "IMPORTANT: Write all titles, descriptions, tags, comments and analysis strictly in ENGLISH."
-        if language_en else
-        "Sua resposta e análise devem ser escritas inteiramente em PORTUGUÊS DO BRASIL."
-    )
+    lang_lower = (language or "pt").lower()
+    if language_en or lang_lower in ("en", "english", "ingles", "inglês"):
+        lang_instruction = "IMPORTANT: Write all titles, descriptions, tags, comments and analysis strictly in ENGLISH."
+    elif lang_lower in ("es", "spanish", "espanhol", "español"):
+        lang_instruction = "IMPORTANTE: Escribe todos los títulos, descripciones, tags, comentarios y análisis estrictamente en ESPAÑOL."
+    else:
+        lang_instruction = "Sua resposta e análise devem ser escritas inteiramente em PORTUGUÊS DO BRASIL."
 
     return f"""{base_context}
 TAREFA: Analise este vídeo e forneça uma estratégia impecável de otimização para viralizar no YouTube Shorts.
@@ -239,6 +385,7 @@ Responda EXATAMENTE neste formato JSON:
     "optimization": {{
         "viral_score": 88,
         "viral_score_explanation": "Explicação da nota com base no algoritmo do Shorts (retenção e swipe rate)",
+        "hook_grade": "EXCELENTE / BOM / ATENCAO / FRACO",
         "hook_quality": "Análise detalhada do gancho nos primeiros 3 segundos",
         "suggested_hook": "Sugestão de gancho (verbal/visual) para impedir o swipe",
         "loop_strategy": "Estratégia para conectar o áudio/visual do fim com o início para >100% retenção",
@@ -312,41 +459,277 @@ REGRAS CRÍTICAS PARA AS DESCRIÇÕES:
 """
 
 
+def _sec_to_ts(s: float) -> str:
+    m = int(s // 60)
+    sec = int(s % 60)
+    return f"{m:02d}:{sec:02d}"
+
+
+def extract_hook_thumbnail(
+    video_path: str,
+    output_path: Optional[str] = None,
+    timestamp_sec: float = 1.5,
+    ffmpeg_bin: str = "ffmpeg"
+) -> Optional[str]:
+    """
+    Extrai frame de alta qualidade (1080x1920) no ápice do gancho (ex: 1.5s)
+    para ser utilizado como Capa / Thumbnail de alto CTR no YouTube Shorts e Instagram Reels.
+    """
+    if not video_path or not os.path.exists(video_path):
+        return None
+    try:
+        p = Path(video_path)
+        if not output_path:
+            output_path = str(p.parent / f"{p.stem}_capa_hook.jpg")
+
+        import subprocess
+        cmd = [
+            ffmpeg_bin, "-y",
+            "-ss", f"{timestamp_sec:.2f}",
+            "-i", str(video_path),
+            "-vframes", "1",
+            "-q:v", "2",
+            str(output_path)
+        ]
+        flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=flags)
+        if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+            return output_path
+
+        # Fallback para 0.5s se 1.5s ultrapassar duração
+        cmd[2] = "0.50"
+        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=flags)
+        if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+            return output_path
+    except Exception:
+        pass
+    return None
+
+
+def adapt_yt_to_instagram(yt_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Converte análise do YouTube Shorts diretamente para o formato do Instagram Reels."""
+    if not yt_data or not isinstance(yt_data, dict):
+        return {}
+    va = yt_data.get("video_analysis") or {}
+    opt = yt_data.get("optimization") or {}
+    titles = yt_data.get("titles") or []
+    descriptions = yt_data.get("descriptions") or []
+    tags = yt_data.get("tags") or []
+    captions = yt_data.get("video_captions") or []
+
+    # Converte tags do YouTube em hashtags do Instagram
+    insta_hashtags = []
+    for t in tags[:15]:
+        clean = re.sub(r'[^a-zA-Z0-9_]', '', t.replace(" ", ""))
+        if clean and not clean.startswith("#"):
+            insta_hashtags.append(f"#{clean.lower()}")
+        elif clean:
+            insta_hashtags.append(clean.lower())
+    if "#reels" not in insta_hashtags:
+        insta_hashtags.insert(0, "#reels")
+    if "#viral" not in insta_hashtags:
+        insta_hashtags.insert(1, "#viral")
+
+    adapted_captions = []
+    for d in descriptions:
+        full = d.get("full_caption") or (d.get("first_line", "") + "\n\n" + d.get("body", "") + "\n\n" + d.get("cta", ""))
+        adapted_captions.append({
+            "caption": full,
+            "style": d.get("style", "Geral"),
+            "why_works": d.get("why_works", "")
+        })
+
+    first_cta = descriptions[0].get("cta", "Salve para ver depois e compartilhe na DM!") if descriptions else "Compartilhe na DM!"
+
+    return {
+        "source_network": "youtube_shorts",
+        "adapted_for": "instagram_reels",
+        "content_summary": va.get("content_summary", ""),
+        "characters_detected": va.get("characters_detected", []),
+        "hook_analysis": {
+            "score": opt.get("viral_score", 85),
+            "explanation": opt.get("viral_score_explanation", ""),
+            "hook_quality": opt.get("hook_quality", ""),
+            "suggested_hook": opt.get("suggested_hook", "")
+        },
+        "suggested_captions": adapted_captions,
+        "hashtags": insta_hashtags,
+        "video_captions": captions,
+        "call_to_actions": [first_cta],
+        "viral_tricks": opt.get("retention_tricks", [])
+    }
+
+
+def adapt_instagram_to_yt(insta_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Converte análise do Instagram Reels diretamente para o formato do YouTube Shorts."""
+    if not insta_data or not isinstance(insta_data, dict):
+        return {}
+    va = insta_data.get("video_analysis") or {}
+    hook_info = insta_data.get("hook_analysis") or {}
+    captions = insta_data.get("suggested_captions") or []
+    hashtags = insta_data.get("hashtags") or []
+    video_caps = insta_data.get("video_captions") or []
+
+    yt_tags = [h.replace("#", "") for h in hashtags if h.replace("#", "")]
+    first_cap = captions[0].get("caption", "") if captions else ""
+    first_line = first_cap.split("\n")[0][:80] if first_cap else "Momento Épico!"
+
+    titles = [
+        {"title": f"{first_line} #shorts", "style": "Hype / Viral", "why_works": "Inspirado no gancho viral do Reels"},
+        {"title": f"VOCÊ JÁ VIU ISSO?! 🔥 #shorts", "style": "Curiosidade", "why_works": "Provoca clique imediato no feed"},
+        {"title": f"O final vai te chocar... 😱 #shorts", "style": "Suspense", "why_works": "Alto potencial de retenção"}
+    ]
+
+    yt_descriptions = [{
+        "style": "Storytelling Instagram Adaptado",
+        "first_line": first_line,
+        "body": first_cap,
+        "cta": "Inscreva-se no canal para mais vídeos como este e ative as notificações! 🚀",
+        "hashtags_inline": " ".join([f"#{t}" for t in yt_tags[:5]]),
+        "full_caption": f"{first_line}\n\n{first_cap}\n\nInscreva-se no canal e deixe seu like! 🚀\n\n{' '.join([f'#{t}' for t in yt_tags[:5]])}",
+        "why_works": "Adaptado do Reels mantendo narrativa e direcionando CTA para inscritos"
+    }]
+
+    return {
+        "source_network": "instagram_reels",
+        "adapted_for": "youtube_shorts",
+        "video_analysis": {
+            "content_summary": insta_data.get("content_summary") or va.get("content_summary", ""),
+            "characters_detected": insta_data.get("characters_detected") or va.get("characters_detected", []),
+            "strengths": ["Alto apelo visual testado para Reels"],
+            "weaknesses": []
+        },
+        "optimization": {
+            "viral_score": hook_info.get("score", 85),
+            "viral_score_explanation": hook_info.get("explanation", ""),
+            "hook_quality": hook_info.get("hook_quality", ""),
+            "suggested_hook": hook_info.get("suggested_hook", ""),
+            "retention_tricks": insta_data.get("viral_tricks", [])
+        },
+        "titles": titles,
+        "descriptions": yt_descriptions,
+        "tags": yt_tags[:15],
+        "video_captions": video_caps
+    }
+
+
 def analyze_instagram_video(
     video_path: str,
     context: str = "",
     work_name: str = "",
     language_en: bool = False,
+    language: str = "pt",
+    force_refresh: bool = False,
     ffmpeg_bin: str = "ffmpeg",
     on_log: Optional[Callable[[str], None]] = None,
     log_cb: Optional[Callable[[str], None]] = None,
     **kwargs
 ) -> Dict[str, Any]:
-    """Execute full Instagram Reels video analysis with optional Anime/Dorama API grounding."""
+    """Execute full Instagram Reels video analysis with optional Anime/Dorama API grounding and 24h AI caching."""
     _logger = on_log or log_cb
 
     def _log(m):
         if _logger:
             _logger(m)
 
+    try:
+        from ai_cache_hub import ai_cache
+    except Exception:
+        ai_cache = None
+
+    # Check cached analysis unless force_refresh is requested
+    if ai_cache and not force_refresh:
+        cached_res = ai_cache.get(video_path, "instagram_analysis")
+        if (cached_res and isinstance(cached_res, dict) and
+            not cached_res.get("parse_error") and
+            ("hook_analysis" in cached_res or "suggested_captions" in cached_res)):
+            _log("⚡ [Cache Inteligente 24h] Análise Instagram recuperada instantaneamente (0 tokens gastos)!")
+            return cached_res
+
     _log("📸 Iniciando análise para Instagram Reels...")
     _log(f"   Arquivo: {os.path.basename(video_path)}")
 
-    # 1. Transcribe audio if available
+    # 1. Transcribe audio if available (check cache first)
     transcript = ""
-    try:
-        _log("🎙️ Extraindo áudio do vídeo...")
-        audio_path = extract_audio(video_path, ffmpeg_bin=ffmpeg_bin)
-        _log("✓ Áudio extraído. Gerando transcrição com timestamps...")
-        transcript = transcribe_video_audio(audio_path, on_log=_log)
-        if transcript:
-            _log(f"✓ Transcrição gerada ({len(transcript.splitlines())} segmentos de fala)")
+    if ai_cache and not force_refresh:
+        cached_dt = ai_cache.get(video_path, "director_transcript")
+        if cached_dt and isinstance(cached_dt, str):
+            transcript = cached_dt
+            _log("⚡ [Cache Inteligente 24h] Transcrição recuperada do cache (0 tokens gastos)!")
+        else:
+            cached_trans = ai_cache.get(video_path, "transcription")
+            if cached_trans and isinstance(cached_trans, dict):
+                words = cached_trans.get("words", [])
+                if words:
+                    lines = []
+                    curr = []
+                    st = None
+                    for w in words:
+                        s = float(w.get("start", 0.0))
+                        e = float(w.get("end", 0.0))
+                        txt = w.get("word") if "word" in w else w.get("text", "")
+                        if st is None:
+                            st = s
+                        curr.append(txt)
+                        if len(curr) >= 8 or (txt and txt[-1] in ".!?"):
+                            lines.append(f"[{_sec_to_ts(st)} -> {_sec_to_ts(e)}] {' '.join(curr)}")
+                            curr = []
+                            st = None
+                    if curr and st is not None:
+                        lines.append(f"[{_sec_to_ts(st)} -> {_sec_to_ts(e)}] {' '.join(curr)}")
+                    transcript = "\n".join(lines)
+                    _log("⚡ [Cache Inteligente 24h] Falas e diálogos sincronizados a partir do cache Whisper!")
+
+    if not transcript and ai_cache:
         try:
-            os.remove(audio_path)
+            cut_origin = ai_cache.get_cut_origin(video_path)
+            if cut_origin:
+                src_ep = cut_origin.get("source_episode_path") or cut_origin.get("source_episode")
+                st_sec = cut_origin.get("start_sec")
+                end_sec = cut_origin.get("end_sec")
+                if src_ep and st_sec is not None and end_sec is not None:
+                    src_trans = ai_cache.get(src_ep, "transcription")
+                    if src_trans and isinstance(src_trans, dict):
+                        words = src_trans.get("words", [])
+                        cut_words = [w for w in words if float(st_sec) - 0.5 <= float(w.get("start", 0)) <= float(end_sec) + 0.5]
+                        if cut_words:
+                            lines = []
+                            curr = []
+                            st_rel = None
+                            for w in cut_words:
+                                s = max(0.0, float(w.get("start", 0)) - float(st_sec))
+                                e = max(s + 0.1, float(w.get("end", 0)) - float(st_sec))
+                                txt = w.get("word") if "word" in w else w.get("text", "")
+                                if st_rel is None:
+                                    st_rel = s
+                                curr.append(txt)
+                                if len(curr) >= 8 or (txt and txt[-1] in ".!?"):
+                                    lines.append(f"[{_sec_to_ts(st_rel)} -> {_sec_to_ts(e)}] {' '.join(curr)}")
+                                    curr = []
+                                    st_rel = None
+                            if curr and st_rel is not None:
+                                lines.append(f"[{_sec_to_ts(st_rel)} -> {_sec_to_ts(e)}] {' '.join(curr)}")
+                            transcript = "\n".join(lines)
+                            _log("⚡ [Cache Inteligente] Diálogos herdados do episódio original (0s gastos, sem re-transcrever)!")
         except Exception:
             pass
-    except Exception as e:
-        _log(f"⚠ Aviso ao transcrever áudio: {e}. Prosseguindo com análise contextual...")
+
+    if not transcript:
+        try:
+            _log("🎙️ Extraindo áudio do vídeo...")
+            audio_path = extract_audio(video_path, ffmpeg_bin=ffmpeg_bin)
+            _log("✓ Áudio extraído. Gerando transcrição com timestamps...")
+            transcript = transcribe_video_audio(audio_path, on_log=_log)
+            if transcript:
+                _log(f"✓ Transcrição gerada ({len(transcript.splitlines())} segmentos de fala)")
+                if ai_cache:
+                    ai_cache.set(video_path, "director_transcript", transcript)
+            try:
+                os.remove(audio_path)
+            except Exception:
+                pass
+        except Exception as e:
+            _log(f"⚠ Aviso ao transcrever áudio: {e}. Prosseguindo com análise contextual...")
 
     # 2. Enrich context via Anime/Dorama APIs (Kitsu, MyAnimeList, TVMaze)
     enriched_context = ""
@@ -363,7 +746,8 @@ def analyze_instagram_video(
         work_name=work_name,
         enriched_context=enriched_context,
         transcript=transcript,
-        language_en=language_en
+        language_en=language_en,
+        language=language
     )
     raw_response = call_ai_text(prompt, on_log=_log, max_tokens=4096)
 
@@ -371,6 +755,26 @@ def analyze_instagram_video(
     data = _parse_ai_json(raw_response)
     data["_transcript"] = transcript
     data["_enriched_context"] = enriched_context
+
+    # Extrai frame de capa para Thumbnail de Alto CTR (1080x1920)
+    thumb_path = extract_hook_thumbnail(video_path, ffmpeg_bin=ffmpeg_bin)
+    if thumb_path:
+        data["_thumbnail_path"] = thumb_path
+        data["_thumbnail_sec"] = 1.5
+        _log(f"🖼️ [Thumbnail Hook CTR] Capa 1080x1920 extraída com sucesso: {os.path.basename(thumb_path)}")
+
+    if ai_cache and data and not data.get("parse_error") and ("hook_analysis" in data or "suggested_captions" in data):
+        ai_cache.set(video_path, "instagram_analysis", data)
+        # Salva metadados virais para compartilhamento
+        viral_info = {
+            "title": data.get("title") or data.get("hook_text") or "",
+            "hashtags": data.get("hashtags", []),
+            "source": "instagram"
+        }
+        ai_cache.set(video_path, "viral_metadata", viral_info)
+    elif data.get("parse_error") and ai_cache:
+        ai_cache.invalidate(video_path, "instagram_analysis")
+
     return data
 
 
@@ -380,38 +784,123 @@ def analyze_yt_shorts_video(
     anime: str = "",
     scene_type: str = "",
     category: str = "anime",
+    context: str = "",
     language_en: bool = False,
+    language: str = "pt",
+    force_refresh: bool = False,
     ffmpeg_bin: str = "ffmpeg",
     on_log: Optional[Callable[[str], None]] = None,
     log_cb: Optional[Callable[[str], None]] = None,
     **kwargs
 ) -> Dict[str, Any]:
-    """Execute full YouTube Shorts video analysis with Anime/Dorama API grounding."""
+    """Execute full YouTube Shorts video analysis with Anime/Dorama API grounding and 24h AI caching."""
     _logger = on_log or log_cb
 
     def _log(m):
         if _logger:
             _logger(m)
 
+    try:
+        from ai_cache_hub import ai_cache
+    except Exception:
+        ai_cache = None
+
+    # Check cached analysis unless force_refresh is requested
+    if ai_cache and not force_refresh:
+        cached_res = ai_cache.get(video_path, "yt_shorts_analysis")
+        if (cached_res and isinstance(cached_res, dict) and
+            not cached_res.get("parse_error") and
+            ("video_analysis" in cached_res or "optimization" in cached_res)):
+            _log("⚡ [Cache Inteligente 24h] Análise YouTube Shorts recuperada instantaneamente (0 tokens gastos)!")
+            return cached_res
+
     _log("▶️ Iniciando análise para YouTube Shorts...")
     _log(f"   Arquivo: {os.path.basename(video_path)}")
     _log(f"   Categoria: {category.capitalize()} | Idioma: {'Inglês' if language_en else 'Português'}")
+    if context.strip():
+        _log(f"   Contexto extra: {context.strip()}")
 
-    # 1. Transcribe audio if available
+    # 1. Transcribe audio if available (check cache first)
     transcript = ""
-    try:
-        _log("🎙️ Extraindo áudio do vídeo...")
-        audio_path = extract_audio(video_path, ffmpeg_bin=ffmpeg_bin)
-        _log("✓ Áudio extraído. Gerando transcrição com timestamps...")
-        transcript = transcribe_video_audio(audio_path, on_log=_log)
-        if transcript:
-            _log(f"✓ Transcrição gerada ({len(transcript.splitlines())} segmentos)")
+    if ai_cache and not force_refresh:
+        cached_dt = ai_cache.get(video_path, "director_transcript")
+        if cached_dt and isinstance(cached_dt, str):
+            transcript = cached_dt
+            _log("⚡ [Cache Inteligente 24h] Transcrição recuperada do cache (0 tokens gastos)!")
+        else:
+            cached_trans = ai_cache.get(video_path, "transcription")
+            if cached_trans and isinstance(cached_trans, dict):
+                words = cached_trans.get("words", [])
+                if words:
+                    lines = []
+                    curr = []
+                    st = None
+                    for w in words:
+                        s = float(w.get("start", 0.0))
+                        e = float(w.get("end", 0.0))
+                        txt = w.get("word") if "word" in w else w.get("text", "")
+                        if st is None:
+                            st = s
+                        curr.append(txt)
+                        if len(curr) >= 8 or (txt and txt[-1] in ".!?"):
+                            lines.append(f"[{_sec_to_ts(st)} -> {_sec_to_ts(e)}] {' '.join(curr)}")
+                            curr = []
+                            st = None
+                    if curr and st is not None:
+                        lines.append(f"[{_sec_to_ts(st)} -> {_sec_to_ts(e)}] {' '.join(curr)}")
+                    transcript = "\n".join(lines)
+                    _log("⚡ [Cache Inteligente 24h] Falas e diálogos sincronizados a partir do cache Whisper!")
+
+    if not transcript and ai_cache:
         try:
-            os.remove(audio_path)
+            cut_origin = ai_cache.get_cut_origin(video_path)
+            if cut_origin:
+                src_ep = cut_origin.get("source_episode_path") or cut_origin.get("source_episode")
+                st_sec = cut_origin.get("start_sec")
+                end_sec = cut_origin.get("end_sec")
+                if src_ep and st_sec is not None and end_sec is not None:
+                    src_trans = ai_cache.get(src_ep, "transcription")
+                    if src_trans and isinstance(src_trans, dict):
+                        words = src_trans.get("words", [])
+                        cut_words = [w for w in words if float(st_sec) - 0.5 <= float(w.get("start", 0)) <= float(end_sec) + 0.5]
+                        if cut_words:
+                            lines = []
+                            curr = []
+                            st_rel = None
+                            for w in cut_words:
+                                s = max(0.0, float(w.get("start", 0)) - float(st_sec))
+                                e = max(s + 0.1, float(w.get("end", 0)) - float(st_sec))
+                                txt = w.get("word") if "word" in w else w.get("text", "")
+                                if st_rel is None:
+                                    st_rel = s
+                                curr.append(txt)
+                                if len(curr) >= 8 or (txt and txt[-1] in ".!?"):
+                                    lines.append(f"[{_sec_to_ts(st_rel)} -> {_sec_to_ts(e)}] {' '.join(curr)}")
+                                    curr = []
+                                    st_rel = None
+                            if curr and st_rel is not None:
+                                lines.append(f"[{_sec_to_ts(st_rel)} -> {_sec_to_ts(e)}] {' '.join(curr)}")
+                            transcript = "\n".join(lines)
+                            _log("⚡ [Cache Inteligente] Diálogos herdados do episódio original (0s gastos, sem re-transcrever)!")
         except Exception:
             pass
-    except Exception as e:
-        _log(f"⚠ Aviso ao transcrever áudio: {e}. Prosseguindo com análise...")
+
+    if not transcript:
+        try:
+            _log("🎙️ Extraindo áudio do vídeo...")
+            audio_path = extract_audio(video_path, ffmpeg_bin=ffmpeg_bin)
+            _log("✓ Áudio extraído. Gerando transcrição com timestamps...")
+            transcript = transcribe_video_audio(audio_path, on_log=_log)
+            if transcript:
+                _log(f"✓ Transcrição gerada ({len(transcript.splitlines())} segmentos)")
+                if ai_cache:
+                    ai_cache.set(video_path, "director_transcript", transcript)
+            try:
+                os.remove(audio_path)
+            except Exception:
+                pass
+        except Exception as e:
+            _log(f"⚠ Aviso ao transcrever áudio: {e}. Prosseguindo com análise...")
 
     # 2. Enrich context via Anime/Dorama APIs (Kitsu, MyAnimeList, TVMaze)
     enriched_context = ""
@@ -428,9 +917,11 @@ def analyze_yt_shorts_video(
         anime=anime,
         scene_type=scene_type,
         category=category,
+        context=context,
         enriched_context=enriched_context,
         transcript=transcript,
-        language_en=language_en
+        language_en=language_en,
+        language=language
     )
     raw_response = call_ai_text(prompt, on_log=_log, max_tokens=4096)
 
@@ -438,6 +929,33 @@ def analyze_yt_shorts_video(
     data = _parse_ai_json(raw_response)
     data["_transcript"] = transcript
     data["_enriched_context"] = enriched_context
+
+    # Extrai frame de capa para Thumbnail de Alto CTR (1080x1920)
+    thumb_path = extract_hook_thumbnail(video_path, ffmpeg_bin=ffmpeg_bin)
+    if thumb_path:
+        data["_thumbnail_path"] = thumb_path
+        data["_thumbnail_sec"] = 1.5
+        _log(f"🖼️ [Thumbnail Hook CTR] Capa 1080x1920 extraída com sucesso: {os.path.basename(thumb_path)}")
+
+    if ai_cache and data and not data.get("parse_error") and ("video_analysis" in data or "optimization" in data):
+        ai_cache.set(video_path, "yt_shorts_analysis", data)
+        # Salva metadados virais para compartilhamento
+        titles = data.get("titles", [])
+        chosen_title = ""
+        if titles and isinstance(titles, list):
+            first_t = titles[0]
+            chosen_title = first_t.get("title", "") if isinstance(first_t, dict) else str(first_t)
+        if not chosen_title:
+            chosen_title = data.get("title", "")
+        viral_info = {
+            "title": chosen_title,
+            "tags": data.get("tags", []),
+            "source": "yt_shorts"
+        }
+        ai_cache.set(video_path, "viral_metadata", viral_info)
+    elif data.get("parse_error") and ai_cache:
+        ai_cache.invalidate(video_path, "yt_shorts_analysis")
+
     return data
 
 

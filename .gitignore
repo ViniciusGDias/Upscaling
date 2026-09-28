@@ -13,6 +13,8 @@ credentials.json
 # ==============================================================================
 dist/
 build/
+setup_output/
+api_health_cache.json
 *.spec
 *.exe
 *.dll

@@ -23,23 +23,24 @@ from upscaler import (
     format_time,
     format_file_size,
 )
+import icon_manager
 
 COLORS = {
     "bg_dark": "#09090b",
-    "bg_card": "#111113",
-    "bg_card_hover": "#18181b",
-    "accent_primary": "#16a34a",
-    "accent_secondary": "#22c55e",
-    "accent_refiner": "#16a34a",
-    "accent_refiner_hover": "#15803d",
-    "success": "#22c55e",
+    "bg_card": "#121216",
+    "bg_card_hover": "#18181e",
+    "accent_primary": "#10b981",
+    "accent_secondary": "#059669",
+    "accent_refiner": "#10b981",
+    "accent_refiner_hover": "#059669",
+    "success": "#10b981",
     "warning": "#f59e0b",
     "error": "#ef4444",
     "text_primary": "#fafafa",
-    "text_secondary": "#71717a",
-    "text_muted": "#3f3f46",
-    "border": "#27272a",
-    "border_active": "#16a34a",
+    "text_secondary": "#a1a1aa",
+    "text_muted": "#a1a1aa",
+    "border": "#222228",
+    "border_active": "#10b981",
     "console_bg": "#050505",
     "console_text": "#a1a1aa",
 }
@@ -59,6 +60,7 @@ class RefinerMastercutTab(ctk.CTkFrame):
         self.last_result = None
         self.is_processing = False
         self._start_time = 0.0
+        self._current_cut_origin = None
 
         self._build_ui()
 
@@ -73,6 +75,7 @@ class RefinerMastercutTab(ctk.CTkFrame):
         self._build_header()
         self._build_file_section()
         self._build_info_section()
+        self._build_continuous_origin_section()
         self._build_settings_section()
         self._build_output_section()
         self._build_action_section()
@@ -89,7 +92,7 @@ class RefinerMastercutTab(ctk.CTkFrame):
         row.pack(fill="x")
 
         ctk.CTkLabel(
-            row, text="✂️  Refinador",
+            row, text="Refinador Mastercut",
             font=ctk.CTkFont(family="Segoe UI", size=24, weight="bold"),
             text_color=COLORS["text_primary"],
         ).pack(side="left")
@@ -137,7 +140,9 @@ class RefinerMastercutTab(ctk.CTkFrame):
         ).pack(side="left")
 
         sync_btn = ctk.CTkButton(
-            t_row, text="🔄 Sincronizar com Upscaling",
+            t_row, text="Sincronizar com Upscaling",
+            image=icon_manager.get_icon("refresh", size=(14, 14), color=COLORS["accent_refiner"]),
+            compound="left",
             font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
             fg_color=COLORS["bg_dark"], hover_color=COLORS["bg_card_hover"],
             border_width=1, border_color=COLORS["border"],
@@ -162,11 +167,12 @@ class RefinerMastercutTab(ctk.CTkFrame):
 
         browse_btn = ctk.CTkButton(
             f_row, text="Buscar Vídeo",
+            image=icon_manager.get_icon("folder", size=(14, 14), color="#fafafa"), compound="left",
             font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
             fg_color=COLORS["bg_dark"], hover_color=COLORS["bg_card_hover"],
             border_width=1, border_color=COLORS["border"],
             text_color=COLORS["text_primary"],
-            height=36, corner_radius=8, width=110,
+            height=36, corner_radius=8, width=120,
             command=self._browse_file,
         )
         browse_btn.pack(side="right")
@@ -191,14 +197,15 @@ class RefinerMastercutTab(ctk.CTkFrame):
 
         grid = ctk.CTkFrame(inner, fg_color="transparent")
         grid.pack(fill="x")
-        grid.grid_columnconfigure((0, 1, 2, 3), weight=1)
+        grid.grid_columnconfigure((0, 1, 2, 3, 4), weight=1)
 
         self.info_labels = {}
         fields = [
-            ("duration", "⏱️ Duração", "00:00"),
-            ("resolution", "📐 Resolução", "—"),
-            ("fps", "🎞️ FPS", "—"),
-            ("size", "💾 Tamanho", "—"),
+            ("duration", "Duração", "00:00"),
+            ("resolution", "Resolução", "—"),
+            ("fps", "FPS", "—"),
+            ("size", "Tamanho", "—"),
+            ("copyright_risk", "Risco Copyright", "🟢 Seguro"),
         ]
         for col, (key, title, val) in enumerate(fields):
             f = ctk.CTkFrame(grid, fg_color=COLORS["bg_dark"], corner_radius=8, border_width=1, border_color=COLORS["border"])
@@ -208,13 +215,56 @@ class RefinerMastercutTab(ctk.CTkFrame):
                 font=ctk.CTkFont(family="Segoe UI", size=10),
                 text_color=COLORS["text_secondary"],
             ).pack(pady=(6, 1))
+            val_color = "#10b981" if key == "copyright_risk" else COLORS["text_primary"]
             lbl = ctk.CTkLabel(
                 f, text=val,
                 font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
-                text_color=COLORS["text_primary"],
+                text_color=val_color,
             )
             lbl.pack(pady=(0, 6))
             self.info_labels[key] = lbl
+
+    # ── Continuous Cut Origin Banner ──────────────────────────────────────
+
+    def _build_continuous_origin_section(self):
+        self.continuous_origin_card = ctk.CTkFrame(
+            self.scroll, fg_color="#181308",
+            corner_radius=12, border_width=1, border_color="#f59e0b",
+        )
+        # Inicialmente oculto, visível quando vídeo for identificado como corte contínuo do Diretor IA
+
+        inner = ctk.CTkFrame(self.continuous_origin_card, fg_color="transparent")
+        inner.pack(fill="x", padx=16, pady=12)
+
+        top_row = ctk.CTkFrame(inner, fg_color="transparent")
+        top_row.pack(fill="x")
+
+        ctk.CTkLabel(
+            top_row, text="🛡️ Trecho Contínuo de Episódio Detectado (Diretor IA)",
+            font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
+            text_color="#fbbf24", anchor="w",
+        ).pack(side="left")
+
+        ctk.CTkButton(
+            top_row, text="Limpar Marcação do Cache",
+            image=icon_manager.get_icon("trash", size=(12, 12), color="#fca5a5"), compound="left",
+            font=ctk.CTkFont(family="Segoe UI", size=11),
+            fg_color="#27180c", hover_color="#3b1d11",
+            border_width=1, border_color="#78350f",
+            text_color="#fca5a5",
+            height=26, corner_radius=6,
+            command=self._clear_continuous_origin_cache,
+        ).pack(side="right")
+
+        self.continuous_origin_desc = ctk.CTkLabel(
+            inner,
+            text="",
+            font=ctk.CTkFont(family="Segoe UI", size=11),
+            text_color="#fde68a",
+            justify="left", anchor="w",
+            wraplength=720,
+        )
+        self.continuous_origin_desc.pack(fill="x", pady=(4, 0))
 
     # ── Settings ──────────────────────────────────────────────────────────
 
@@ -264,14 +314,14 @@ class RefinerMastercutTab(ctk.CTkFrame):
             text_color=COLORS["text_secondary"], anchor="w",
         ).pack(fill="x", pady=(0, 4))
 
-        self.refine_mode_var = ctk.StringVar(value="🟡 Equilibrado (Dinâmico - Padrão)")
+        self.refine_mode_var = ctk.StringVar(value="Equilibrado (Dinâmico - Padrão)")
         self.refine_mode_menu = ctk.CTkOptionMenu(
             mode_row,
             variable=self.refine_mode_var,
             values=[
-                "🟢 Preservar Conteúdo (Corta apenas silêncios mortos, mantém 100% dos diálogos)",
-                "🟡 Equilibrado (Dinâmico - Padrão: Ritmo acelerado sem perder essência)",
-                "🔴 Agressivo (Ultra-condensado: Picos emocionais e clímax máximo)",
+                "Preservar Conteúdo (Corta apenas silêncios mortos, mantém 100% dos diálogos)",
+                "Equilibrado (Dinâmico - Padrão: Ritmo acelerado sem perder essência)",
+                "Agressivo (Ultra-condensado: Picos emocionais e clímax máximo)",
             ],
             font=ctk.CTkFont(family="Segoe UI", size=12),
             fg_color=COLORS["bg_dark"], button_color=COLORS["bg_dark"],
@@ -300,7 +350,7 @@ class RefinerMastercutTab(ctk.CTkFrame):
             variable=self.target_duration_var,
             values=[
                 "Automático Inteligente (Recomendado)",
-                "🎬 Tratar Mini-Filme / Resumo 50% (Até 2:30 min)",
+                "Tratar Mini-Filme / Resumo 50% (Até 2:30 min)",
                 "Manter Máximo de Conteúdo (~70-90s se vídeo for longo)",
                 "Padrão Shorts / Reels (~40s a 60s)",
                 "Curto & Rápido (~25s a 40s)",
@@ -326,13 +376,13 @@ class RefinerMastercutTab(ctk.CTkFrame):
             text_color=COLORS["text_secondary"], anchor="w",
         ).pack(fill="x", pady=(0, 4))
 
-        self.loop_mode_var = ctk.StringVar(value="▶️ Sem Loop (Mastercut Direto)")
+        self.loop_mode_var = ctk.StringVar(value="Sem Loop (Mastercut Direto)")
         self.loop_mode_menu = ctk.CTkOptionMenu(
             loop_row,
             variable=self.loop_mode_var,
             values=[
-                "▶️ Sem Loop (Mastercut Direto)",
-                "🔁 Com Loop Contextual (Fatia clímax final e move para abertura em 0.0s)",
+                "Sem Loop (Mastercut Direto)",
+                "Com Loop Contextual (Fatia clímax final e move para abertura em 0.0s)",
             ],
             font=ctk.CTkFont(family="Segoe UI", size=12),
             fg_color=COLORS["bg_dark"], button_color=COLORS["bg_dark"],
@@ -363,7 +413,7 @@ class RefinerMastercutTab(ctk.CTkFrame):
         self.demucs_isolation_var = ctk.BooleanVar(value=False)
         self.demucs_cb = ctk.CTkCheckBox(
             toggles_row,
-            text="🤖 Isolar Só Voz com IA (Remove 100% Música/Piano)",
+            text="Isolar Voz com IA Demucs (Remove Instrumental)",
             variable=self.demucs_isolation_var,
             font=ctk.CTkFont(family="Segoe UI", size=11),
             fg_color=COLORS["accent_primary"], hover_color=COLORS["accent_secondary"],
@@ -371,12 +421,12 @@ class RefinerMastercutTab(ctk.CTkFrame):
         )
         self.demucs_cb.pack(side="left", padx=(0, 12))
 
-        self.anti_copyright_var = ctk.BooleanVar(value=False)
+        self.anti_copyright_var = ctk.BooleanVar(value=True)
         self.anti_copy_cb = ctk.CTkCheckBox(
             toggles_row,
-            text="Micro-Aceleração Anti-Copyright (1.8%)",
+            text="Modo Anti-Copyright (Fatiamento <=7.5s + Zoom 2.5% + DSP)",
             variable=self.anti_copyright_var,
-            font=ctk.CTkFont(family="Segoe UI", size=11),
+            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
             fg_color=COLORS["accent_primary"], hover_color=COLORS["accent_secondary"],
             border_color=COLORS["border"], corner_radius=4,
         )
@@ -385,7 +435,7 @@ class RefinerMastercutTab(ctk.CTkFrame):
         # Duration & Anti-cut Guarantee Hint Label
         self.hint_label = ctk.CTkLabel(
             inner,
-            text="🛡️ Proteção Anti-Corte: Carregue um vídeo para ver a estimativa exata de retenção e duração final.",
+            text="Proteção Anti-Corte: Carregue um vídeo para ver a estimativa exata de retenção e duração final.",
             font=ctk.CTkFont(family="Segoe UI", size=11, slant="italic"),
             text_color="#10b981",
             justify="left", anchor="w",
@@ -426,11 +476,13 @@ class RefinerMastercutTab(ctk.CTkFrame):
 
         browse_btn = ctk.CTkButton(
             o_row, text="Salvar Como...",
+            image=icon_manager.get_icon("download", size=(14, 14), color=COLORS["text_secondary"]),
+            compound="left",
             font=ctk.CTkFont(family="Segoe UI", size=12),
             fg_color=COLORS["bg_dark"], hover_color=COLORS["bg_card_hover"],
             border_width=1, border_color=COLORS["border"],
             text_color=COLORS["text_secondary"],
-            height=36, corner_radius=8, width=110,
+            height=36, corner_radius=8, width=125,
             command=self._browse_output,
         )
         browse_btn.pack(side="right")
@@ -442,7 +494,9 @@ class RefinerMastercutTab(ctk.CTkFrame):
         row.pack(fill="x", pady=(0, 10))
 
         self.generate_btn = ctk.CTkButton(
-            row, text="⚡  Gerar Mastercut Concentrado",
+            row, text="Gerar Mastercut Concentrado",
+            image=icon_manager.get_icon("sparkle", size=(18, 18), color="#ffffff"),
+            compound="left",
             font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
             fg_color=COLORS["accent_primary"], hover_color=COLORS["accent_secondary"],
             text_color="#ffffff",
@@ -451,8 +505,21 @@ class RefinerMastercutTab(ctk.CTkFrame):
         )
         self.generate_btn.pack(side="left", fill="x", expand=True, padx=(0, 8))
 
+        self.clear_cache_btn = ctk.CTkButton(
+            row, text="Limpar Cache IA",
+            image=icon_manager.get_icon("trash", size=(16, 16), color="#ef4444"),
+            compound="left",
+            font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
+            fg_color=COLORS["bg_card"], hover_color=COLORS["bg_card_hover"],
+            border_width=1, border_color=COLORS["border"],
+            text_color=COLORS["warning"],
+            height=46, corner_radius=10, width=150,
+            command=self._clear_cache_for_video,
+        )
+        self.clear_cache_btn.pack(side="left", padx=(0, 8))
+
         self.cancel_btn = ctk.CTkButton(
-            row, text="⛔ Cancelar",
+            row, text="Cancelar",
             font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
             fg_color=COLORS["bg_card"], hover_color=COLORS["bg_card_hover"],
             border_width=1, border_color=COLORS["border"],
@@ -518,13 +585,25 @@ class RefinerMastercutTab(ctk.CTkFrame):
         h_row.pack(fill="x")
 
         ctk.CTkLabel(
-            h_row, text="🎉  Mastercut Gerado com Sucesso!",
+            h_row, text="Mastercut Gerado com Sucesso!",
             font=ctk.CTkFont(family="Segoe UI", size=15, weight="bold"),
             text_color="#10b981", anchor="w",
         ).pack(side="left")
 
+        ctk.CTkButton(
+            h_row, text="Subir ao Topo",
+            image=icon_manager.get_icon("upscale", size=(12, 12)),
+            compound="left",
+            font=ctk.CTkFont(family="Segoe UI", size=11),
+            fg_color=COLORS["bg_dark"], hover_color=COLORS["bg_card_hover"],
+            border_width=1, border_color=COLORS["border"],
+            text_color=COLORS["text_secondary"],
+            height=26, corner_radius=6,
+            command=lambda: self.scroll._parent_canvas.yview_moveto(0.0),
+        ).pack(side="right")
+
         self.stats_label = ctk.CTkLabel(
-            r_inner, text="Duração: 00:00 ➔ 00:00 (-0.0%) | 0 cortes",
+            r_inner, text="Duração: 00:00 -> 00:00 (-0.0%) | 0 cortes",
             font=ctk.CTkFont(family="Segoe UI", size=12),
             text_color=COLORS["text_secondary"], anchor="w",
         )
@@ -535,7 +614,9 @@ class RefinerMastercutTab(ctk.CTkFrame):
         btn_row.pack(fill="x")
 
         self.preview_btn = ctk.CTkButton(
-            btn_row, text="▶️  Pré-visualizar Vídeo",
+            btn_row, text="Pré-visualizar Vídeo",
+            image=icon_manager.get_icon("play", size=(16, 16), color="#fafafa"),
+            compound="left",
             font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
             fg_color=COLORS["bg_dark"], hover_color=COLORS["bg_card_hover"],
             border_width=1, border_color=COLORS["border"],
@@ -546,7 +627,9 @@ class RefinerMastercutTab(ctk.CTkFrame):
         self.preview_btn.pack(side="left", fill="x", expand=True, padx=(0, 6))
 
         self.send_to_upscaler_btn = ctk.CTkButton(
-            btn_row, text="⬆️  Usar no Upscaler (Avançar para Melhorias)",
+            btn_row, text="Usar no Upscaler",
+            image=icon_manager.get_icon("upscale", size=(16, 16), color="#09090b"),
+            compound="left",
             font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
             fg_color=COLORS["accent_primary"], hover_color=COLORS["accent_secondary"],
             text_color="#09090b",
@@ -556,12 +639,14 @@ class RefinerMastercutTab(ctk.CTkFrame):
         self.send_to_upscaler_btn.pack(side="left", fill="x", expand=True, padx=(0, 6))
 
         self.open_folder_btn = ctk.CTkButton(
-            btn_row, text="📁 Pasta",
+            btn_row, text="Pasta",
+            image=icon_manager.get_icon("folder", size=(16, 16), color="#a1a1aa"),
+            compound="left",
             font=ctk.CTkFont(family="Segoe UI", size=12),
             fg_color=COLORS["bg_dark"], hover_color=COLORS["bg_card_hover"],
             border_width=1, border_color=COLORS["border"],
             text_color=COLORS["text_secondary"],
-            height=42, corner_radius=10, width=90,
+            height=42, corner_radius=10, width=100,
             command=self._open_output_folder,
         )
         self.open_folder_btn.pack(side="right")
@@ -607,11 +692,11 @@ class RefinerMastercutTab(ctk.CTkFrame):
             if info.duration <= 75.0:
                 cur_mode = self._get_refine_mode_key()
                 if cur_mode == "aggressive":
-                    self.refine_mode_var.set("🟡 Equilibrado (Dinâmico - Padrão)")
+                    self.refine_mode_var.set("Equilibrado (Dinâmico - Padrão)")
             elif info.duration >= 110.0:
                 # Long clip (>= 2m up to 5m, e.g. mini-movie/arc): suggest Tratar Mini-Filme if on default
                 if self.target_duration_var.get() == "Automático Inteligente (Recomendado)":
-                    self.target_duration_var.set("🎬 Tratar Mini-Filme / Resumo 50% (Até 2:30 min)")
+                    self.target_duration_var.set("Tratar Mini-Filme / Resumo 50% (Até 2:30 min)")
 
             self._update_duration_hint()
 
@@ -620,6 +705,73 @@ class RefinerMastercutTab(ctk.CTkFrame):
         default_out = str(input_p.parent / f"{input_p.stem}_mastercut_{int(time.time())}.mp4")
         self.output_entry.delete(0, "end")
         self.output_entry.insert(0, default_out)
+
+        # Checa se o arquivo é um corte contínuo gerado pelo Diretor IA
+        self._check_and_apply_cut_origin(filepath)
+
+    def _check_and_apply_cut_origin(self, filepath: str):
+        """Consulta o cache persistente do AICacheHub para verificar se o vídeo é corte contínuo."""
+        try:
+            from ai_cache_hub import ai_cache
+            origin = ai_cache.get_cut_origin(filepath)
+            if origin and origin.get("is_continuous"):
+                dur = origin.get("continuous_duration", 0.0) or (self.current_video_info.duration if self.current_video_info else 0.0)
+                ep = origin.get("source_episode", "Episódio")
+                title = origin.get("title", "")
+                title_str = f" ('{title}')" if title else ""
+
+                msg = (
+                    f"Origem Identificada: Trecho contínuo de {dur:.1f}s extraído de '{ep}'{title_str}.\n"
+                    "O Diretor IA salvou este corte como contínuo bruto. A proteção Anti-Copyright 2026 "
+                    "(Zoom Dinâmico com Respiração, Granulação Cinematográfica e Micro-EQ Anti-SoundMatch) foi ativada automaticamente!"
+                )
+                self.continuous_origin_desc.configure(text=msg)
+                if hasattr(self, "continuous_origin_card") and not self.continuous_origin_card.winfo_ismapped():
+                    self.continuous_origin_card.pack(fill="x", pady=(0, 10))
+
+                self.anti_copyright_var.set(True)
+                self._current_cut_origin = origin
+                if "copyright_risk" in self.info_labels:
+                    self.info_labels["copyright_risk"].configure(text="🟡 Risco Alto (>20s)", text_color="#fbbf24")
+                return
+            elif origin:
+                if "copyright_risk" in self.info_labels:
+                    self.info_labels["copyright_risk"].configure(text="🟢 Seguro (Dinâmico)", text_color="#10b981")
+            else:
+                dur = self.current_video_info.duration if self.current_video_info else 0.0
+                if dur >= 20.0:
+                    if "copyright_risk" in self.info_labels:
+                        self.info_labels["copyright_risk"].configure(text="🟡 Vídeo Longo (>20s)", text_color="#fbbf24")
+                else:
+                    if "copyright_risk" in self.info_labels:
+                        self.info_labels["copyright_risk"].configure(text="🟢 Seguro (<20s)", text_color="#10b981")
+        except Exception:
+            pass
+
+        self._current_cut_origin = None
+        if hasattr(self, "continuous_origin_card") and self.continuous_origin_card.winfo_ismapped():
+            self.continuous_origin_card.pack_forget()
+
+    def _clear_continuous_origin_cache(self):
+        """Remove a marcação persistente de corte contínuo do cache ("até eu tirar")."""
+        if not self.input_path:
+            return
+        try:
+            from ai_cache_hub import ai_cache
+            ai_cache.remove_cut_origin(self.input_path)
+            self._current_cut_origin = None
+            if hasattr(self, "continuous_origin_card") and self.continuous_origin_card.winfo_ismapped():
+                self.continuous_origin_card.pack_forget()
+            if "copyright_risk" in self.info_labels:
+                self.info_labels["copyright_risk"].configure(text="🟢 Seguro (Manual)", text_color="#10b981")
+            self._log(f"[CACHE] Marcação de corte contínuo removida para: {Path(self.input_path).name}")
+            messagebox.showinfo(
+                "Marcação Removida",
+                "A marcação de corte contínuo deste vídeo foi removida do cache persistente com sucesso!\n"
+                "A proteção agora responderá aos ajustes manuais da tela."
+            )
+        except Exception as e:
+            messagebox.showwarning("Aviso", f"Não foi possível remover do cache: {e}")
 
     def _get_refine_mode_key(self) -> str:
         val = self.refine_mode_var.get() if hasattr(self, "refine_mode_var") else ""
@@ -654,7 +806,7 @@ class RefinerMastercutTab(ctk.CTkFrame):
 
         if dur <= 0.0:
             self.hint_label.configure(
-                text="🛡️ Proteção Anti-Corte: Carregue um vídeo para ver a estimativa exata de retenção e duração final."
+                text="Proteção Anti-Corte: Carregue um vídeo para ver a estimativa exata de retenção e duração final."
             )
             return
 
@@ -663,34 +815,34 @@ class RefinerMastercutTab(ctk.CTkFrame):
 
         if dur_key == "mini_movie":
             msg = (
-                f"🎬 Previsão Tratar Mini-Filme ({format_time(dur)}): Condensará este arco para cerca de 50% ({min_d:.1f}s a {max_d:.1f}s, máx 2:30 min) "
+                f"Previsão Tratar Mini-Filme ({format_time(dur)}): Condensará este arco para cerca de 50% ({min_d:.1f}s a {max_d:.1f}s, máx 2:30 min) "
                 "em 4 atos narrativos essenciais (Abertura, Tensão, Clímax e Desfecho), cortando tempos mortos e puxando o suco do vídeo!"
             )
         elif dur <= 75.0:
             if mode_key == "soft":
                 msg = (
-                    f"🛡️ Previsão para este clipe ({format_time(dur)}): Modo {mode_name} manterá {min_d:.1f}s a {max_d:.1f}s (~85% do vídeo). "
+                    f"Previsão para este clipe ({format_time(dur)}): Modo {mode_name} manterá {min_d:.1f}s a {max_d:.1f}s (~85% do vídeo). "
                     "Corta estritamente silêncios mortos (>0.35s), mantendo 100% dos diálogos, réplicas e momentos importantes!"
                 )
             elif mode_key == "aggressive":
                 msg = (
-                    f"⚡ Previsão para este clipe ({format_time(dur)}): Modo {mode_name} condensará para {min_d:.1f}s a {max_d:.1f}s "
+                    f"Previsão para este clipe ({format_time(dur)}): Modo {mode_name} condensará para {min_d:.1f}s a {max_d:.1f}s "
                     "focando no clímax de maior impacto."
                 )
             else:
                 msg = (
-                    f"🛡️ Previsão Anti-Corte para este clipe ({format_time(dur)}): Modo {mode_name} manterá {min_d:.1f}s a {max_d:.1f}s "
+                    f"Previsão Anti-Corte para este clipe ({format_time(dur)}): Modo {mode_name} manterá {min_d:.1f}s a {max_d:.1f}s "
                     "com ritmo acelerado, eliminando pausas mortas sem picotar o vídeo nem perder momentos essenciais (nunca gerará 19s!)."
                 )
         else:
             msg = (
-                f"🎯 Previsão para este vídeo ({format_time(dur)}): Duração final estimada entre {min_d:.1f}s e {max_d:.1f}s "
+                f"Previsão para este vídeo ({format_time(dur)}): Duração final estimada entre {min_d:.1f}s e {max_d:.1f}s "
                 f"(Modo: {mode_name}). Proteção de narrativa ativa para garantir início, desenvolvimento e clímax."
             )
 
         loop_val = self.loop_mode_var.get() if hasattr(self, "loop_mode_var") else ""
         if "Com Loop" in loop_val:
-            msg += "\n🔁 Loop Contextual Ativo: O clímax e frase final serão posicionados como abertura (0.0s), conectando perfeitamente o fim ao início para replay infinito (>100% retenção no Shorts/Reels/TikTok)."
+            msg += "\nLoop Contextual Ativo: O clímax e frase final serão posicionados como abertura (0.0s), conectando perfeitamente o fim ao início para replay infinito (>100% retenção no Shorts/Reels/TikTok)."
 
         self.hint_label.configure(text=msg)
 
@@ -719,6 +871,19 @@ class RefinerMastercutTab(ctk.CTkFrame):
             self.output_path = filepath
             self.output_entry.delete(0, "end")
             self.output_entry.insert(0, filepath)
+
+    def _clear_cache_for_video(self):
+        if not self.input_path:
+            messagebox.showinfo("Cache de IA", "Selecione um vídeo primeiro para limpar o cache.")
+            return
+        try:
+            from ai_cache_hub import ai_cache
+            ai_cache.invalidate(self.input_path)
+            self._log(f"[CACHE IA] Cache limpo para o vídeo: {Path(self.input_path).name}!")
+            self._log("[INFO] A próxima execução analisará falas e cenas visuais do zero.")
+            messagebox.showinfo("Cache Limpo", "Cache de IA deste vídeo foi limpo com sucesso!\nA próxima execução gerará tudo do zero.")
+        except Exception as e:
+            self._log(f"Aviso cache: {e}")
 
     def _log(self, text: str):
         self.log_box.configure(state="normal")
@@ -749,7 +914,7 @@ class RefinerMastercutTab(ctk.CTkFrame):
     def _run_refine(self):
         self.is_processing = True
         self._start_time = time.time()
-        self.generate_btn.configure(state="disabled", text="⏳  Processando Mastercut...")
+        self.generate_btn.configure(state="disabled", text="Processando Mastercut...")
         self.cancel_btn.configure(state="normal", text_color=COLORS["text_primary"])
         self.status_label.configure(text="Iniciando pipeline...")
         self.progress_bar.set(0.0)
@@ -770,16 +935,26 @@ class RefinerMastercutTab(ctk.CTkFrame):
         self._log(f"Entrada: {self.input_path}")
         self._log(f"Saída:   {self.output_path}")
         self._log(f"Modo:    {refine_mode} | Duração Alvo: {target_dur}")
-        self._log(f"Loop:    {'🔁 Com Loop Contextual (Replay Infinito)' if enable_loop else '▶️ Sem Loop (Mastercut Direto)'}")
+        self._log(f"Loop:    {'Com Loop Contextual (Replay Infinito)' if enable_loop else 'Sem Loop (Mastercut Direto)'}")
 
         vocal_iso = self.vocal_isolation_var.get()
         demucs_iso = self.demucs_isolation_var.get()
         anti_copy = self.anti_copyright_var.get()
+        is_continuous_clip = bool(self._current_cut_origin and self._current_cut_origin.get("is_continuous"))
         video_ctx = self.context_entry.get().strip() if hasattr(self, 'context_entry') else ""
+
+        if is_continuous_clip:
+            orig_dur = self._current_cut_origin.get("continuous_duration", 0.0)
+            orig_ep = self._current_cut_origin.get("source_episode", "")
+            self._log(f"[ORIGEM CACHE] Trecho Contínuo detectado do Diretor IA (~{orig_dur:.1f}s de '{orig_ep}')!")
+            self._log("[ANTI-COPYRIGHT 2026] Blindagem Ativa: Fatiamento em pausas de respiração + Dynamic Breathing Camera Zoom + Granulação Fina + Micro-EQ DSP.")
+        elif anti_copy:
+            self._log("[SEGURANÇA] Proteção Anti-Copyright 2026: ATIVADA (Dynamic Breathing Camera Zoom + Granulação Fina + Micro-EQ DSP)")
+
         if video_ctx:
             self._log(f"Contexto: {video_ctx}")
         if demucs_iso:
-            self._log("🤖 Isolamento com IA Demucs: ATIVADO (Removerá 100% do instrumental)")
+            self._log("[AI] Isolamento com IA Demucs: ATIVADO (Removerá 100% do instrumental)")
 
         def _worker():
             try:
@@ -793,6 +968,7 @@ class RefinerMastercutTab(ctk.CTkFrame):
                     refine_mode=refine_mode,
                     target_duration_mode=target_dur,
                     enable_loop=enable_loop,
+                    is_continuous_clip=is_continuous_clip,
                     on_progress=lambda p, msg: self.after(0, self._on_progress_update, p, msg),
                     on_log=lambda msg: self.after(0, self._log, msg),
                 )
@@ -811,7 +987,7 @@ class RefinerMastercutTab(ctk.CTkFrame):
     def _on_process_success(self, stats: dict):
         self.is_processing = False
         self.last_result = stats
-        self.generate_btn.configure(state="normal", text="⚡  Gerar Mastercut Concentrado (30s-60s)")
+        self.generate_btn.configure(state="normal", text="Gerar Mastercut Concentrado (30s-60s)")
         self.cancel_btn.configure(state="disabled", text_color=COLORS["text_muted"])
 
         dur_before = format_time(stats["duration_before"])
@@ -819,27 +995,28 @@ class RefinerMastercutTab(ctk.CTkFrame):
         pct = stats["time_saved_percent"]
         segs = stats["segments_count"]
         size = stats["size_mb"]
-        loop_badge = " | 🔁 Loop Contextual Ativo" if stats.get("enable_loop") else ""
+        loop_badge = " | Loop Contextual Ativo" if stats.get("enable_loop") else ""
 
         self.stats_label.configure(
-            text=f"Duração: {dur_before} ➔ {dur_after} ({pct}% economizado) | {segs} cortes | Tamanho: {size} MB{loop_badge}"
+            text=f"Duração: {dur_before} -> {dur_after} ({pct}% economizado) | {segs} cortes | Tamanho: {size} MB{loop_badge}"
         )
         self.result_card.pack(fill="x", pady=(0, 10))
-        self._log(f"✓ Concluído com sucesso em {time.time() - self._start_time:.1f}s!")
+        self.after(150, lambda: self.scroll._parent_canvas.yview_moveto(0.55))
+        self._log(f"[OK] Concluído com sucesso em {time.time() - self._start_time:.1f}s!")
 
     def _on_process_cancelled(self):
         self.is_processing = False
-        self.generate_btn.configure(state="normal", text="⚡  Gerar Mastercut Concentrado (30s-60s)")
+        self.generate_btn.configure(state="normal", text="Gerar Mastercut Concentrado (30s-60s)")
         self.cancel_btn.configure(state="disabled", text_color=COLORS["text_muted"])
         self.status_label.configure(text="Cancelado pelo usuário.")
-        self._log("⛔ Processamento cancelado.")
+        self._log("Processamento cancelado.")
 
     def _on_process_error(self, err_msg: str):
         self.is_processing = False
-        self.generate_btn.configure(state="normal", text="⚡  Gerar Mastercut Concentrado (30s-60s)")
+        self.generate_btn.configure(state="normal", text="Gerar Mastercut Concentrado (30s-60s)")
         self.cancel_btn.configure(state="disabled", text_color=COLORS["text_muted"])
         self.status_label.configure(text="Erro no processamento.")
-        self._log(f"✕ Erro: {err_msg}")
+        self._log(f"[ERRO]: {err_msg}")
         messagebox.showerror("Erro no Mastercut", f"Ocorreu um erro ao gerar o Mastercut:\n\n{err_msg}")
 
     def _cancel_mastercut(self):
@@ -868,8 +1045,8 @@ class RefinerMastercutTab(ctk.CTkFrame):
             # Load video into main app
             self.main_app._load_video(self.output_path)
             # Switch tab to Upscaling
-            self.main_app.tabview.set("⬆  Upscaling")
-            self.main_app._set_status("✓ Vídeo do Mastercut carregado! Escolha as melhorias e inicie o upscaling.", COLORS["success"])
+            self.main_app.tabview.set("Upscaling")
+            self.main_app._set_status("[OK] Vídeo do Mastercut carregado! Escolha as melhorias e inicie o upscaling.", COLORS["success"])
         else:
             messagebox.showinfo("Sucesso", f"Vídeo salvo em:\n{self.output_path}")
 

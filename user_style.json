@@ -1,0 +1,71 @@
+{
+  "subtitle": {
+    "font_name": "Lovely Scream Queens",
+    "font_path": "assets/Queens.otf",
+    "size_px": 76,
+    "color": "#FFFFFF",
+    "stroke_color": "#000000",
+    "stroke_width_px": 6,
+    "position_y_percent": 50,
+    "alignment": "center",
+    "capitalization": "upper",
+    "max_words_per_line": 3,
+    "style_preset": "dynamic_animax",
+    "pop_animation": true,
+    "highlight_color": "#00FFFF"
+  },
+  "watermark_text": {
+    "text": "@ANIMAX_97",
+    "position": "center",
+    "size_px": 62,
+    "opacity": 0.38,
+    "color": "#FFFFFF",
+    "font_name": "Lovely Scream Queens"
+  },
+  "watermark_png": {
+    "path": "assets/Perfil_1.png",
+    "position": "top-left",
+    "opacity": 1.0,
+    "size_percent": 13
+  },
+  "channel_header": {
+    "name": "Animax",
+    "verified": true,
+    "handle": "@animax_97",
+    "profile_png": "assets/Perfil_1.png",
+    "size_px": 225,
+    "font_color": "#FFFFFF"
+  },
+  "title_overlay": {
+    "font_name": "Lovely Scream Queens",
+    "font_path": "assets/Queens.otf",
+    "size_px": 60,
+    "color": "#FFFFFF",
+    "stroke_color": "#000000",
+    "stroke_width_px": 6,
+    "position_y_percent": 20,
+    "capitalization": "upper"
+  },
+  "cta_bar": {
+    "line1": "FINALMENTE O ALGORITMO TE TROUXE",
+    "line2": "PRO CANAL CERTO! 🚀 SE INSCREVE",
+    "font_name": "Lovely Scream Queens",
+    "font_path": "assets/Queens.otf",
+    "background_color": "transparent",
+    "text_color": "#FFFFFF"
+  },
+  "video_style": {
+    "scale_percent": 187,
+    "blur_sides": true,
+    "blur_strength": 30,
+    "format": "9:16",
+    "resolution": "1080x1920",
+    "fps": 60
+  },
+  "_meta": {
+    "analyzed_segments": 46,
+    "subtitle_segments": 36,
+    "static_segments": 10,
+    "font_family": "Lovely Scream Queens"
+  }
+}

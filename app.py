@@ -62,31 +62,42 @@ from director_tab import DirectorTab
 from instagram_tab import InstagramAnalyzerTab
 from yt_shorts_tab import YTShortsAnalyzerTab
 from anime_finder_tab import AnimeFinderTab
+from batch_history_tab import BatchHistoryTab
 from settings_tab import SettingsTab
+from studio_tab import StudioPipelineTab
 from updater import CURRENT_VERSION, check_for_updates_async, open_download_page
 from engine_manager import check_all_engines
+import icon_manager
+from sidebar_navigation import SidebarNavigation
 
 
 # ── Theme Configuration ──────────────────────────────────────────────────────
 ctk.set_appearance_mode("dark")
-ctk.set_default_color_theme("green")
+_theme_path = resource_path("urahara_theme.json")
+if os.path.exists(_theme_path):
+    try:
+        ctk.set_default_color_theme(_theme_path)
+    except Exception:
+        ctk.set_default_color_theme("green")
+else:
+    ctk.set_default_color_theme("green")
 
-# Color palette — Urahara Hat Green & Minimal Black Pro
+# Color palette — Urahara Studio Dark Obsidian & Emerald
 COLORS = {
-    "bg_dark": "#09090b",          # true black background
-    "bg_card": "#111113",          # slightly lifted card
-    "bg_card_hover": "#18181b",    # hover state
-    "accent_primary": "#16a34a",   # Urahara Hat Emerald Green
-    "accent_secondary": "#22c55e", # Urahara Hat Light Green
-    "accent_dark": "#14532d",      # Urahara Hat Deep Green
-    "success": "#22c55e",
+    "bg_dark": "#09090b",          # true deep obsidian background
+    "bg_card": "#121216",          # sleek card background
+    "bg_card_hover": "#18181e",    # card hover state
+    "accent_primary": "#10b981",   # Kisuke Emerald Green
+    "accent_secondary": "#059669", # Kisuke Deep Emerald
+    "accent_dark": "#064e3b",      # Deep Forest
+    "success": "#10b981",
     "warning": "#f59e0b",
     "error": "#ef4444",
     "text_primary": "#fafafa",     # pure off-white
-    "text_secondary": "#71717a",   # zinc-500 — muted labels
-    "text_muted": "#3f3f46",       # zinc-700 — very subtle
-    "border": "#27272a",           # zinc-800 — ultra-thin borders
-    "border_active": "#16a34a",    # Urahara green focus/hover border
+    "text_secondary": "#a1a1aa",   # zinc-400 — clearly visible secondary labels
+    "text_muted": "#a1a1aa",       # zinc-400 — high-readability dark mode text
+    "border": "#222228",           # zinc-800 — ultra-thin borders
+    "border_active": "#10b981",    # Emerald green focus/hover border
     "console_bg": "#050505",
     "console_text": "#a1a1aa",     # subtle console grey
 }
@@ -105,8 +116,8 @@ class VideoUpscalerApp(ctk.CTk):
 
         # Window setup
         self.title("Urahara")
-        self.geometry("980x940")
-        self.minsize(860, 800)
+        self.geometry("1280x850")
+        self.minsize(1050, 700)
         self.configure(fg_color=COLORS["bg_dark"])
 
         # Set window icon
@@ -138,159 +149,103 @@ class VideoUpscalerApp(ctk.CTk):
     # ── UI Construction ──────────────────────────────────────────────────
 
     def _build_ui(self):
-        """Build the complete user interface."""
-        # Top Brand & Quick Settings Bar
-        self.top_bar = ctk.CTkFrame(self, fg_color="transparent")
-        self.top_bar.pack(fill="x", padx=16, pady=(8, 4))
+        """Build the complete user interface with Studio Sidebar Navigation."""
+        # Main Navigation Sidebar on left and content area on right
+        self.tabview = SidebarNavigation(self)
+        self.tabview.pack(fill="both", expand=True)
 
-        brand_left = ctk.CTkFrame(self.top_bar, fg_color="transparent")
-        brand_left.pack(side="left")
-
-        # Green pulse indicator
-        ctk.CTkLabel(
-            brand_left,
-            text="●",
-            font=ctk.CTkFont(size=11),
-            text_color="#22c55e",
-        ).pack(side="left", padx=(0, 6))
-
-        app_title_lbl = ctk.CTkLabel(
-            brand_left,
-            text="URAHARA",
-            font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
-            text_color=COLORS["text_primary"],
-        )
-        app_title_lbl.pack(side="left")
-
-        ctk.CTkLabel(
-            brand_left,
-            text="STUDIO PRO",
-            font=ctk.CTkFont(family="Segoe UI", size=9, weight="bold"),
-            text_color=COLORS["text_muted"],
-        ).pack(side="left", padx=(6, 8))
-
-        ver_lbl = ctk.CTkLabel(
-            brand_left,
-            text=f"v{CURRENT_VERSION}",
-            font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
-            text_color="#86efac",
-            fg_color="#14532d",
-            corner_radius=6,
-            padx=7, pady=2,
-        )
-        ver_lbl.pack(side="left")
-
-        # Quick Config button top right
-        cfg_top_btn = ctk.CTkButton(
-            self.top_bar,
-            text="⚙️ Configurações & Motores",
-            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
-            fg_color=COLORS["bg_card"],
-            hover_color=COLORS["bg_card_hover"],
-            text_color=COLORS["text_primary"],
-            border_width=1,
-            border_color=COLORS["border"],
-            corner_radius=8,
-            height=28,
-            command=lambda: self.tabview.set("⚙️  Configurações"),
-        )
-        cfg_top_btn.pack(side="right")
-
+        # Update button ready in sidebar footer if a new release is detected
         self.update_top_btn = ctk.CTkButton(
-            self.top_bar,
-            text="",
-            font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
+            self.tabview.sidebar_frame,
+            text="Nova Versão!",
+            image=icon_manager.get_icon("download", size=(14, 14), color="#ffffff"),
+            compound="left",
+            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
             fg_color="#15803d",
             hover_color="#16a34a",
             text_color="#ffffff",
             corner_radius=6,
-            height=26,
-            command=lambda: (self.tabview.set("⚙️  Configurações"), open_download_page()),
+            height=30,
+            command=lambda: (self.tabview.set("Configurações"), open_download_page()),
         )
-
-        # Tab view for multi-tool with sleek capsule navigation
-        self.tabview = ctk.CTkTabview(
-            self,
-            fg_color=COLORS["bg_dark"],
-            segmented_button_fg_color="#121215",
-            segmented_button_selected_color=COLORS["accent_primary"],
-            segmented_button_selected_hover_color="#15803d",
-            segmented_button_unselected_color="#121215",
-            segmented_button_unselected_hover_color="#1c1c21",
-            text_color="#ffffff",
-            text_color_disabled="#71717a",
-            corner_radius=10,
-        )
-        self.tabview.pack(fill="both", expand=True, padx=12, pady=(4, 12))
-        try:
-            self.tabview._segmented_button.configure(
-                font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
-                corner_radius=8,
-            )
-        except Exception:
-            pass
 
         # ── Tab 1: Video Upscaler ──
-        tab_upscale = self.tabview.add("⬆  Upscaling")
+        tab_upscale = self.tabview.add("Upscaling")
         tab_upscale.configure(fg_color="transparent")
 
+        # 1. Docked Action & Progress Bar at BOTTOM of tab_upscale (always visible, no scrolling!)
+        self._build_docked_action_section(tab_upscale)
+
+        # 2. Main Scrollable Area for Video configuration (takes all remaining space above dock)
         self.main_scroll = ctk.CTkScrollableFrame(
             tab_upscale, fg_color="transparent",
             scrollbar_button_color=COLORS["border"],
             scrollbar_button_hover_color=COLORS["accent_primary"],
         )
-        self.main_scroll.pack(fill="both", expand=True)
+        self.main_scroll.pack(side="top", fill="both", expand=True, padx=4, pady=0)
 
         self._build_header()
         self._build_file_section()
         self._build_video_info_section()
         self._build_settings_section()
         self._build_output_section()
-        self._build_action_section()
-        self._build_progress_section()
         self._build_status_bar()
 
         # ── Tab 2: Diretor IA (Smart Cortes & Top 3) ──
-        tab_director = self.tabview.add("🎬  Diretor IA")
+        tab_director = self.tabview.add("Diretor IA")
         tab_director.configure(fg_color="transparent")
         self.director_tab = DirectorTab(tab_director, main_app=self)
         self.director_tab.pack(fill="both", expand=True)
 
         # ── Tab 3: Refinador Mastercut ──
-        tab_refiner = self.tabview.add("✂️  Refinador (Mastercut)")
+        tab_refiner = self.tabview.add("Refinador Mastercut")
         tab_refiner.configure(fg_color="transparent")
         self.refiner_tab = RefinerMastercutTab(tab_refiner, main_app=self)
         self.refiner_tab.pack(fill="both", expand=True)
 
-        # ── Tab 4: Audio Separation ──
-        tab_audio = self.tabview.add("🎧  Separação de Áudio")
+        # ── Tab 4: Studio Pipeline ──
+        tab_studio = self.tabview.add("Studio Pipeline")
+        tab_studio.configure(fg_color="transparent")
+        self.studio_tab = StudioPipelineTab(tab_studio, settings_manager=getattr(self, 'settings_manager', None))
+        self.studio_tab.pack(fill="both", expand=True)
+
+        # ── Tab 5: Audio Separation ──
+        tab_audio = self.tabview.add("Separação de Áudio")
         tab_audio.configure(fg_color="transparent")
         self.audio_tab = AudioSeparationTab(tab_audio)
         self.audio_tab.pack(fill="both", expand=True)
 
-        # ── Tab 5: Analisar Instagram ──
-        tab_insta = self.tabview.add("📸  Analisar Instagram")
+        # ── Tab 6: Analisar Instagram ──
+        tab_insta = self.tabview.add("Instagram Shorts")
         tab_insta.configure(fg_color="transparent")
-        self.insta_tab = InstagramAnalyzerTab(tab_insta, log_callback=self._log)
+        self.insta_tab = InstagramAnalyzerTab(tab_insta, log_callback=self._log, main_app=self)
         self.insta_tab.pack(fill="both", expand=True)
 
-        # ── Tab 6: Analisar YT Shorts ──
-        tab_shorts = self.tabview.add("▶️  Analisar YT Shorts")
+        # ── Tab 7: Analisar YT Shorts ──
+        tab_shorts = self.tabview.add("YouTube Shorts")
         tab_shorts.configure(fg_color="transparent")
-        self.shorts_tab = YTShortsAnalyzerTab(tab_shorts, log_callback=self._log)
+        self.shorts_tab = YTShortsAnalyzerTab(tab_shorts, log_callback=self._log, main_app=self)
         self.shorts_tab.pack(fill="both", expand=True)
 
-        # ── Tab 7: Anime Finder ──
-        tab_finder = self.tabview.add("⛩️  Anime Finder")
+        # ── Tab 8: Batch & Histórico de Análises ──
+        tab_batch = self.tabview.add("Batch & Histórico")
+        tab_batch.configure(fg_color="transparent")
+        self.batch_history_tab = BatchHistoryTab(tab_batch, main_app=self, log_callback=self._log)
+        self.batch_history_tab.pack(fill="both", expand=True)
+
+        # ── Tab 9: Anime Finder ──
+        tab_finder = self.tabview.add("Anime Finder")
         tab_finder.configure(fg_color="transparent")
         self.anime_finder_tab = AnimeFinderTab(tab_finder, log_callback=self._log)
         self.anime_finder_tab.pack(fill="both", expand=True)
 
-        # ── Tab 8: Configurações & Motores ──
-        tab_settings = self.tabview.add("⚙️  Configurações")
+        # ── Tab 9: Configurações & Motores ──
+        tab_settings = self.tabview.add("Configurações")
         tab_settings.configure(fg_color="transparent")
         self.settings_tab = SettingsTab(tab_settings, main_app=self, log_callback=self._log)
         self.settings_tab.pack(fill="both", expand=True)
+
+        # As abas e ícones vetoriais já são gerenciados nativamente pelo SidebarNavigation
 
     def _build_header(self):
         """Build the app header with title and subtitle."""
@@ -356,13 +311,15 @@ class VideoUpscalerApp(ctk.CTk):
 
         ctk.CTkButton(
             file_row, text="Procurar",
-            font=ctk.CTkFont(family="Segoe UI", size=12),
+            image=icon_manager.get_icon("folder", size=(14, 14), color=COLORS["text_primary"]),
+            compound="left",
+            font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
             fg_color=COLORS["bg_card_hover"],
             hover_color=COLORS["border_active"],
             text_color=COLORS["text_primary"],
             border_width=1,
             border_color=COLORS["border"],
-            height=36, width=100, corner_radius=6,
+            height=36, width=110, corner_radius=6,
             command=self._browse_file,
         ).pack(side="right")
 
@@ -372,7 +329,7 @@ class VideoUpscalerApp(ctk.CTk):
 
         ctk.CTkLabel(
             shortcut_row,
-            text="Vídeo longo? Extraia os melhores momentos primeiro.",
+            text="Vídeo longo? Extraia os melhores momentos primeiro:",
             font=ctk.CTkFont(family="Segoe UI", size=11),
             text_color=COLORS["text_muted"],
         ).pack(side="left")
@@ -380,26 +337,30 @@ class VideoUpscalerApp(ctk.CTk):
         ctk.CTkButton(
             shortcut_row,
             text="Diretor IA",
+            image=icon_manager.get_icon("director", size=(13, 13), color=COLORS["text_secondary"]),
+            compound="left",
             font=ctk.CTkFont(family="Segoe UI", size=11),
             fg_color="transparent",
             hover_color=COLORS["bg_card_hover"],
             border_width=1,
-            border_color=COLORS["border_active"],
+            border_color=COLORS["border"],
             text_color=COLORS["text_secondary"],
-            height=24,
+            height=26,
             command=self._open_in_director,
         ).pack(side="left", padx=(10, 0))
 
         ctk.CTkButton(
             shortcut_row,
-            text="Mastercut (30-60s)",
+            text="Mastercut",
+            image=icon_manager.get_icon("scissors", size=(13, 13), color=COLORS["text_secondary"]),
+            compound="left",
             font=ctk.CTkFont(family="Segoe UI", size=11),
             fg_color="transparent",
             hover_color=COLORS["bg_card_hover"],
             border_width=1,
-            border_color=COLORS["border_active"],
+            border_color=COLORS["border"],
             text_color=COLORS["text_secondary"],
-            height=24,
+            height=26,
             command=self._open_in_refiner,
         ).pack(side="left", padx=(6, 0))
 
@@ -467,7 +428,7 @@ class VideoUpscalerApp(ctk.CTk):
         card.pack(fill="x", pady=(0, 10))
 
         ctk.CTkLabel(
-            card, text="⚙️  Configurações",
+            card, text="Configurações de Upscaling",
             font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"),
             text_color=COLORS["text_primary"], anchor="w",
         ).pack(fill="x", padx=16, pady=(12, 8))
@@ -519,7 +480,7 @@ class VideoUpscalerApp(ctk.CTk):
         # ── AI Mode Section ─────────────────────────────────────────────────
         ai_label = ctk.CTkLabel(
             card,
-            text="🤖  Modo IA — Real-ESRGAN (Upscaling Neural)",
+            text="Modo IA — Real-ESRGAN (Upscaling Neural)",
             font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
             text_color="#10b981",
             anchor="w",
@@ -595,13 +556,15 @@ class VideoUpscalerApp(ctk.CTk):
         # Install button (shows only when deps missing)
         self.ai_install_btn = ctk.CTkButton(
             model_sel_row,
-            text="📦 Instalar IA",
+            text="Instalar Motor IA",
+            image=icon_manager.get_icon("download", size=(15, 15), color="#ffffff"),
+            compound="left",
             font=ctk.CTkFont(size=12, weight="bold"),
             fg_color="#065f46",
             hover_color="#047857",
             text_color="white",
             height=36,
-            width=120,
+            width=140,
             corner_radius=8,
             command=self._install_ai_deps,
         )
@@ -622,7 +585,7 @@ class VideoUpscalerApp(ctk.CTk):
         # Warning label
         self.ai_warn_label = ctk.CTkLabel(
             self.ai_model_panel,
-            text="⚠  Modo IA é mais lento (segundos por frame) mas produz qualidade foto-realista próxima ao DLSS.",
+            text="Modo IA é mais lento (segundos por frame) mas produz qualidade foto-realista próxima ao DLSS.",
             font=ctk.CTkFont(family="Segoe UI", size=11),
             text_color=COLORS["warning"],
             anchor="w",
@@ -635,7 +598,7 @@ class VideoUpscalerApp(ctk.CTk):
         self.after(300, self._check_ai_status)
 
         # ── Row 2: Color Style, Denoise, Sharpen ──
-        enhance_label = ctk.CTkLabel(card, text="✨ Melhorias de Estilo", font=ctk.CTkFont(size=13, weight="bold"), text_color=COLORS["accent_primary"], anchor="w")
+        enhance_label = ctk.CTkLabel(card, text="Melhorias de Estilo & Nitidez", font=ctk.CTkFont(size=13, weight="bold"), text_color=COLORS["accent_primary"], anchor="w")
         enhance_label.pack(fill="x", padx=16, pady=(10, 4))
 
         enhance_grid = ctk.CTkFrame(card, fg_color="transparent")
@@ -664,7 +627,7 @@ class VideoUpscalerApp(ctk.CTk):
         enhance_grid.columnconfigure(2, weight=1)
 
         # ── Row 3: YouTube/Anti-Copyright & Audio Enhancement ──
-        ac_label = ctk.CTkLabel(card, text="🛡️ Segurança Anti-Copyright & Áudio de Estúdio", font=ctk.CTkFont(size=13, weight="bold"), text_color=COLORS["warning"], anchor="w")
+        ac_label = ctk.CTkLabel(card, text="Segurança Anti-Copyright & Áudio de Estúdio", font=ctk.CTkFont(size=13, weight="bold"), text_color=COLORS["warning"], anchor="w")
         ac_label.pack(fill="x", padx=16, pady=(10, 4))
         
         ac_grid = ctk.CTkFrame(card, fg_color="transparent")
@@ -682,7 +645,7 @@ class VideoUpscalerApp(ctk.CTk):
         # Col 1: Audio Enhancement
         ae_col = ctk.CTkFrame(ac_grid, fg_color="transparent")
         ae_col.grid(row=0, column=1, sticky="ew", padx=(6, 0))
-        ctk.CTkLabel(ae_col, text="🎙️ Melhoria de Áudio (Qualidade Estúdio)", font=ctk.CTkFont(size=12), text_color=COLORS["text_secondary"]).pack(anchor="w", pady=(0, 4))
+        ctk.CTkLabel(ae_col, text="Melhoria de Áudio (Qualidade Estúdio)", font=ctk.CTkFont(size=12), text_color=COLORS["text_secondary"]).pack(anchor="w", pady=(0, 4))
         self.audio_enhance_var = ctk.StringVar(value=list(AUDIO_ENHANCE_OPTIONS.keys())[0])
         ctk.CTkOptionMenu(ae_col, values=list(AUDIO_ENHANCE_OPTIONS.keys()), variable=self.audio_enhance_var, font=ctk.CTkFont(size=12), height=36, corner_radius=8).pack(fill="x")
 
@@ -703,7 +666,7 @@ class VideoUpscalerApp(ctk.CTk):
         card.pack(fill="x", pady=(0, 10))
 
         ctk.CTkLabel(
-            card, text="💾  Arquivo de Saída",
+            card, text="Arquivo de Saída",
             font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"),
             text_color=COLORS["text_primary"], anchor="w",
         ).pack(fill="x", padx=16, pady=(12, 8))
@@ -733,139 +696,179 @@ class VideoUpscalerApp(ctk.CTk):
             command=self._browse_output,
         ).pack(side="right")
 
-    def _build_action_section(self):
-        """Build the action buttons section."""
-        action_frame = ctk.CTkFrame(self.main_scroll, fg_color="transparent")
-        action_frame.pack(fill="x", pady=(12, 12))
+    def _build_docked_action_section(self, parent):
+        """Build the docked action, live progress, and expandable terminal drawer."""
+        self.dock_panel = ctk.CTkFrame(
+            parent,
+            fg_color="#0e0e12",
+            corner_radius=12,
+            border_width=1,
+            border_color=COLORS["border"],
+        )
+        self.dock_panel.pack(side="bottom", fill="x", padx=16, pady=(4, 10))
+
+        # ── Gaveta Retrátil do Console (Terminal Drawer) ──
+        self.console_drawer = ctk.CTkFrame(self.dock_panel, fg_color="transparent")
+        self._console_visible = False
+
+        c_header = ctk.CTkFrame(self.console_drawer, fg_color="transparent")
+        c_header.pack(fill="x", padx=14, pady=(8, 4))
+
+        ctk.CTkLabel(
+            c_header,
+            text="TERMINAL DE EXECUÇÃO",
+            font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
+            text_color=COLORS["text_secondary"],
+        ).pack(side="left")
+
+        ctk.CTkButton(
+            c_header,
+            text="Limpar",
+            font=ctk.CTkFont(family="Segoe UI", size=10),
+            fg_color="#18181f", hover_color="#22222a",
+            text_color=COLORS["text_secondary"],
+            height=22, width=60, corner_radius=5,
+            command=self._clear_log,
+        ).pack(side="right", padx=(4, 0))
+
+        self.console_text = ctk.CTkTextbox(
+            self.console_drawer,
+            fg_color=COLORS["console_bg"],
+            text_color=COLORS["console_text"],
+            font=ctk.CTkFont(family="Consolas", size=11),
+            height=125, corner_radius=8,
+            border_width=1, border_color=COLORS["border"],
+            wrap="word",
+        )
+        self.console_text.pack(fill="x", padx=14, pady=(0, 8))
+        self.console_text.configure(state="disabled")
+
+        # ── Linha de Progresso & Estatísticas (Sempre visível no dock) ──
+        self.dock_progress_frame = ctk.CTkFrame(self.dock_panel, fg_color="transparent")
+        self.dock_progress_frame.pack(fill="x", padx=14, pady=(8, 4))
+
+        # Barra de progresso esmeralda
+        self.progress_bar = ctk.CTkProgressBar(
+            self.dock_progress_frame,
+            fg_color=COLORS["bg_dark"],
+            progress_color=COLORS["accent_primary"],
+            height=10, corner_radius=5,
+        )
+        self.progress_bar.pack(fill="x", pady=(0, 4))
+        self.progress_bar.set(0)
+
+        p_stats_row = ctk.CTkFrame(self.dock_progress_frame, fg_color="transparent")
+        p_stats_row.pack(fill="x")
+
+        self.progress_percent_label = ctk.CTkLabel(
+            p_stats_row, text="0.0%",
+            font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"),
+            text_color=COLORS["accent_primary"],
+        )
+        self.progress_percent_label.pack(side="left")
+
+        self.progress_status_label = ctk.CTkLabel(
+            p_stats_row, text="Aguardando início...",
+            font=ctk.CTkFont(family="Segoe UI", size=11),
+            text_color=COLORS["text_secondary"],
+        )
+        self.progress_status_label.pack(side="left", padx=(10, 0))
+
+        self.elapsed_label = ctk.CTkLabel(
+            p_stats_row, text="Tempo: 00:00",
+            font=ctk.CTkFont(family="Segoe UI", size=11),
+            text_color=COLORS["text_secondary"],
+        )
+        self.elapsed_label.pack(side="right")
+
+        self.live_compare_btn = ctk.CTkButton(
+            p_stats_row, text="Comparação Lado a Lado",
+            image=icon_manager.get_icon("search", size=(12, 12), color="#ffffff"),
+            compound="left",
+            font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
+            fg_color="#18181f", hover_color="#22222a",
+            border_width=1, border_color=COLORS["border"],
+            height=24, corner_radius=6,
+            command=self._show_comparison,
+        )
+        self.live_compare_btn.pack_forget()
+
+        # ── Linha de Ações Principais & Botão Toggle Terminal ──
+        act_row = ctk.CTkFrame(self.dock_panel, fg_color="transparent")
+        act_row.pack(fill="x", padx=14, pady=(4, 10))
 
         self.preview_btn = ctk.CTkButton(
-            action_frame,
-            text="👁️  Ver Efeito",
-            font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"),
+            act_row,
+            text="Visualizar Efeito",
+            image=icon_manager.get_icon("eye", size=(15, 15), color="#fafafa"),
+            compound="left",
+            font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
             fg_color=COLORS["bg_card"],
             hover_color=COLORS["bg_card_hover"],
             border_color=COLORS["border_active"], border_width=1,
             text_color=COLORS["text_primary"],
-            height=50, corner_radius=12,
+            height=42, corner_radius=8,
             command=self._preview_filters,
         )
-        self.preview_btn.pack(side="left", fill="x", expand=True, padx=(0, 8))
+        self.preview_btn.pack(side="left", padx=(0, 8))
 
         self.start_btn = ctk.CTkButton(
-            action_frame,
-            text="🚀  Iniciar Upscaling",
-            font=ctk.CTkFont(family="Segoe UI", size=16, weight="bold"),
+            act_row,
+            text="Iniciar Upscaling",
+            image=icon_manager.get_icon("play", size=(16, 16), color="#09090b"),
+            compound="left",
+            font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"),
             fg_color=COLORS["accent_primary"],
             hover_color=COLORS["accent_secondary"],
-            height=50, corner_radius=12,
+            text_color="#09090b",
+            height=42, corner_radius=8,
             command=self._start_upscaling,
         )
         self.start_btn.pack(side="left", fill="x", expand=True, padx=(0, 8))
 
         self.cancel_btn = ctk.CTkButton(
-            action_frame,
-            text="✕  Cancelar",
-            font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"),
-            fg_color=COLORS["error"], hover_color="#dc2626",
-            height=50, width=140, corner_radius=12,
+            act_row,
+            text="Cancelar",
+            font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
+            fg_color=COLORS["bg_card"], hover_color="#dc2626",
+            border_width=1, border_color=COLORS["border"],
+            text_color=COLORS["error"],
+            height=42, width=95, corner_radius=8,
             command=self._cancel_upscaling,
             state="disabled",
         )
-        self.cancel_btn.pack(side="right")
+        self.cancel_btn.pack(side="left", padx=(0, 8))
 
-    def _build_progress_section(self):
-        """Build the progress display with console log (hidden by default)."""
-        self.progress_card_outer = ctk.CTkFrame(
-            self.main_scroll, fg_color=COLORS["bg_card"],
-            corner_radius=12, border_width=1, border_color=COLORS["border"],
-        )
-        # DO NOT pack yet — hidden until upscaling starts
-
-        ctk.CTkLabel(
-            self.progress_card_outer, text="📊  Progresso",
-            font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"),
-            text_color=COLORS["text_primary"], anchor="w",
-        ).pack(fill="x", padx=16, pady=(12, 8))
-
-        progress_inner = ctk.CTkFrame(self.progress_card_outer, fg_color="transparent")
-        progress_inner.pack(fill="x", padx=16, pady=(0, 14))
-
-        # ── Progress bar ──
-        self.progress_bar = ctk.CTkProgressBar(
-            progress_inner,
-            fg_color=COLORS["bg_dark"],
-            progress_color=COLORS["accent_primary"],
-            height=16, corner_radius=8,
-        )
-        self.progress_bar.pack(fill="x", pady=(0, 10))
-        self.progress_bar.set(0)
-
-        # ── Stats row ──
-        stats_row = ctk.CTkFrame(progress_inner, fg_color="transparent")
-        stats_row.pack(fill="x", pady=(0, 10))
-
-        # Percentage
-        self.progress_percent_label = ctk.CTkLabel(
-            stats_row, text="0.0%",
-            font=ctk.CTkFont(family="Segoe UI", size=24, weight="bold"),
-            text_color=COLORS["accent_primary"],
-        )
-        self.progress_percent_label.pack(side="left")
-
-        # Right side stats
-        right_stats = ctk.CTkFrame(stats_row, fg_color="transparent")
-        right_stats.pack(side="right")
-
-        self.elapsed_label = ctk.CTkLabel(
-            right_stats, text="Tempo: 00:00",
+        self.terminal_toggle_btn = ctk.CTkButton(
+            act_row,
+            text="Terminal",
+            image=icon_manager.get_icon("studio", size=(14, 14), color=COLORS["text_secondary"]),
+            compound="left",
             font=ctk.CTkFont(family="Segoe UI", size=12),
-            text_color=COLORS["text_secondary"],
-        )
-        self.elapsed_label.pack(anchor="e")
-
-        self.progress_status_label = ctk.CTkLabel(
-            right_stats, text="Aguardando...",
-            font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
-            text_color=COLORS["text_secondary"],
-        )
-        self.progress_status_label.pack(anchor="e")
-
-        # ── Buttons ──
-        btns_row = ctk.CTkFrame(progress_inner, fg_color="transparent")
-        btns_row.pack(fill="x", pady=(8, 0))
-
-        self.live_compare_btn = ctk.CTkButton(
-            btns_row, text="🔍  Ver Comparação (Lado a Lado)",
-            font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
-            fg_color=COLORS["accent_primary"],
-            hover_color=COLORS["accent_secondary"],
-            height=40, corner_radius=8,
-            command=self._show_comparison
-        )
-        # Hidden initially
-        self.live_compare_btn.pack_forget()
-
-        # ── Console Log ──
-        console_label_row = ctk.CTkFrame(progress_inner, fg_color="transparent")
-        console_label_row.pack(fill="x", pady=(4, 4))
-
-        ctk.CTkLabel(
-            console_label_row, text="Console",
-            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
-            text_color=COLORS["text_muted"],
-        ).pack(side="left")
-
-        self.console_text = ctk.CTkTextbox(
-            progress_inner,
-            fg_color=COLORS["console_bg"],
-            text_color=COLORS["console_text"],
-            font=ctk.CTkFont(family="Consolas", size=11),
-            height=140, corner_radius=8,
+            fg_color="#18181f", hover_color="#22222a",
             border_width=1, border_color=COLORS["border"],
-            wrap="word",
+            text_color=COLORS["text_secondary"],
+            height=42, width=100, corner_radius=8,
+            command=self._toggle_console_drawer,
         )
-        self.console_text.pack(fill="x")
-        self.console_text.configure(state="disabled")
+        self.terminal_toggle_btn.pack(side="right")
+
+        # Compatibilidade com referências legadas
+        self.progress_card_outer = self.dock_progress_frame
+
+    def _toggle_console_drawer(self, force_show: bool = False):
+        """Abre ou fecha a gaveta retrátil do console no painel fixo."""
+        if force_show:
+            self._console_visible = False
+        if not self._console_visible:
+            self.console_drawer.pack(side="top", fill="x", before=self.dock_progress_frame)
+            self._console_visible = True
+            self.terminal_toggle_btn.configure(text="Fechar Log", text_color=COLORS["accent_primary"])
+            self.console_text.see("end")
+        else:
+            self.console_drawer.pack_forget()
+            self._console_visible = False
+            self.terminal_toggle_btn.configure(text="Terminal", text_color=COLORS["text_secondary"])
 
     def _build_status_bar(self):
         """Build the bottom status bar."""
@@ -952,15 +955,15 @@ class VideoUpscalerApp(ctk.CTk):
         if base_height == 0:
             if self.current_video:
                 self.dims_preview_label.configure(
-                    text=f"📍 Saída: {target_w}×{target_h} (Original)"
+                    text=f"Saída: {target_w}x{target_h} (Original)"
                 )
             else:
                 self.dims_preview_label.configure(
-                    text="📍 Saída: Original"
+                    text="Saída: Original"
                 )
         else:
             self.dims_preview_label.configure(
-                text=f"📍 Saída: {target_w}×{target_h}"
+                text=f"Saída: {target_w}x{target_h}"
             )
 
     def _start_elapsed_timer(self):
@@ -988,13 +991,13 @@ class VideoUpscalerApp(ctk.CTk):
         self.upscaler.ffmpeg_path = find_ffmpeg()
         if self.upscaler.is_available:
             self.ffmpeg_status.configure(
-                text="✓ FFmpeg encontrado",
+                text="[OK] FFmpeg encontrado",
                 text_color=COLORS["success"],
             )
             self._set_status("Pronto para uso.")
         else:
             self.ffmpeg_status.configure(
-                text="✕ FFmpeg não encontrado",
+                text="[FALHA] FFmpeg não encontrado",
                 text_color=COLORS["error"],
             )
             self._set_status("FFmpeg não encontrado!", COLORS["error"])
@@ -1005,7 +1008,7 @@ class VideoUpscalerApp(ctk.CTk):
                 "Ele é o motor essencial para processar e editar vídeos.\n\n"
                 "Deseja que o aplicativo baixe e instale o FFmpeg automaticamente agora com 1 clique?"
             ):
-                self.tabview.set("⚙️  Configurações")
+                self.tabview.set("Configurações")
                 if hasattr(self, "settings_tab"):
                     self.settings_tab._auto_download_ffmpeg()
 
@@ -1017,18 +1020,16 @@ class VideoUpscalerApp(ctk.CTk):
 
             # Check if keys are missing
             if not settings.get("gemini_keys") and not settings.get("groq_key"):
-                self._set_status("⚙️ Nenhuma chave de IA configurada. Acesse a aba Configurações para adicionar sua chave grátis.", COLORS["warning"])
+                self._set_status("Aviso: Nenhuma chave de IA configurada. Acesse a aba Configurações para adicionar sua chave grátis.", COLORS["warning"])
 
             # Check for updates
             if settings.get("check_updates", True):
                 def _on_update_result(res):
                     if res.get("has_update"):
-                        latest = res.get("latest_version")
                         def _show_badge():
-                            self.update_top_btn.configure(
-                                text=f"🚀 Nova Versão v{latest} Disponível!",
-                            )
-                            self.update_top_btn.pack(side="right", padx=(0, 10))
+                            if hasattr(self, "tabview") and hasattr(self.tabview, "show_update_alert"):
+                                self.tabview.show_update_alert(res)
+                            self._set_status(f"Nova versão v{res.get('latest_version')} disponível! Atualize direto na barra lateral.", COLORS["success"])
                         self.after(0, _show_badge)
 
                 check_for_updates_async(_on_update_result)
@@ -1049,13 +1050,13 @@ class VideoUpscalerApp(ctk.CTk):
         available, msg = check_realesrgan_available()
         if available:
             self.ai_status_label.configure(
-                text=f"✓ IA pronta ({msg.split('✓')[0].strip()})",
+                text=f"[OK] IA pronta ({msg.split('[OK]')[0].strip()})",
                 text_color=COLORS["success"],
             )
             self.ai_install_btn.pack_forget()
         else:
             self.ai_status_label.configure(
-                text="⚠ Dependências faltando",
+                text="[AVISO] Dependências faltando",
                 text_color=COLORS["warning"],
             )
             # Show install button
@@ -1067,7 +1068,7 @@ class VideoUpscalerApp(ctk.CTk):
         if self._ai_mode:
             self.ai_model_panel.pack(fill="x", padx=0, pady=(0, 4))
             self._on_ai_model_change(self.ai_model_var.get())
-            self._set_status("🤖 Modo IA ativado — qualidade foto-realista", "#10b981")
+            self._set_status("Modo IA ativado — qualidade foto-realista", "#10b981")
         else:
             self.ai_model_panel.pack_forget()
             self._set_status("Modo FFmpeg — rápido e eficiente")
@@ -1078,7 +1079,7 @@ class VideoUpscalerApp(ctk.CTk):
         desc = model_info.get("description", "")
         scale = model_info.get("scale", 4)
         self.ai_model_desc.configure(
-            text=f"   ↳ {desc} | Fator: {scale}×"
+            text=f"   -> {desc} | Fator: {scale}x"
         )
 
     def _install_ai_deps(self):
@@ -1100,8 +1101,8 @@ class VideoUpscalerApp(ctk.CTk):
         if not self.progress_card_outer.winfo_ismapped():
             self.progress_card_outer.pack(fill="x", pady=(0, 10))
         self._clear_log()
-        self._log("📦 Iniciando instalação das dependências de IA...")
-        self.ai_install_btn.configure(state="disabled", text="⏳ Instalando...")
+        self._log("Iniciando instalação das dependências de IA...")
+        self.ai_install_btn.configure(state="disabled", text="Instalando...")
 
         def _do_install():
             from ai_upscaler import install_dependencies
@@ -1112,16 +1113,16 @@ class VideoUpscalerApp(ctk.CTk):
 
     def _on_install_done(self, success: bool):
         """Called when AI dependency installation finishes."""
-        self.ai_install_btn.configure(state="normal", text="📦 Instalar IA")
+        self.ai_install_btn.configure(state="normal", text="Instalar Motor IA")
         if success:
-            self._log("✓ Instalação concluída! Reinicie o app para carregar os módulos.")
+            self._log("[OK] Instalação concluída! Reinicie o app para carregar os módulos.")
             messagebox.showinfo(
                 "Instalação Concluída",
                 "Dependências de IA instaladas com sucesso!\n\nReinicie o app para usar o Modo IA."
             )
             self._check_ai_status()
         else:
-            self._log("✕ Instalação falhou. Veja o console para detalhes.")
+            self._log("[FALHA] Instalação falhou. Veja o console para detalhes.")
             messagebox.showerror("Erro", "Falha na instalação. Verifique a conexão e tente novamente.")
 
     def _browse_file(self):
@@ -1142,14 +1143,14 @@ class VideoUpscalerApp(ctk.CTk):
         if hasattr(self, 'refiner_tab'):
             if self.input_path and os.path.exists(self.input_path):
                 self.refiner_tab._load_video(self.input_path)
-            self.tabview.set("✂️  Refinador (Mastercut)")
+            self.tabview.set("Refinador Mastercut")
 
     def _open_in_director(self):
         """Send current video to Director AI tab and switch to it."""
         if hasattr(self, 'director_tab'):
             if self.input_path and os.path.exists(self.input_path):
                 self.director_tab._load_video(self.input_path)
-            self.tabview.set("🎬  Diretor IA")
+            self.tabview.set("Diretor IA")
 
     def _browse_output(self):
         """Open file dialog to select output path."""
@@ -1203,10 +1204,10 @@ class VideoUpscalerApp(ctk.CTk):
             self.output_entry.delete(0, "end")
             self.output_entry.insert(0, output_path)
 
-            self._set_status(f"✓ Vídeo carregado: {video_info.filename}", COLORS["success"])
+            self._set_status(f"[OK] Vídeo carregado: {video_info.filename}", COLORS["success"])
         else:
             self._set_status(
-                "✕ Não foi possível ler o vídeo. Verifique se o FFmpeg está instalado.",
+                "[FALHA] Não foi possível ler o vídeo. Verifique se o FFmpeg está instalado.",
                 COLORS["error"]
             )
             messagebox.showerror(
@@ -1329,13 +1330,12 @@ class VideoUpscalerApp(ctk.CTk):
 
         # Update UI
         self.is_processing = True
-        self.start_btn.configure(state="disabled", text="⏳  Processando...")
+        self.start_btn.configure(state="disabled", text="Processando...")
         self.cancel_btn.configure(state="normal")
         self.live_compare_btn.pack_forget() # Hide if it was there from previous run
 
-        # Show progress card
-        if not self.progress_card_outer.winfo_ismapped():
-            self.progress_card_outer.pack(fill="x", pady=(0, 10))
+        # Expandir terminal na barra fixa automaticamente ao iniciar
+        self._toggle_console_drawer(force_show=True)
 
         self.progress_bar.set(0)
         self.progress_percent_label.configure(text="0.0%")
@@ -1345,7 +1345,7 @@ class VideoUpscalerApp(ctk.CTk):
         # Build info for console
         ar_label = ar_key
         fps_label = fps_key
-        mode_label = f"🤖 Real-ESRGAN ({self.ai_model_var.get()})" if self._ai_mode else f"FFmpeg / {algo_key}"
+        mode_label = f"Real-ESRGAN ({self.ai_model_var.get()})" if self._ai_mode else f"FFmpeg / {algo_key}"
 
         # Clear and populate console
         self._clear_log()
@@ -1368,7 +1368,7 @@ class VideoUpscalerApp(ctk.CTk):
             self._log(f"Qualidade:   CRF={quality['crf']}, Preset={quality['preset']}")
         self._log(f"─────────────────────────")
 
-        self._set_status("⏳ Upscaling em andamento...", COLORS["warning"])
+        self._set_status("Upscaling em andamento...", COLORS["warning"])
         self._start_elapsed_timer()
 
         # ── AI Pipeline ──────────────────────────────────────────────────
@@ -1376,7 +1376,7 @@ class VideoUpscalerApp(ctk.CTk):
             if not self.ai_upscaler:
                 messagebox.showerror("Erro", "ai_upscaler.py não encontrado!")
                 self.is_processing = False
-                self.start_btn.configure(state="normal", text="🚀  Iniciar Upscaling")
+                self.start_btn.configure(state="normal", text="Iniciar Upscaling")
                 self.cancel_btn.configure(state="disabled")
                 return
 
@@ -1388,14 +1388,14 @@ class VideoUpscalerApp(ctk.CTk):
                 cugan_bin = find_realcugan_bin()
                 if not cugan_bin or not os.path.isfile(cugan_bin):
                     self.is_processing = False
-                    self.start_btn.configure(state="normal", text="🚀  Iniciar Upscaling")
+                    self.start_btn.configure(state="normal", text="Iniciar Upscaling")
                     self.cancel_btn.configure(state="disabled")
                     if messagebox.askyesno(
                         "Motor Real-CUGAN Opcional",
                         "O motor Real-CUGAN 4K (~14 MB) é opcional e ainda não foi baixado.\n\n"
                         "Deseja baixá-lo agora automaticamente com 1 clique?"
                     ):
-                        self.tabview.set("⚙️  Configurações")
+                        self.tabview.set("Configurações")
                         if hasattr(self, "settings_tab"):
                             self.settings_tab._auto_download_realcugan()
                     return
@@ -1407,13 +1407,13 @@ class VideoUpscalerApp(ctk.CTk):
                         f"{msg}\n\nRecomendamos utilizar os modelos Real-CUGAN (Vulkan), que são leves (~14 MB) e funcionam em qualquer placa de vídeo."
                     )
                     self.is_processing = False
-                    self.start_btn.configure(state="normal", text="🚀  Iniciar Upscaling")
+                    self.start_btn.configure(state="normal", text="Iniciar Upscaling")
                     self.cancel_btn.configure(state="disabled")
                     return
 
             selected_model = self.ai_model_var.get()
             engine_tag = "Real-CUGAN (Vulkan / Alta Velocidade)" if "CUGAN" in selected_model else "Real-ESRGAN (CUDA)"
-            self._log(f"🤖 Iniciando pipeline de IA ({engine_tag})...")
+            self._log(f"[AI] Iniciando pipeline ({engine_tag})...")
             self._log(f"   Modelo selecionado: {selected_model}")
 
             # Resolve anti-copyright filters
@@ -1481,7 +1481,7 @@ class VideoUpscalerApp(ctk.CTk):
                     self.ai_upscaler.cancel()
                 else:
                     self.upscaler.cancel()
-                self._on_log("⚠ Cancelamento solicitado...")
+                self._on_log("[AVISO] Cancelamento solicitado...")
 
     def _on_progress(self, percent: float, status: str):
         """Handle progress updates (called from worker thread)."""
@@ -1505,7 +1505,7 @@ class VideoUpscalerApp(ctk.CTk):
         """Update UI on completion (main thread)."""
         self.is_processing = False
         self._stop_elapsed_timer()
-        self.start_btn.configure(state="normal", text="🚀  Iniciar Upscaling")
+        self.start_btn.configure(state="normal", text="Iniciar Upscaling")
         self.cancel_btn.configure(state="disabled")
 
         elapsed = time.time() - self._start_time
@@ -1514,25 +1514,25 @@ class VideoUpscalerApp(ctk.CTk):
         if success:
             self.progress_bar.set(1.0)
             self.progress_percent_label.configure(text="100%")
-            self.progress_status_label.configure(text="✓ Concluído!")
+            self.progress_status_label.configure(text="[OK] Concluído!")
             self._set_status(message, COLORS["success"])
             self._log(f"─────────────────────────")
-            self._log(f"✓ {message}")
+            self._log(f"[OK] {message}")
             self._log(f"Tempo total: {format_time(elapsed)}")
 
             output_path = self.output_entry.get().strip()
             if output_path and os.path.exists(output_path):
                 self.live_compare_btn.pack(fill="x", pady=(10, 0))
                 
-                if messagebox.askyesno("Concluído! ✓",
+                if messagebox.askyesno("Concluído!",
                         f"{message}\n\nAbrir pasta do arquivo?"):
                     folder = os.path.dirname(os.path.abspath(output_path))
                     os.startfile(folder)
         else:
-            self.progress_status_label.configure(text="✕ Falhou")
+            self.progress_status_label.configure(text="[FALHA] Falhou")
             self._set_status(message, COLORS["error"])
             self._log(f"─────────────────────────")
-            self._log(f"✕ ERRO: {message}")
+            self._log(f"[ERRO]: {message}")
             messagebox.showerror("Erro", message)
 
     def _show_comparison(self):

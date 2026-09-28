@@ -217,7 +217,7 @@ def extract_audio(video_path: str, ffmpeg_bin: str = "ffmpeg") -> str:
 def transcribe_audio_groq(audio_path: str, groq_key: str, on_log: Optional[Callable[[str], None]] = None) -> str:
     """Transcribe audio using Groq Whisper API (whisper-large-v3). Super fast (1-3s)."""
     if on_log:
-        on_log("🎙️ Transcrevendo áudio com Whisper Large v3 (Groq)...")
+        on_log("[WHISPER] Transcrevendo áudio com Whisper Large v3 (Groq)...")
 
     url = "https://api.groq.com/openai/v1/audio/transcriptions"
     headers = {"Authorization": f"Bearer {groq_key}"}
@@ -258,7 +258,7 @@ def transcribe_audio_groq(audio_path: str, groq_key: str, on_log: Optional[Calla
 def transcribe_audio_local(audio_path: str, on_log: Optional[Callable[[str], None]] = None) -> str:
     """Fallback local transcription with faster-whisper (CTranslate2, works without PyTorch)."""
     if on_log:
-        on_log("🎙️ Transcrevendo com faster-whisper local (GPU/CPU)...")
+        on_log("[WHISPER] Transcrevendo com faster-whisper local (GPU/CPU)...")
 
     from faster_whisper import WhisperModel
 
@@ -294,14 +294,14 @@ def transcribe_video_audio(audio_path: str, on_log: Optional[Callable[[str], Non
             return transcribe_audio_groq(audio_path, groq_key, on_log)
         except Exception as e:
             if on_log:
-                on_log(f"⚠ Groq Whisper falhou ({e}). Tentando transcrição local...")
+                on_log(f"[AVISO] Groq Whisper falhou ({e}). Tentando transcrição local...")
 
     # Fallback local
     try:
         return transcribe_audio_local(audio_path, on_log)
     except Exception as e:
         if on_log:
-            on_log(f"⚠ faster-whisper local falhou: {e}")
+            on_log(f"[AVISO] faster-whisper local falhou: {e}")
         return ""
 
 
@@ -492,15 +492,25 @@ def fetch_episode_lore(context: str, on_log: Optional[Callable[[str], None]] = N
     if not context or len(context.strip()) < 3:
         return ""
 
+    try:
+        from ai_cache_hub import ai_cache
+        cached_lore = ai_cache.get(context.strip().lower(), "anime_lore")
+        if cached_lore and isinstance(cached_lore, str):
+            if on_log:
+                on_log("[CACHE 24H] Lore e metadados recuperados do cache (0 tokens gastos)!")
+            return cached_lore
+    except Exception:
+        ai_cache = None
+
     if on_log:
-        on_log(f"🔍 Pesquisando lore e metadados sobre: {context}...")
+        on_log(f"[LORE] Pesquisando lore e metadados sobre: {context}...")
 
     enriched_api = ""
     try:
         from metadata_enricher import get_enriched_context_for_prompt
         enriched_api = get_enriched_context_for_prompt(context)
         if enriched_api and on_log:
-            on_log("✓ Metadados oficiais obtidos via API (Kitsu / TVMaze / MAL)")
+            on_log("[OK] Metadados oficiais obtidos via API (Kitsu / TVMaze / MAL)")
     except Exception:
         pass
 
@@ -520,19 +530,27 @@ Responda em formato JSON:
   "lore": "Texto com o resumo dos momentos mais comentados deste episódio"
 }}
 """
+    final_lore = ""
     try:
         raw = call_ai_text(prompt, on_log=None)
         data = json.loads(raw)
         lore = data.get("lore", "").strip()
         if enriched_api:
             if not lore or "Lore não encontrada" in lore:
-                return enriched_api
-            return f"{enriched_api}\n\n[MOMENTOS DE HYPE & COMUNIDADE]\n{lore}"
-        if "Lore não encontrada" in lore:
-            return ""
-        return lore
+                final_lore = enriched_api
+            else:
+                final_lore = f"{enriched_api}\n\n[MOMENTOS DE HYPE & COMUNIDADE]\n{lore}"
+        elif "Lore não encontrada" in lore:
+            final_lore = ""
+        else:
+            final_lore = lore
     except Exception:
-        return enriched_api or ""
+        final_lore = enriched_api or ""
+
+    if ai_cache and final_lore:
+        ai_cache.set(context.strip().lower(), "anime_lore", final_lore)
+
+    return final_lore
 
 
 # ─── Viral Knowledge Base (from reference ViralAI) ───────────────────────────
@@ -556,28 +574,55 @@ PADRÕES VIRAIS COMPROVADOS:
 """
 
 GENRE_RULES_DIRECTOR = {
-    "shonen_action": """
-[REGRAS DE GÊnerO: AÇÃO / SHONEN]
-  • Busque momentos de confronto direto, frases de efeito marcantes ("eu vou te destruir", "você não é rival para mim"), demonstração de "aura" ou poder absurdo.
-  • Priorize o momento exato em que o personagem revela seu poder máximo, não a fase de preparação longa.
-  • Cortes devem focar no impacto físico, reversões de luta, reações de choque dos personagens que observam.
-  • Faças icônicas de vilões ou heróis têm altíssimo replay value ("Deixa eu te dizer algo...").
+    "general": """
+[FOCO DE CONTEÚDO OBRIGATÓRIO: GERAL / CLÍMAX VIRAL (PADRÃO)]
+  • OBJETIVO: Selecionar os momentos de maior retenção e impacto geral do episódio.
+  • Priorize os pontos mais altos da narrativa: grandes revelações, viradas na história (plot twists), momentos surpreendentes ou o clímax emocional/visual.
+  • O trecho deve ter apelo universal e forte valor de compartilhamento no TikTok, Reels e YouTube Shorts.
 """,
-    "romance_drama": """
-[REGRAS DE GÊnerO: ROMANCE / DRAMA / DORAMA]
-  • Esqueça "aura" e "confronto físico". Busque tensão romântica: aproximação física, "quase beijos", toques acidentais, quebra de espaço pessoal.
-  • VULNERABILIDADE E MICRO-EXPRESSÕES: Priorize reações íntimas (rubor, desviar o olhar, choro silencioso, ciúme contido). A emoção está no rosto, não na ação.
-  • HOOK ROMÂNTICO: O vídeo deve começar com a confissão mais chocante, declaração direta de amor ou momento de vulnerabilidade áxima.
-  • CORTE IMPLACAVEL DE "CLIMA": Obras de romance amam longos planos contemplativos. CORTE TODOS. Se há 10s de silêncio ou contemplão, reduza para 1s de contexto e conecte imediatamente com a próxima fala forte.
+    "action": """
+[FOCO EXCLUSIVO E OBRIGATÓRIO: AÇÃO / BATALHAS / LUTAS]
+🚨 TOLERÂNCIA ZERO PARA CENAS DE CONVERSA OU COMÉDIA PASTELÃO:
+  • O usuário escolheu EXCLUSIVAMENTE AÇÃO. TODOS os cortes devem ser batalhas, lutas corporais, trocação de socos/espadas, poderes, ataques especiais e adrenalina máxima.
+  • ⛔ NUNCA selecione momentos de alívio cômico, romance lento ou conversas pacíficas.
+  • Se o episódio tiver pouca luta, encontre até o menor momento de ameaça física, perseguição ou confronto.
+  • Preencha o campo "genre" com: "Ação / Batalha".
 """,
     "comedy": """
-[REGRAS DE GÊnerO: COMÉDIA / SLICE OF LIFE]
-  • Foque na quebra de expectativa (punchline) e nas reações exageradas.
-  • O timing do corte é crítico: corte IMEDIATAMENTE após a reação cômica para maximizar o impacto.
-  • Expresseões faciais exageradas e reações de personagens secundários têm altíssimo valor de compartilhamento.
-  • Evite incluir o "setup" muito longo da piada; entre direto na punchline com 1–2 segundos mínimos de contexto.
+[FOCO EXCLUSIVO E OBRIGATÓRIO: ENGRAÇADO / COMÉDIA / HUMOR]
+🚨 TOLERÂNCIA ZERO PARA CENAS SÉRIAS, DRAMÁTICAS OU DE LUTA:
+  • O usuário escolheu EXCLUSIVAMENTE HUMOR / ENGRAÇADO. TODOS os cortes devem ser 100% cômicos, engraçados, zoeiras, quebra de expectativa ou reações hilárias.
+  • ⛔ É TERMINANTEMENTE PROIBIDO selecionar lutas sérias, tragédias, discussões sérias, mortes ou cenas dramáticas.
+  • Foque na quebra repentina de expectativa (punchline), situações embaraçosas, mal-entendidos bizarros, caras e bocas cômicas e reações exageradas de espanto.
+  • Se o episódio for sério, garimpe os raros momentos de alívio cômico, ironias, piadas visuais ou respostas sarcásticas.
+  • Preencha o campo "genre" com: "Comédia / Humor".
+""",
+    "romance": """
+[FOCO EXCLUSIVO E OBRIGATÓRIO: ROMANCE / QUÍMICA / TENSÃO AMOROSA]
+🚨 TOLERÂNCIA ZERO PARA PANCADARIA OU PIADAS BESTAS:
+  • O usuário escolheu EXCLUSIVAMENTE ROMANCE. TODOS os cortes devem focar em tensão romântica, intimidade, declarações, ciúmes ou carinho entre personagens.
+  • ⛔ NUNCA selecione lutas violentas ou piadas desconexas.
+  • Busque aproximação física, "quase beijos", toques acidentais, rubor facial e declarações íntimas.
+  • Preencha o campo "genre" com: "Romance / Química".
+""",
+    "sensual": """
+[FOCO EXCLUSIVO E OBRIGATÓRIO: SENSUAL / ECCHI / FANSERVICE]
+🚨 TOLERÂNCIA ZERO PARA CENAS SEM APELO SENSUAL OU CHARME:
+  • O usuário escolheu EXCLUSIVAMENTE SENSUAL / FANSERVICE. TODOS os cortes devem valorizar charme, beleza estética, sensualidade e tensão provocativa.
+  • ⛔ NUNCA selecione cenas focadas em diálogos burocráticos ou lutas sem apelo visual de charme.
+  • Busque poses provocantes, troca de roupas, banho, praia/águas termais e momentos provocantes.
+  • Preencha o campo "genre" com: "Sensual / Fanservice".
 """,
 }
+
+# Aliases de compatibilidade
+GENRE_RULES_DIRECTOR["shonen_action"] = GENRE_RULES_DIRECTOR["action"]
+GENRE_RULES_DIRECTOR["romance_drama"] = GENRE_RULES_DIRECTOR["romance"]
+GENRE_RULES_DIRECTOR["engraçado"] = GENRE_RULES_DIRECTOR["comedy"]
+GENRE_RULES_DIRECTOR["comédia"] = GENRE_RULES_DIRECTOR["comedy"]
+GENRE_RULES_DIRECTOR["humor"] = GENRE_RULES_DIRECTOR["comedy"]
+GENRE_RULES_DIRECTOR["ação"] = GENRE_RULES_DIRECTOR["action"]
+GENRE_RULES_DIRECTOR["sensual"] = GENRE_RULES_DIRECTOR["sensual"]
 
 SNIPER_TIMESTAMP_RULES = """
 [REGRA DE OURO DOS TIMESTAMPS (FLUXO SNIPER)]
@@ -619,12 +664,24 @@ def build_candidates_prompt(
     video_duration_str: str = "",
     cut_mode: str = "context",
     excluded_ranges: Optional[List[str]] = None,
-    genre: str = "shonen_action"
+    genre: str = "general"
 ) -> str:
-    """Build the director curation prompt for Top 3 or Smart Cortes with cut mode and genre support."""
+    """Build the director curation prompt for Top 3 or Smart Cortes with cut mode and content type support."""
+    raw_g = str(genre or "general").lower()
+    if any(k in raw_g for k in ["engraçado", "engracado", "comédia", "comedia", "comedy", "humor"]):
+        genre = "comedy"
+    elif any(k in raw_g for k in ["ação", "acao", "action", "luta", "batalha"]):
+        genre = "action"
+    elif any(k in raw_g for k in ["romance", "química", "quimica", "love"]):
+        genre = "romance"
+    elif any(k in raw_g for k in ["sensual", "ecchi", "fanservice"]):
+        genre = "sensual"
+    else:
+        genre = "general"
+
     lore_section = f"\n[LORE DO EPISÓDIO E REAÇÕES DOS FÃS]\n{lore}\n" if lore else ""
     ctx_section = f"\n[CONTEXTO DA OBRA / EPISÓDIO]\n{context}\n" if context else ""
-    genre_rules = GENRE_RULES_DIRECTOR.get(genre, GENRE_RULES_DIRECTOR["shonen_action"])
+    genre_rules = GENRE_RULES_DIRECTOR.get(genre, GENRE_RULES_DIRECTOR.get("general", ""))
     if video_duration_str:
         dur_section = f"""
 [DURAÇÃO REAL DO ARQUIVO DE VÍDEO]: {video_duration_str}
@@ -658,12 +715,12 @@ TRECHOS JÁ GERADOS (TODOS PROIBIDOS):
 [MODO DE CORTE: MINI-FILME / ARCO NARRATIVO (2 A 5 MINUTOS)]
 
 OBJETIVO: Identificar blocos contextualizados e épicos de 2 a 5 minutos (120 a 300 segundos) que funcionem como um MINI-FILME ou ARCO NARRATIVO COMPLETO.
-Esse trecho será condensado no Refinador para gerar um resumo épico de até 2:30 min.
+Esse trecho será condensado no Refinador Mastercut para gerar um resumo cinematográfico de até 2:30 min com o suco da história.
 
 🚨 REGRA CRÍTICA DE DURAÇÃO (NÃO NEGOCIÁVEL):
   • Duração mínima obrigatória: 2 minutos (120s).
   • Duração máxima permitida: 5 minutos (300s).
-  • ⛔ CORTES DE 40s, 1 MINUTO OU 1m15s SÃO PROIBIDOS NESTE MODO E SERÃO REJEITADOS.
+  • ⛔ CORTES MENORES QUE 2 MINUTOS SÃO PROIBIDOS NESTE MODO E SERÃO DESCARTADOS.
 
 ESTRUTURA DO ARCO:
   • Abertura contextualizada (setup do dilema/confronto)
@@ -671,53 +728,93 @@ ESTRUTURA DO ARCO:
   • Clímax épico central
   • Desfecho e reações imediatas
 
-CAMPOS JSON:
-  • genre: "Mini-Filme / Arco Narrativo"
-  • description: Descreva o arco completo em 2 a 3 frases (o dilema inicial, o clímax e o impacto final).
+FORMATO OBRIGATÓRIO DO TÍTULO:
+  • "title": "[Nome do Arco/Mini-Filme] — [Descrição detalhada do dilema, personagens e impacto final]"
 """
 
     elif cut_mode == "continuous":
         cut_mode_rules = """
 [MODO DE CORTE: CONTÍNUO — CENA ÚNICA SEM EDIÇÃO INTERNA]
 
-OBJETIVO: Identificar trechos que funcionem como UMA ÚNICA CENA FLUÍDA (30 a 90 segundos), sem corte interno.
+OBJETIVO: Identificar trechos que funcionem como UMA ÚNICA CENA FLUÍDA (30 a 75 segundos), sem cortes internos.
+Ideal para diálogos corridos, piadas completas ou momentos de ação direta sem falhas de fala ou alucinações.
 
 ⚠️ LIMITES OBRIGATÓRIOS DESTE MODO — NÃO NEGOCIÁVEIS:
-  ✗ NUNCA sugira cortes com duração superior a 90 segundos (1m 30s) neste modo.
+  ✗ NUNCA sugira cortes com duração superior a 75 segundos (1m 15s) neste modo.
   ✗ NUNCA use "Arco Narrativo" no campo genre. Este modo é para cenas curtas e fluidas.
-  ✗ NUNCA selecione um trecho de 2, 3 ou mais minutos.
-  ✓ genre deve descrever o tipo da cena: ex. "Ação / Confronto", "Comédia / Reação", "Emoção / Confissão".
+  ✗ A cena deve ter emoção uniforme do início ao fim — sem trechos mortos ou silêncios longos no meio.
+  • Duração ideal: 30–60s para Shorts/Reels. Até 75s se a cena justificar.
 
-REGRAS DE INÍCIO E FIM NATURAIS:
-  • INÍCIO: Primeira palavra de uma fala marcante; beat de ação claro; reação facial expressiva.
-  • FIM: Última palavra de uma fala completa; pausa dramática pós-clímax; fade/black; reação final de personagem.
-  • A cena deve ter emoção uniforme do início ao fim — sem trechos "mortos" no meio.
-  • Duração ideal: 30–60s para Shorts/Reels. Até 90s se a cena justificar.
+FORMATO OBRIGATÓRIO DO TÍTULO:
+  • "title": "[Gancho/Título da Cena] — [Descrição detalhada de quem está na cena e o que acontece]"
+"""
+
+    elif cut_mode == "multi_part":
+        cut_mode_rules = """
+[MODO DE CORTE: SÉRIE EM PARTES (MULTI-PARTES: PARTE 1, PARTE 2, PARTE 3)]
+
+OBJETIVO: Identificar uma GRANDE SEQUÊNCIA DRAMÁTICA OU BATALHA do episódio e dividi-la em uma sequência interligada de 2 a 4 Shorts (60 a 90 segundos por parte).
+Perfeito para TikTok e Reels em série ("Parte 1", "Parte 2", etc.), gerando maratona no perfil e altíssimo engajamento.
+
+ESTRUTURA DAS PARTES:
+  • PARTE 1: A Construção do Dilema / Provocação / Ameaça. Termina exatamente quando a batalha começa ou a revelação é anunciada (cliffhanger).
+  • PARTE 2: O Confronto Direto / Clímax Intermediário / Troca de golpes e acusações. Termina no momento de maior perigo ou virada.
+  • PARTE 3: A Resolução Épica / A Queda / O Desfecho chocante e reações imediatas dos personagens.
+
+FORMATO OBRIGATÓRIO DO TÍTULO:
+  • "title": "[Nome da Saga/Confronto] - Parte 1/3 — [Descrição do que acontece especificamente nesta parte]"
+  • O campo 'description' deve explicar como esta parte se conecta com a próxima.
+  • Duração de cada parte: 60s a 90s.
+"""
+
+    elif cut_mode == "dynamic_montage":
+        cut_mode_rules = """
+[MODO DE CORTE: MONTAGEM ÁGIL / SEM BARRIGA (ALTA RETENÇÃO)]
+
+OBJETIVO: Identificar trechos de 45 a 70 segundos com ZERO barriga e alta densidade de acontecimentos.
+Elimine cenas lentas, andanças e pausas mortas. Foque em ritmo acelerado, troca rápida de falas ou clímax ininterrupto.
+
+CRITÉRIOS DE CORTE DINÂMICO:
+  • Começa imediatamente na primeira fala ou golpe decisivo.
+  • Densidade máxima: cada segundo deve conter fala relevante, reação expressiva ou ação visual impactante.
+  • Termina exatamente no pico de energia ou na punchline da cena.
+  • Duração ideal: 45–60 segundos. Máximo: 70 segundos.
+
+FORMATO OBRIGATÓRIO DO TÍTULO:
+  • "title": "[Título de Alta Energia] — [Descrição clara dos acontecimentos dinâmicos e personagens]"
+"""
+
+    elif cut_mode == "verbal_duel":
+        cut_mode_rules = """
+[MODO DE CORTE: DUELO VERBAL & REVELAÇÃO (CONFRONTO PSICOLÓGICO)]
+
+OBJETIVO: Identificar trechos de 40 a 80 segundos focados EXCLUSIVAMENTE em embates intelectuais, bate-boca, humilhações, confissões ou revelações chocantes de segredos.
+Ignore lutas físicas puras e foque na intensidade dramática das palavras e no choque dos personagens.
+
+ELEMENTOS OBRIGATÓRIOS:
+  • Confronto cara a cara ou discurso intimidador.
+  • Reação visual de choque, medo, quebra de ego ou triunfo psicológico.
+  • Fala icônica que mereça ser citada ou comentada nos Shorts.
+  • Duração: 40 a 80 segundos.
+
+FORMATO OBRIGATÓRIO DO TÍTULO:
+  • "title": "[Frase Marcante / Choque] — [Descrição do conflito entre os personagens e a revelação feita]"
 """
 
     else:  # context (default)
         cut_mode_rules = """
 [MODO DE CORTE: CONTEXTO — MINI-HISTÓRIA COM NARRATIVA IN MEDIA RES]
 
-OBJETIVO: Identificar trechos de 45 segundos a 2 minutos que contem uma MINI-HISTÓRIA COMPLETA usando a estrutura "In Media Res" para máxima retenção.
-
-⚠️ LIMITES OBRIGATÓRIOS DESTE MODO — NÃO NEGOCIÁVEIS:
-  ✗ NUNCA sugira cortes com duração superior a 2 minutos (2m 00s).
-  ✗ NUNCA use "Arco Narrativo" no campo genre.
-  ✓ genre deve descrever o tipo emocional da cena: ex. "Tensão / Confronto", "Drama / Revelação".
+OBJETIVO: Identificar trechos de 45 a 90 segundos que contem uma MINI-HISTÓRIA COMPLETA usando a estrutura "In Media Res" para máxima retenção.
 
 ESTRUTURA IN MEDIA RES (A REGRA DE OURO DA RETENÇÃO):
-  1. GANCHO IN MEDIA RES (0–3s): Começa EXATAMENTE no milissegundo da fala de maior impacto, revelação bombástica ou clímax visual — criando a dúvida imediata: 'Como a história chegou aqui?'.
-  2. CONTEXTO CONDENSADO (3s–20s): Volte no tempo. Mostre o setup mínimo necessário para o espectador entender o conflito. CORTE A GORDURA: remova silêncios, andanças e falas inúteis. Emende a fala A com a fala C se B for irrelevante.
-  3. ESCALADA (20s–45s): Mostre a tensão subindo. Reações dos personagens, confronto se intensificando.
-  4. PAYOFF/CLÍMAX (45s–60s): O momento principal explode com todo o contexto construído. O espectador entende o peso do que está acontecendo.
-  5. LOOP VALUE: O encerramento deve criar uma "pergunta no ar" ou "deixa" que se conecte com o gancho inicial, estimulando o replay.
+  1. GANCHO (0–3s): Começa EXATAMENTE na fala de maior impacto, revelação bombástica ou provocação — criando a dúvida: 'Como chegou aqui?'.
+  2. CONTEXTO RÁPIDO (3s–30s): Mostra o motivo do conflito e a escalada da tensão entre os envolvidos.
+  3. PAYOFF / DESFECHO (30s–75s): A resolução daquela mini-história com gancho final ou fechamento de ciclo.
+  • Duração ideal: 45 a 75 segundos. Máximo: 90 segundos.
 
-REGRAS DE CONDENSAÇÃO (SEJA IMPIEDOSO):
-  • NUNCA selecione 40s contínuos de uma mesma cena se houver "barriga" (silêncios, encaradas sem fala, transições lentas).
-  • CONDENSE: Pegue a frase de ameaça e emende diretamente com a reação, pulando os 15s de silêncio entre elas.
-  • O resultado deve parecer um "Trailer Emocional" hiper-focado: emoção de 20 minutos em 50 segundos.
-  • Duração ideal: 45–90s. Até 2 minutos se a narrativa justificar.
+FORMATO OBRIGATÓRIO DO TÍTULO:
+  • "title": "[Título Gancho] — [Descrição detalhada da mini-história, personagens e desfecho]"
 """
 
     if cut_mode == "narrative_arc":
@@ -727,16 +824,16 @@ REGRAS DE CONDENSAÇÃO (SEJA IMPIEDOSO):
   "candidates": [
     {
       "id": "corte_01",
-      "title": "Título épico do Mini-Filme / Arco Dramático",
+      "title": "O Despertar do Hichigo — Ichigo perde o controle e massacra Ulquiorra no topo de Las Noches",
       "estimated_range": "08:30 -> 12:15",
       "start_time": "08:30",
       "end_time": "12:15",
       "duration": "3m 45s",
       "genre": "Mini-Filme / Arco Narrativo",
-      "quality_score": 9.5,
+      "quality_score": 9.8,
       "viral_potential": "Altíssimo (Mini-Filme 3m 45s)",
-      "description": "Arco narrativo completo: do início da discussão até a revelação dramática e o desfecho emocionante.",
-      "quality_reasoning": "História completa que prende a atenção com 3m45s de duração ideal para refinamento."
+      "description": "Ichigo desperta sua forma Vasto Lorde após o chamado desesperado de Orihime; ele anula os ataques de Ulquiorra com Cero devastador e muda o rumo da guerra.",
+      "quality_reasoning": "História completa com início, virada dramática, clímax colossal e impacto emocional arrebatador."
     }
   ]
 }"""
@@ -763,12 +860,6 @@ Sua missão: analisar a transcrição timestamp a timestamp e identificar todos 
 - ⛔ NUNCA sugira cortes com mais de 5 minutos (300s).
 - O trecho precisa conter a introdução do momento, os diálogos de construção, o clímax emocionante e as consequências imediatas.
 
-Exemplos de durações válidas para este modo:
-- 08:30 -> 12:00 (3m 30s)
-- 13:45 -> 17:15 (3m 30s)
-- 18:20 -> 22:50 (4m 30s)
-- 20:30 -> 23:10 (2m 40s)
-
 {cut_mode_rules}
 {genre_rules}
 
@@ -785,19 +876,27 @@ Exemplos de durações válidas para este modo:
   "candidates": [
     {
       "id": "corte_01",
-      "title": "Título atraente e instigante para o momento",
-      "estimated_range": "04:15 -> 06:30",
+      "title": "A Revelação de Aizen — Ele para a lâmina de Ichigo com um único dedo e choca a todos",
+      "estimated_range": "04:15 -> 05:25",
       "start_time": "04:15",
-      "end_time": "06:30",
-      "duration": "2m 15s",
-      "genre": "Ação / Clímax",
-      "quality_score": 9,
-      "viral_potential": "Altíssimo (Nota 9/10)",
-      "description": "Explicação resumida do que acontece na cena.",
-      "quality_reasoning": "Justificativa crítica de por que esse trecho viraliza."
+      "end_time": "05:25",
+      "duration": "1m 10s",
+      "genre": "Tensão / Revelação",
+      "quality_score": 9.5,
+      "viral_potential": "Altíssimo (Nota 9.5/10)",
+      "description": "Ichigo avança com toda sua velocidade no Bankai, mas Aizen interrompe a trilha sonora e segura a Zangetsu apenas com o dedo indicador.",
+      "quality_reasoning": "Quebra de expectativa brutal nos primeiros 3 segundos com retenção máxima até a última fala."
     }
   ]
 }"""
+        if genre != "general":
+            crit_5 = f"""5. FILTRO ESTRITO DE GÊNERO [{genre.upper()}]:
+   - O usuário exigiu EXCLUSIVAMENTE cortes do gênero: {genre.upper()}.
+   - ⛔ PROIBIDO misturar com outros tipos de cena! NÃO inclua cenas fora deste gênero.
+   - Todos os cortes selecionados DEVEM ser 100% focados em {genre.upper()}."""
+        else:
+            crit_5 = "5. DIVERSIDADE: Não retorne três cenas do mesmo tipo. Misture ação com emoção ou comédia."
+
         if mode == "top3":
             task_rules = f"""TAREFA: Você é um Diretor de Conteúdo e Editor Profissional especializado em cortes virais para TikTok, Reels e YouTube Shorts.
 Analise a transcrição de ponta a ponta e selecione rigorosamente os TOP 3 momentos com maior potencial de viralizar deste episódio.
@@ -807,15 +906,23 @@ Analise a transcrição de ponta a ponta e selecione rigorosamente os TOP 3 mome
 
 CRITÉRIOS DOS TOP 3:
 1. HOOK PODEROSO: Os primeiros 3 segundos do corte precisam ser fortes o bastante para parar o scroll. Priorize cenas que começam com uma fala marcante, uma reação expressiva ou um beat de ação claro.
-2. PICO DE IMPACTO: Clímax, confrontos decisivos, revelações chocantes, mortes, comédia de timing perfeito, romance intenso.
+2. PICO DE IMPACTO: O momento de maior expressão do foco selecionado.
 3. RETENÇÃO ATÉ O FIM: O trecho deve manter tensão, emoção ou humor até os últimos segundos.
 4. NOTA DE QUALIDADE (0 a 10): Notas 9-10 somente para cenas verdadeiramente históricas/épicas do episódio. Seja honesto.
-5. DIVERSIDADE: Não retorne três cenas do mesmo tipo. Misture ação com emoção ou comédia.
-6. RETORNE EXATAMENTE 3 CANDIDATOS, ordenados do maior potencial para o menor."""
+{crit_5}
+6. REGRA DO TÍTULO OBRIGATÓRIA: O campo 'title' DEVE OBRIGATORIAMENTE seguir o padrão: "[Título Chamativo] — [Descrição detalhada da ação, personagens e clímax]". Títulos curtos ou genéricos são PROIBIDOS.
+7. RETORNE EXATAMENTE 3 CANDIDATOS, ordenados do maior potencial para o menor."""
         else:  # smart
+            if genre != "general":
+                crit_smart = f"""  • FILTRO EXCLUSIVO DE GÊNERO [{genre.upper()}]:
+    - TODOS os candidatos selecionados DEVEM ser estritamente do gênero {genre.upper()}.
+    - ⛔ NÃO inclua momentos de outras categorias. NÃO diversifique para outros gêneros."""
+            else:
+                crit_smart = "  • Evite incluir mais de 2 cenas da mesma categoria (diversifique o conteúdo)."
+
             task_rules = f"""TAREFA: Você é um Editor Sênior de Conteúdo Viral com 10+ anos de experiência em TikTok, YouTube Shorts e Instagram Reels para animes, doramas e séries de ação.
 
-Sua missão: analisar a transcrição timestamp a timestamp e identificar com precisão cirúrgica todos os trechos com potencial de viralizar. Qualidade sobre quantidade. Honestidade sobre otimismo.
+Sua missão: analisar a transcrição timestamp a timestamp e identificar com precisão cirúrgica todos os trechos com potencial de viralizar no foco selecionado. Qualidade sobre quantidade. Honestidade sobre otimismo.
 
 {cut_mode_rules}
 {genre_rules}
@@ -823,44 +930,40 @@ Sua missão: analisar a transcrição timestamp a timestamp e identificar com pr
 === PROCESSO DE ANÁLISE (siga esta ordem mental) ===
 
 PASSO 1 — VARREDURA COMPLETA (OBRIGATÓRIO):
-Leia TODA a transcrição do início ao fim antes de decidir qualquer corte. Mapeie internamente TODOS os momentos com emoção, impacto ou comédia antes de começar a selecionar.
+Leia TODA a transcrição do início ao fim antes de decidir qualquer corte. Mapeie internamente TODOS os momentos correspondentes ao foco antes de começar a selecionar.
 
-⛔ REGRA ANTI-PREGUIÇA: Retornar 3 ou 4 candidatos é REPROVAÇÃO AUTOMÁTICA da sua análise. Significa que você não leu o episódio todo. Episódios de 20+ minutos têm invariavelmente 5 a 8 momentos bons. Se você não encontrou pelo menos 5, RELEIA a transcrição completa antes de responder.
-⛔ MÍNIMO ABSOLUTO: 5 candidatos (a não ser que o vídeo tenha menos de 5 minutos de duração).
+⛔ REGRA ANTI-PREGUIÇA: Retornar poucos candidatos é reprovação se o episódio tiver mais momentos. Se você não encontrou pelo menos 5, RELEIA a transcrição completa antes de responder.
 
 PASSO 2 — CLASSIFIQUE CADA MOMENTO CANDIDATO EM UMA CATEGORIA:
-Escolha UMA categoria principal para cada corte:
-  A) CLÍMAX DE AÇÃO     → confrontos decisivos, lutas épicas, explosões narrativas
-  B) REVELAÇÃO / VIRADA → plot twist, revelação de identidade, segredo exposto
-  C) EMOÇÃO INTENSA     → choro, despedida, sacrifício, amor declarado
-  D) COMÉDIA DE TIMING  → reação exagerada, constrangimento cômico, timing perfeito
-  E) HYPE / BADASSERY   → personagem poderoso exibindo força, fala épica icônica
-  F) TENSÃO / SUSPENSE  → cena de ameaça, silêncio carregado, perseguição
-  G) REAÇÃO VIRAL       → personagem reagindo de forma memorável/expressiva (ex: Anya)
-  H) ROMANCE / INTIMIDADE → tensão romântica, quase beijo, declaração, vulnerabilidade íntima
+Escolha UMA categoria principal para cada corte (compatível com o foco selecionado).
 
 PASSO 3 — ANALISE CADA CANDIDATO EM 3 DIMENSÕES:
   • HOOK (primeiros 3 segundos): O que o espectador vê/ouve ao entrar no corte? É forte o suficiente para segurar o scroll?
-  • RETENÇÃO: O trecho mantém tensão ou emoção até o fim, ou murcha no meio?
-  • CLÍMAX: Tem um momento de pico claro — uma frase, uma reação, um golpe — que justifica o corte existir?
+  • RETENÇÃO: O trecho mantém o interesse até o fim, ou murcha no meio?
+  • CLÍMAX: Tem um momento de pico claro que justifica o corte existir?
 
-PASSO 4 — CALIBRAÇÃO HONESTA DE NOTA (use a escala inteira, sem inflação):
-  3-4  → Cena válida, mas sem forte potencial viral isolada
-  5-6  → Momento bom com apelo moderado; funciona bem no contexto do episódio
-  7    → Sólido: hook claro, emoção real, retenção decente — vai bem como short
-  8    → Excelente: tem o que precisa para engajamento alto e comentários
-  9    → Quase perfeito: hook explosivo, clímax memorável, replay value alto
-  9.5+ → Histórico: esse tipo de cena define o episódio inteiro; muito raro
+PASSO 4 — REGRA DO TÍTULO DESCRITIVO (MANDATÓRIO):
+Todo corte DEVE ter o campo 'title' no formato: "[Título Chamativo] — [Descrição detalhada da ação, personagens e clímax da cena]".
+Exemplo: "A Fúria de Ichigo — Bankai destrói a lâmina de Byakuya e choca todos".
+⛔ NUNCA use títulos curtos ou vagos como 'A Batalha' ou 'Corte 1'.
 
 PASSO 5 — SELEÇÃO FINAL:
   • Inclua apenas momentos com nota ≥ 6.
-  • Evite incluir mais de 2 cenas da mesma categoria (diversifique o conteúdo).
-  • Não inclua cenas com hooks fracos (abertura num silêncio vazio, fala de transição, cena de exposição sem emoção).
-  • Mínimo: 5 candidatos. Máximo: 8 candidatos.
-  • Se você tem menos de 5, você NÃO terminou a varredura. Volte ao Passo 1.
+{crit_smart}
+  • Não inclua cenas com hooks fracos.
+  • Mínimo: 3 a 5 candidatos dependendo do episódio. Máximo: 8 candidatos.
   • Ordene do maior potencial para o menor.
 
 CRITÉRIO DE DESEMPATE: Prefira cenas com FALA ICÔNICA ou REAÇÃO EXPRESSIVA — elas geram comentários e compartilhamentos."""
+
+    genre_alert = ""
+    if genre != "general":
+        genre_alert = f"""
+🚨 ALERTA SUPREMO DE GÊNERO [{genre.upper()}]:
+O usuário escolheu EXCLUSIVAMENTE o gênero [{genre.upper()}].
+TODOS OS CORTES DEVEM SER RIGOROSAMENTE DESSE GÊNERO. NÃO RETORNE CENAS DE OUTROS GÊNEROS.
+Preencha o campo "genre" em cada candidato com a descrição de {genre.upper()}.
+"""
 
     return f"""{kb_block}{ctx_section}{dur_section}{excluded_section}{lore_section}
 {task_rules}
@@ -869,16 +972,80 @@ CRITÉRIO DE DESEMPATE: Prefira cenas com FALA ICÔNICA ou REAÇÃO EXPRESSIVA �
 [TRANSCRIÇÃO DE ÁUDIO COM TIMESTAMPS DO VÍDEO]
 {transcript if transcript else "Transcrição indisponível. Baseie-se no lore do episódio e nos momentos clássicos."}
 
+{genre_alert}
 REGRAS OBRIGATÓRIAS:
 - Retorne EXATAMENTE no formato JSON especificado abaixo.
 - Os tempos devem ser no formato MM:SS (ex: "04:15") ou HH:MM:SS para vídeos com mais de 1 hora.
 - Calcule a duração aproximada de cada corte e preencha tanto 'estimated_range' quanto 'start_time' e 'end_time'.
+- O campo 'title' DEVE conter OBRIGATORIAMENTE o formato: "[Título Chamativo] — [Descrição detalhada da cena, personagens e acontecimento]".
+- O campo 'description' deve detalhar o desenrolar da cena e o impacto dramático em 1 ou 2 frases.
 - NÃO repita nenhum trecho listado em [TRECHOS JÁ GERADOS — PROIBIDO REPETIR].
 - Responda APENAS com o JSON, sem nenhum texto adicional.
 
 FORMATO JSON OBRIGATÓRIO:
 {json_example}
 """
+
+
+def _parse_ai_candidates_json(raw_response: str, on_log: Optional[Callable[[str], None]] = None) -> List[Dict[str, Any]]:
+    """
+    Robust JSON parser for Director candidates.
+    Handles:
+    1. Direct list: [{"id": "corte_01", ...}]
+    2. Dict with 'candidates': {"candidates": [...]}
+    3. Dict with any list: {"cortes": [...]} or {"items": [...]}
+    4. Markdown code blocks (```json ... ```)
+    5. Regex extraction for list [...] or dict {...}
+    """
+    if not raw_response or not isinstance(raw_response, str):
+        return []
+
+    clean = raw_response.strip()
+    if "```json" in clean:
+        clean = clean.split("```json")[1].split("```")[0].strip()
+    elif "```" in clean:
+        clean = clean.split("```")[1].split("```")[0].strip()
+
+    try:
+        data = json.loads(clean)
+        if isinstance(data, list):
+            return [x for x in data if isinstance(x, dict)]
+        if isinstance(data, dict):
+            if "candidates" in data and isinstance(data["candidates"], list):
+                return [x for x in data["candidates"] if isinstance(x, dict)]
+            for v in data.values():
+                if isinstance(v, list) and v and isinstance(v[0], dict):
+                    return v
+            return []
+    except Exception as e:
+        if on_log:
+            on_log(f"[AVISO] Tentando extração avançada de candidatos JSON ({e})...")
+
+    # Fallback 1: Direct JSON list [...]
+    match_list = re.search(r'\[\s*\{.*\}\s*\]', raw_response, re.DOTALL)
+    if match_list:
+        try:
+            data = json.loads(match_list.group(0))
+            if isinstance(data, list):
+                return [x for x in data if isinstance(x, dict)]
+        except Exception:
+            pass
+
+    # Fallback 2: JSON object {...}
+    match_dict = re.search(r'\{.*\}', raw_response, re.DOTALL)
+    if match_dict:
+        try:
+            data = json.loads(match_dict.group(0))
+            if isinstance(data, dict):
+                if "candidates" in data and isinstance(data["candidates"], list):
+                    return [x for x in data["candidates"] if isinstance(x, dict)]
+                for v in data.values():
+                    if isinstance(v, list) and v and isinstance(v[0], dict):
+                        return v
+        except Exception:
+            pass
+
+    return []
 
 
 def enforce_cut_mode_durations(
@@ -952,6 +1119,18 @@ def enforce_cut_mode_durations(
                 cand["estimated_range"] = f"{st_str} -> {et_str}"
 
         elif cut_mode == "continuous":
+            if dur_sec > 75.0:
+                new_end = start_sec + 75.0
+                if max_dur > 0 and new_end > max_dur:
+                    new_end = max_dur
+                new_dur = new_end - start_sec
+                et_str = _seconds_to_time_str(new_end)
+                dur_str = f"{int(new_dur // 60)}m {int(new_dur % 60):02d}s" if new_dur >= 60 else f"{int(new_dur)}s"
+                cand["end_time"] = et_str
+                cand["duration"] = dur_str
+                cand["estimated_range"] = f"{_seconds_to_time_str(start_sec)} -> {et_str}"
+
+        elif cut_mode == "multi_part":
             if dur_sec > 90.0:
                 new_end = start_sec + 90.0
                 if max_dur > 0 and new_end > max_dur:
@@ -960,6 +1139,45 @@ def enforce_cut_mode_durations(
                 et_str = _seconds_to_time_str(new_end)
                 dur_str = f"{int(new_dur // 60)}m {int(new_dur % 60):02d}s" if new_dur >= 60 else f"{int(new_dur)}s"
                 cand["end_time"] = et_str
+                cand["duration"] = dur_str
+                cand["estimated_range"] = f"{_seconds_to_time_str(start_sec)} -> {et_str}"
+
+        elif cut_mode == "dynamic_montage":
+            if dur_sec > 70.0:
+                new_end = start_sec + 70.0
+                if max_dur > 0 and new_end > max_dur:
+                    new_end = max_dur
+                new_dur = new_end - start_sec
+                et_str = _seconds_to_time_str(new_end)
+                dur_str = f"{int(new_dur // 60)}m {int(new_dur % 60):02d}s" if new_dur >= 60 else f"{int(new_dur)}s"
+                cand["end_time"] = et_str
+                cand["duration"] = dur_str
+                cand["estimated_range"] = f"{_seconds_to_time_str(start_sec)} -> {et_str}"
+
+        elif cut_mode == "verbal_duel":
+            if dur_sec > 80.0:
+                new_end = start_sec + 80.0
+                if max_dur > 0 and new_end > max_dur:
+                    new_end = max_dur
+                new_dur = new_end - start_sec
+                et_str = _seconds_to_time_str(new_end)
+                dur_str = f"{int(new_dur // 60)}m {int(new_dur % 60):02d}s" if new_dur >= 60 else f"{int(new_dur)}s"
+                cand["end_time"] = et_str
+                cand["duration"] = dur_str
+                cand["estimated_range"] = f"{_seconds_to_time_str(start_sec)} -> {et_str}"
+
+        elif cut_mode == "context":
+            if dur_sec > 90.0:
+                new_end = start_sec + 90.0
+                if max_dur > 0 and new_end > max_dur:
+                    new_end = max_dur
+                new_dur = new_end - start_sec
+                et_str = _seconds_to_time_str(new_end)
+                dur_str = f"{int(new_dur // 60)}m {int(new_dur % 60):02d}s" if new_dur >= 60 else f"{int(new_dur)}s"
+                cand["end_time"] = et_str
+                cand["duration"] = dur_str
+                cand["estimated_range"] = f"{_seconds_to_time_str(start_sec)} -> {et_str}"
+
         # Always ensure duration and estimated_range are clean and present
         if not cand.get("duration"):
             _, _, st_val, et_val, calc_dur = parse_candidate_times(cand, max_duration=max_dur)
@@ -979,14 +1197,15 @@ def analyze_episode(
     ffmpeg_bin: str = "ffmpeg",
     on_progress: Optional[Callable[[float, str], None]] = None,
     on_log: Optional[Callable[[str], None]] = None,
-    excluded_ranges: Optional[List[str]] = None
+    excluded_ranges: Optional[List[str]] = None,
+    content_type: str = "general"
 ) -> tuple:
     """
     Main Director AI pipeline:
     1. Extract audio
     2. Transcribe with Whisper
     3. Search Lore
-    4. AI analyzes episode and returns candidates based on mode and cut_mode
+    4. AI analyzes episode and returns candidates based on mode, cut_mode and content_type
     Returns: (candidates, transcript, lore)
     """
     def _log(msg):
@@ -997,44 +1216,110 @@ def analyze_episode(
         if on_progress:
             on_progress(pct, msg)
 
-    mode_label = "🏆 Top 3 do Episódio" if mode == "top3" else "🧠 Smart Cortes (Curadoria Sincera)"
+    mode_label = "Top 3 do Episódio" if mode == "top3" else "Smart Cortes (Curadoria Sincera)"
     cut_mode_label = {
         "context": "Contexto (Mini-História)",
         "continuous": "Contínuo (Sem cortes internos)",
-        "narrative_arc": "Mini-Filme / Arco Narrativo (2 a 5 min)"
+        "narrative_arc": "Mini-Filme / Arco Narrativo (2 a 5 min)",
+        "multi_part": "Série em Partes (Multi-Partes 1, 2, 3)",
+        "dynamic_montage": "Corte Dinâmico (Montagem Ágil)",
+        "verbal_duel": "Duelo Verbal & Revelação",
     }.get(cut_mode, cut_mode)
 
+    type_label_map = {
+        "general": "Geral (Padrão Viral)",
+        "action": "Ação (Batalhas & Lutas)",
+        "comedy": "Engraçado (Comédia & Humor)",
+        "romance": "Romance (Química & Tensão)",
+        "sensual": "Sensual (Ecchi & Fanservice)"
+    }
+    content_type_label = type_label_map.get(content_type, content_type)
+
+    try:
+        from ai_cache_hub import ai_cache
+    except Exception:
+        ai_cache = None
+
+    # 0. Checagem de Cache de Cortes Prontos (0 TOKENS GASTOS)
+    # Se o usuário já gerou cortes com esta configuração para este vídeo, carrega imediatamente
+    cache_key = f"director_cuts_{mode}_{cut_mode}_{content_type}"
+    if ai_cache and not excluded_ranges:
+        cached_candidates = ai_cache.get(video_path, cache_key)
+        if cached_candidates and isinstance(cached_candidates, list) and len(cached_candidates) > 0:
+            _prog(100, "Concluído (recuperado do cache)!")
+            _log(f"[CACHE 24H] {len(cached_candidates)} cortes carregados do cache para [{cut_mode_label}]! (0 TOKENS GASTOS)")
+            _log("   💡 Dica: Se quiser novos cortes alternativos, use o botão 'Novos Cortes' ou 'Limpar Cache (IA)'.")
+            cached_trans = ai_cache.get(video_path, "director_transcript") or ""
+            cached_lore = ai_cache.get(video_path, "anime_lore") or ""
+            return cached_candidates, cached_trans, cached_lore
+
     _prog(5, "Extraindo áudio do episódio...")
-    _log("🎬 Iniciando análise com Diretor IA...")
+    _log("[DIRETOR IA] Iniciando análise...")
     _log(f"   Vídeo: {os.path.basename(video_path)}")
     if context:
         _log(f"   Contexto fornecido: {context}")
     _log(f"   Curadoria: {mode_label}")
     _log(f"   Modo de Corte: {cut_mode_label}")
+    _log(f"   Foco do Conteúdo: {content_type_label}")
 
-    # 1. Extract audio
-    audio_path = None
-    try:
-        audio_path = extract_audio(video_path, ffmpeg_bin=ffmpeg_bin)
-        _log("✓ Áudio extraído com sucesso")
-    except Exception as e:
-        _log(f"⚠ Erro na extração de áudio: {e}")
-
-    # 2. Transcribe
-    _prog(20, "Transcrevendo falas e timestamps...")
+    # 1 & 2. Transcribe falas (check cache first)
+    _prog(15, "Verificando transcrição de áudio...")
     transcript = ""
-    if audio_path and os.path.exists(audio_path):
-        transcript = transcribe_video_audio(audio_path, on_log=_log)
+    if ai_cache:
+        cached_dt = ai_cache.get(video_path, "director_transcript")
+        if cached_dt and isinstance(cached_dt, str):
+            transcript = cached_dt
+            _log("[CACHE 24H] Transcrição do episódio recuperada do cache (0 tokens gastos)!")
+        else:
+            cached_trans = ai_cache.get(video_path, "transcription")
+            if cached_trans and isinstance(cached_trans, dict):
+                words = cached_trans.get("words", [])
+                if words:
+                    lines = []
+                    curr = []
+                    st = None
+                    for w in words:
+                        s = float(w.get("start", 0.0))
+                        e = float(w.get("end", 0.0))
+                        txt = w.get("word") if "word" in w else w.get("text", "")
+                        if st is None:
+                            st = s
+                        curr.append(txt)
+                        if len(curr) >= 8 or (txt and txt[-1] in ".!?"):
+                            lines.append(f"[{_seconds_to_time_str(st)} -> {_seconds_to_time_str(e)}] {' '.join(curr)}")
+                            curr = []
+                            st = None
+                    if curr and st is not None:
+                        lines.append(f"[{_seconds_to_time_str(st)} -> {_seconds_to_time_str(e)}] {' '.join(curr)}")
+                    transcript = "\n".join(lines)
+                    _log("[CACHE 24H] Falas e diálogos sincronizados a partir do cache Whisper!")
+
+    if not transcript:
+        # 1. Extract audio
+        audio_path = None
         try:
-            os.remove(audio_path)
-        except Exception:
-            pass
+            _prog(20, "Extraindo áudio do episódio...")
+            audio_path = extract_audio(video_path, ffmpeg_bin=ffmpeg_bin)
+            _log("[OK] Áudio extraído com sucesso")
+        except Exception as e:
+            _log(f"[AVISO] Erro na extração de áudio: {e}")
+
+        # 2. Transcribe
+        _prog(35, "Transcrevendo falas e timestamps...")
+        if audio_path and os.path.exists(audio_path):
+            transcript = transcribe_video_audio(audio_path, on_log=_log)
+            if transcript and ai_cache:
+                ai_cache.set(video_path, "director_transcript", transcript)
+            try:
+                os.remove(audio_path)
+            except Exception:
+                pass
 
     if transcript:
         lines_count = len(transcript.splitlines())
-        _log(f"✓ Transcrição concluída ({lines_count} falas mapeadas com timestamps)")
+        _log(f"[OK] Transcrição concluída ({lines_count} falas mapeadas com timestamps)")
     else:
-        _log("⚠ Transcrição não gerou falas (vídeo mudo ou sem suporte). Prosseguindo com análise contextual...")
+        _log("[AVISO] Transcrição não gerou falas (vídeo mudo ou sem suporte). Prosseguindo com análise contextual...")
 
     # 3. Lore & Hype
     _prog(50, "Pesquisando lore e reações da internet...")
@@ -1042,11 +1327,11 @@ def analyze_episode(
     if context:
         lore = fetch_episode_lore(context, on_log=_log)
         if lore:
-            _log("✓ Lore e momentos mais comentados recuperados da internet")
+            _log("[OK] Lore e momentos mais comentados recuperados da internet")
 
     # 4. AI Curation
     _prog(70, "Diretor IA analisando os melhores momentos...")
-    _log(f"🧠 IA avaliando picos de retenção no modo [{cut_mode_label}]...")
+    _log(f"[IA] Avaliando picos de retenção no modo [{cut_mode_label}]...")
 
     dur_str = _seconds_to_time_str(video_duration) if video_duration > 0 else ""
     prompt = build_candidates_prompt(
@@ -1056,40 +1341,24 @@ def analyze_episode(
         transcript=transcript,
         video_duration_str=dur_str,
         cut_mode=cut_mode,
-        excluded_ranges=excluded_ranges or []
+        excluded_ranges=excluded_ranges or [],
+        genre=content_type
     )
 
     raw_response = call_ai_text(prompt, on_log=_log, max_tokens=8192)
 
     _prog(90, "Formatando candidatos...")
-    try:
-        # Extract JSON substring if surrounded by markdown code blocks
-        clean_json = raw_response.strip()
-        if "```json" in clean_json:
-            clean_json = clean_json.split("```json")[1].split("```")[0].strip()
-        elif "```" in clean_json:
-            clean_json = clean_json.split("```")[1].split("```")[0].strip()
-
-        data = json.loads(clean_json)
-        candidates = data.get("candidates", [])
-    except Exception as e:
-        _log(f"✕ Falha ao decodificar JSON da IA: {e}")
-        # Try finding json object with regex
-        match = re.search(r'\{.*\}', raw_response, re.DOTALL)
-        if match:
-            try:
-                data = json.loads(match.group(0))
-                candidates = data.get("candidates", [])
-            except Exception:
-                candidates = []
-        else:
-            candidates = []
+    candidates = _parse_ai_candidates_json(raw_response, on_log=_log)
 
     # Enforce strict cut_mode bounds (e.g. 2-5m for narrative_arc)
     candidates = enforce_cut_mode_durations(candidates, cut_mode=cut_mode, video_duration=video_duration, on_log=_log)
 
+    if ai_cache and candidates:
+        cache_key = f"director_cuts_{mode}_{cut_mode}_{content_type}"
+        ai_cache.set(video_path, cache_key, candidates)
+
     _prog(100, "Concluído!")
-    _log(f"✨ Concluído! {len(candidates)} candidatos identificados pelo Diretor.")
+    _log(f"[CONCLUÍDO] {len(candidates)} candidatos identificados pelo Diretor.")
     return candidates, transcript, lore
 
 
@@ -1102,7 +1371,8 @@ def analyze_episode_reroll(
     video_duration: float = 0.0,
     excluded_ranges: Optional[List[str]] = None,
     on_progress: Optional[Callable[[float, str], None]] = None,
-    on_log: Optional[Callable[[str], None]] = None
+    on_log: Optional[Callable[[str], None]] = None,
+    content_type: str = "general"
 ) -> List[Dict[str, Any]]:
     """
     Fast re-roll: reuses cached transcript and lore to ask the AI for NEW cuts,
@@ -1117,8 +1387,25 @@ def analyze_episode_reroll(
         if on_progress:
             on_progress(pct, msg)
 
+    type_label_map = {
+        "general": "Geral (Padrão Viral)",
+        "action": "Ação (Batalhas & Lutas)",
+        "comedy": "Engraçado (Comédia & Humor)",
+        "romance": "Romance (Química & Tensão)",
+        "sensual": "Sensual (Ecchi & Fanservice)"
+    }
+    content_type_label = type_label_map.get(content_type, content_type)
+    cut_mode_label = {
+        "context": "Contexto (Mini-História)",
+        "continuous": "Contínuo (Sem cortes internos)",
+        "narrative_arc": "Mini-Filme / Arco Narrativo (2 a 5 min)",
+        "multi_part": "Série em Partes (Multi-Partes 1, 2, 3)",
+        "dynamic_montage": "Corte Dinâmico (Montagem Ágil)",
+        "verbal_duel": "Duelo Verbal & Revelação",
+    }.get(cut_mode, cut_mode)
+
     excl_display = ", ".join(excluded_ranges) if excluded_ranges else "nenhum"
-    _log(f"🔄 Gerando novos cortes (trechos excluídos: {excl_display})...")
+    _log(f"[NOVOS CORTES] Gerando novos cortes (Modo: {cut_mode_label} | Foco: {content_type_label} | Excluídos: {excl_display})...")
     _prog(30, "Construindo novo prompt com trechos excluídos...")
 
     dur_str = _seconds_to_time_str(video_duration) if video_duration > 0 else ""
@@ -1129,39 +1416,21 @@ def analyze_episode_reroll(
         transcript=transcript,
         video_duration_str=dur_str,
         cut_mode=cut_mode,
-        excluded_ranges=excluded_ranges or []
+        excluded_ranges=excluded_ranges or [],
+        genre=content_type
     )
 
     _prog(60, "IA buscando novos trechos alternativos...")
     raw_response = call_ai_text(prompt, on_log=_log, max_tokens=8192)
 
     _prog(90, "Formatando novos candidatos...")
-    try:
-        clean_json = raw_response.strip()
-        if "```json" in clean_json:
-            clean_json = clean_json.split("```json")[1].split("```")[0].strip()
-        elif "```" in clean_json:
-            clean_json = clean_json.split("```")[1].split("```")[0].strip()
-
-        data = json.loads(clean_json)
-        candidates = data.get("candidates", [])
-    except Exception as e:
-        _log(f"✕ Falha ao decodificar JSON da IA: {e}")
-        match = re.search(r'\{.*\}', raw_response, re.DOTALL)
-        if match:
-            try:
-                data = json.loads(match.group(0))
-                candidates = data.get("candidates", [])
-            except Exception:
-                candidates = []
-        else:
-            candidates = []
+    candidates = _parse_ai_candidates_json(raw_response, on_log=_log)
 
     # Enforce strict cut_mode bounds (e.g. 2-5m for narrative_arc)
     candidates = enforce_cut_mode_durations(candidates, cut_mode=cut_mode, video_duration=video_duration, on_log=_log)
 
     _prog(100, "Novos cortes gerados!")
-    _log(f"✨ {len(candidates)} novos cortes alternativos identificados.")
+    _log(f"[CONCLUÍDO] {len(candidates)} novos cortes alternativos identificados.")
     return candidates
 
 

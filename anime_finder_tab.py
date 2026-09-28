@@ -7,6 +7,7 @@ além de chat interativo para tirar dúvidas com o especialista em anime.
 import threading
 import urllib.parse
 import webbrowser
+import icon_manager
 import customtkinter as ctk
 def _copy_text_to_clipboard(widget, text: str):
     try:
@@ -56,7 +57,8 @@ class AnimeFinderTab(ctk.CTkFrame):
         header_frame.pack(fill="x", padx=15, pady=(15, 8))
         ctk.CTkLabel(
             header_frame,
-            text="⛩️ Anime & Episode Finder",
+            text=" Anime & Episode Finder",
+            image=icon_manager.get_icon("search", size=(20, 20), color="#10b981"), compound="left",
             font=ctk.CTkFont(family="Segoe UI", size=20, weight="bold"),
             text_color="#c084fc"
         ).pack(anchor="w")
@@ -72,14 +74,14 @@ class AnimeFinderTab(ctk.CTkFrame):
         # Alternador de Modo (Busca por Estilo vs Busca por Obra Específica)
         self.mode_selector = ctk.CTkSegmentedButton(
             left_frame,
-            values=["🎯 Por Estilo / Nicho", "🔍 Episódios de uma Obra"],
+            values=["Por Estilo / Nicho", "Episódios de uma Obra"],
             command=self._on_mode_change,
             height=32,
             font=ctk.CTkFont(weight="bold", size=12),
             selected_color="#9333ea",
             selected_hover_color="#7e22ce"
         )
-        self.mode_selector.set("🎯 Por Estilo / Nicho")
+        self.mode_selector.set("Por Estilo / Nicho")
         self.mode_selector.pack(fill="x", padx=15, pady=(5, 10))
 
         # Container dos Filtros Dinâmicos
@@ -91,7 +93,8 @@ class AnimeFinderTab(ctk.CTkFrame):
         # Botão de Busca
         self.btn_search = ctk.CTkButton(
             left_frame,
-            text="🔍 Buscar Animes e Cenas Virais",
+            text="Buscar Animes e Cenas Virais",
+            image=icon_manager.get_icon("search", size=(14, 14), color="#09090b"), compound="left",
             font=ctk.CTkFont(family="Segoe UI", size=15, weight="bold"),
             height=42,
             fg_color=COLOR_ACCENT,
@@ -106,7 +109,7 @@ class AnimeFinderTab(ctk.CTkFrame):
         chat_box.grid_columnconfigure(0, weight=1)
         chat_box.grid_rowconfigure(1, weight=1)
 
-        ctk.CTkLabel(chat_box, text="💬 Dúvidas sobre o Anime / Cenas?", font=ctk.CTkFont(weight="bold", size=13), text_color="#e9d5ff").grid(row=0, column=0, sticky="w", padx=10, pady=(8, 4))
+        ctk.CTkLabel(chat_box, text="Dúvidas sobre o Anime / Cenas?", font=ctk.CTkFont(weight="bold", size=13), text_color="#e9d5ff").grid(row=0, column=0, sticky="w", padx=10, pady=(8, 4))
         
         self.txt_chat_history = ctk.CTkTextbox(chat_box, font=ctk.CTkFont(size=11), wrap="word")
         self.txt_chat_history.grid(row=1, column=0, sticky="nsew", padx=10, pady=4)
@@ -141,12 +144,12 @@ class AnimeFinderTab(ctk.CTkFrame):
     def _on_mode_change(self, value):
         for w in self.filters_container.winfo_children():
             w.destroy()
-        if value == "🎯 Por Estilo / Nicho":
+        if value == "Por Estilo / Nicho":
             self._build_style_filters()
-            self.btn_search.configure(text="🔍 Buscar Animes e Cenas Virais")
+            self.btn_search.configure(text="Buscar Animes e Cenas Virais")
         else:
             self._build_episode_filters()
-            self.btn_search.configure(text="🎬 Buscar Episódios da Obra")
+            self.btn_search.configure(text="Buscar Episódios da Obra")
 
     def _build_style_filters(self):
         f = self.filters_container
@@ -216,13 +219,13 @@ class AnimeFinderTab(ctk.CTkFrame):
         if self.is_processing:
             return
         self.is_processing = True
-        self.btn_search.configure(state="disabled", text="⏳ Buscando...")
+        self.btn_search.configure(state="disabled", text="Buscando...")
 
         mode = self.mode_selector.get()
 
         def worker():
             try:
-                if mode == "🎯 Por Estilo / Nicho":
+                if mode == "Por Estilo / Nicho":
                     query = self.txt_query.get("1.0", "end").strip()
                     genre = self.opt_genre.get()
                     plat = self.opt_platform.get().lower()
@@ -242,7 +245,7 @@ class AnimeFinderTab(ctk.CTkFrame):
                     self.current_results = res
                     self.after(0, lambda: self._render_episode_results(res, name))
             except Exception as e:
-                self._log(f"❌ Erro na busca: {str(e)}")
+                self._log(f"[ERRO] Erro na busca: {str(e)}")
             finally:
                 self.after(0, self._finish_search)
 
@@ -251,12 +254,12 @@ class AnimeFinderTab(ctk.CTkFrame):
     def _finish_search(self):
         self.is_processing = False
         mode = self.mode_selector.get()
-        text = "🔍 Buscar Animes e Cenas Virais" if mode == "🎯 Por Estilo / Nicho" else "🎬 Buscar Episódios da Obra"
+        text = "Buscar Animes e Cenas Virais" if mode == "Por Estilo / Nicho" else "Buscar Episódios da Obra"
         self.btn_search.configure(state="normal", text=text)
 
-    def _copy_text(self, text: str, btn: ctk.CTkButton, original_text: str = "📋 Copiar"):
+    def _copy_text(self, text: str, btn: ctk.CTkButton, original_text: str = "Copiar"):
         _copy_text_to_clipboard(self, text)
-        btn.configure(text="✅ Copiado!", fg_color="#10b981")
+        btn.configure(text="Copiado!", fg_color="#10b981")
         self.after(1800, lambda: btn.configure(text=original_text, fg_color="#16a34a"))
 
     def _open_youtube_search(self, term: str):
@@ -272,7 +275,7 @@ class AnimeFinderTab(ctk.CTkFrame):
         if summary:
             s_box = ctk.CTkFrame(self.right_scroll, fg_color=COLOR_CARD, corner_radius=8, border_width=1, border_color=COLOR_CARD_BORDER)
             s_box.pack(fill="x", padx=5, pady=(0, 10))
-            ctk.CTkLabel(s_box, text=f"💡 {summary}", font=ctk.CTkFont(size=12, weight="bold"), text_color="#e9d5ff", wraplength=480, justify="left").pack(padx=12, pady=8)
+            ctk.CTkLabel(s_box, text=f"{summary}", font=ctk.CTkFont(size=12, weight="bold"), text_color="#e9d5ff", wraplength=480, justify="left").pack(padx=12, pady=8)
 
         animes = data.get("animes", [])
         if not animes:
@@ -299,7 +302,7 @@ class AnimeFinderTab(ctk.CTkFrame):
             ).pack(side="right")
 
             # Metadados rápidos
-            meta_str = f"📅 {anime.get('year', 'N/A')} | 🎭 {anime.get('genre', 'N/A')} | 🎬 {anime.get('episodes_total', 'N/A')} eps | {anime.get('popularity_level', '')}"
+            meta_str = f"{anime.get('year', 'N/A')} | {anime.get('genre', 'N/A')} | {anime.get('episodes_total', 'N/A')} eps | {anime.get('popularity_level', '')}"
             ctk.CTkLabel(card, text=meta_str, font=ctk.CTkFont(size=11), text_color=COLOR_TEXT_MUTED).pack(anchor="w", padx=12, pady=(0, 4))
 
             if anime.get("why_recommended"):
@@ -308,7 +311,7 @@ class AnimeFinderTab(ctk.CTkFrame):
             # Episódios / Cenas Exatas
             episodes = anime.get("best_episodes", [])
             if episodes:
-                ctk.CTkLabel(card, text="📍 Melhores Cenas e Episódios Exatos:", font=ctk.CTkFont(size=12, weight="bold"), text_color="#facc15").pack(anchor="w", padx=12, pady=(4, 2))
+                ctk.CTkLabel(card, text="Melhores Cenas e Episódios Exatos:", font=ctk.CTkFont(size=12, weight="bold"), text_color="#facc15").pack(anchor="w", padx=12, pady=(4, 2))
                 for ep in episodes:
                     ep_box = ctk.CTkFrame(card, fg_color="#1f1f23", corner_radius=6)
                     ep_box.pack(fill="x", padx=12, pady=4)
@@ -318,7 +321,7 @@ class AnimeFinderTab(ctk.CTkFrame):
 
                     ep_num = ep.get("episode", "Episódio")
                     arc = f" ({ep.get('arc_name', '')})" if ep.get("arc_name") else ""
-                    ctk.CTkLabel(top_ep, text=f"⭐ {ep_num}{arc}", font=ctk.CTkFont(size=12, weight="bold"), text_color="#38bdf8").pack(side="left")
+                    ctk.CTkLabel(top_ep, text=f"{ep_num}{arc}", font=ctk.CTkFont(size=12, weight="bold"), text_color="#38bdf8").pack(side="left")
 
                     desc = ep.get("scene_description", "")
                     if desc:
@@ -329,11 +332,11 @@ class AnimeFinderTab(ctk.CTkFrame):
                     btn_row = ctk.CTkFrame(ep_box, fg_color="transparent")
                     btn_row.pack(fill="x", padx=8, pady=(4, 6))
 
-                    btn_cp = ctk.CTkButton(btn_row, text="📋 Copiar Termo de Busca", width=140, height=24, font=ctk.CTkFont(size=11), fg_color="#16a34a", hover_color="#15803d")
-                    btn_cp.configure(command=lambda t=term, b=btn_cp: self._copy_text(t, b, "📋 Copiar Termo de Busca"))
+                    btn_cp = ctk.CTkButton(btn_row, text="Copiar Termo de Busca", width=140, height=24, font=ctk.CTkFont(size=11), fg_color="#16a34a", hover_color="#15803d")
+                    btn_cp.configure(command=lambda t=term, b=btn_cp: self._copy_text(t, b, "Copiar Termo de Busca"))
                     btn_cp.pack(side="left", padx=(0, 6))
 
-                    btn_yt = ctk.CTkButton(btn_row, text="🌐 Abrir no YouTube", width=120, height=24, font=ctk.CTkFont(size=11), fg_color="#ef4444", hover_color="#dc2626")
+                    btn_yt = ctk.CTkButton(btn_row, text="Abrir no YouTube", width=120, height=24, font=ctk.CTkFont(size=11), fg_color="#ef4444", hover_color="#dc2626")
                     btn_yt.configure(command=lambda t=term: self._open_youtube_search(t))
                     btn_yt.pack(side="left")
 
@@ -346,7 +349,7 @@ class AnimeFinderTab(ctk.CTkFrame):
         summary = data.get("summary", f"Episódios encontrados para {obra_name}")
         s_box = ctk.CTkFrame(self.right_scroll, fg_color=COLOR_CARD, corner_radius=8, border_width=1, border_color=COLOR_CARD_BORDER)
         s_box.pack(fill="x", padx=5, pady=(0, 10))
-        ctk.CTkLabel(s_box, text=f"🎬 {summary}", font=ctk.CTkFont(size=13, weight="bold"), text_color="#e9d5ff", wraplength=480, justify="left").pack(padx=12, pady=8)
+        ctk.CTkLabel(s_box, text=f"{summary}", font=ctk.CTkFont(size=13, weight="bold"), text_color="#e9d5ff", wraplength=480, justify="left").pack(padx=12, pady=8)
 
         episodes = data.get("episodes", [])
         if not episodes:
@@ -362,7 +365,7 @@ class AnimeFinderTab(ctk.CTkFrame):
 
             ep_num = ep.get("episode", "Episódio")
             arc = f" — {ep.get('arc_name', '')}" if ep.get("arc_name") else ""
-            ctk.CTkLabel(top_row, text=f"🔥 {ep_num}{arc}", font=ctk.CTkFont(size=14, weight="bold"), text_color="#facc15").pack(side="left")
+            ctk.CTkLabel(top_row, text=f"{ep_num}{arc}", font=ctk.CTkFont(size=14, weight="bold"), text_color="#facc15").pack(side="left")
 
             score = ep.get("viral_potential", 90)
             ctk.CTkLabel(top_row, text=f"Nota: {score}/100", font=ctk.CTkFont(size=11, weight="bold"), text_color="#34d399").pack(side="right")
@@ -375,11 +378,11 @@ class AnimeFinderTab(ctk.CTkFrame):
             btn_row = ctk.CTkFrame(card, fg_color="transparent")
             btn_row.pack(fill="x", padx=12, pady=(6, 10))
 
-            btn_cp = ctk.CTkButton(btn_row, text="📋 Copiar Termo", width=110, height=26, font=ctk.CTkFont(size=11), fg_color="#16a34a", hover_color="#15803d")
-            btn_cp.configure(command=lambda t=term, b=btn_cp: self._copy_text(t, b, "📋 Copiar Termo"))
+            btn_cp = ctk.CTkButton(btn_row, text="Copiar Termo", width=110, height=26, font=ctk.CTkFont(size=11), fg_color="#16a34a", hover_color="#15803d")
+            btn_cp.configure(command=lambda t=term, b=btn_cp: self._copy_text(t, b, "Copiar Termo"))
             btn_cp.pack(side="left", padx=(0, 8))
 
-            btn_yt = ctk.CTkButton(btn_row, text="🌐 Buscar no YouTube", width=140, height=26, font=ctk.CTkFont(size=11), fg_color="#ef4444", hover_color="#dc2626")
+            btn_yt = ctk.CTkButton(btn_row, text="Buscar no YouTube", width=140, height=26, font=ctk.CTkFont(size=11), fg_color="#ef4444", hover_color="#dc2626")
             btn_yt.configure(command=lambda t=term: self._open_youtube_search(t))
             btn_yt.pack(side="left")
 

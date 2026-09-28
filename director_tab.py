@@ -24,6 +24,7 @@ from director_ai import (
     _time_str_to_seconds,
     ranges_overlap,
 )
+import icon_manager
 from upscaler import (
     get_video_info,
     format_time,
@@ -43,8 +44,8 @@ COLORS = {
     "warning": "#f59e0b",
     "error": "#ef4444",
     "text_primary": "#fafafa",
-    "text_secondary": "#71717a",
-    "text_muted": "#3f3f46",
+    "text_secondary": "#a1a1aa",
+    "text_muted": "#a1a1aa",
     "border": "#27272a",
     "border_active": "#52525b",
     "console_bg": "#050505",
@@ -70,6 +71,9 @@ class DirectorTab(ctk.CTkFrame):
         # Stores excluded ranges as list of (start_sec, end_sec, label) tuples for robust overlap detection
         self._all_excluded_ranges: List[tuple] = []  # (start_sec, end_sec, str_repr)
         self._all_excluded_strs: List[str] = []      # formatted strings sent to prompt
+
+        self.cut_mode_var = ctk.StringVar(value="context")
+        self.content_type_var = ctk.StringVar(value="general")
 
         self._build_ui()
 
@@ -97,7 +101,9 @@ class DirectorTab(ctk.CTkFrame):
         row.pack(fill="x")
 
         ctk.CTkLabel(
-            row, text="🎬  Diretor IA",
+            row, text=" Diretor IA",
+            image=icon_manager.get_icon("director", size=(24, 24), color="#10b981"),
+            compound="left",
             font=ctk.CTkFont(family="Segoe UI", size=26, weight="bold"),
             text_color=COLORS["text_primary"],
         ).pack(side="left")
@@ -129,13 +135,15 @@ class DirectorTab(ctk.CTkFrame):
         h_row.pack(fill="x", padx=16, pady=(12, 6))
 
         ctk.CTkLabel(
-            h_row, text="📁  Episódio / Vídeo Longo",
+            h_row, text="Episódio / Vídeo Longo",
             font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"),
             text_color=COLORS["text_primary"],
         ).pack(side="left")
 
         ctk.CTkButton(
-            h_row, text="⚡ Usar vídeo do Upscaler",
+            h_row, text="Usar vídeo do Upscaler",
+            image=icon_manager.get_icon("refresh", size=(13, 13), color=COLORS["accent_director"]),
+            compound="left",
             font=ctk.CTkFont(family="Segoe UI", size=11),
             fg_color=COLORS["bg_dark"], hover_color=COLORS["bg_card_hover"],
             border_width=1, border_color=COLORS["border"],
@@ -169,7 +177,7 @@ class DirectorTab(ctk.CTkFrame):
         out_lbl_row = ctk.CTkFrame(card, fg_color="transparent")
         out_lbl_row.pack(fill="x", padx=16, pady=(4, 4))
         ctk.CTkLabel(
-            out_lbl_row, text="💾  Pasta de Saída dos Cortes (Onde Salvar):",
+            out_lbl_row, text="Pasta de Saída dos Cortes (Onde Salvar):",
             font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
             text_color=COLORS["text_secondary"], anchor="w",
         ).pack(side="left")
@@ -237,7 +245,7 @@ class DirectorTab(ctk.CTkFrame):
         card.pack(fill="x", pady=(0, 10))
 
         ctk.CTkLabel(
-            card, text="🧠  Contexto e Modo da Curadoria",
+            card, text="Contexto e Modo da Curadoria",
             font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"),
             text_color=COLORS["text_primary"], anchor="w",
         ).pack(fill="x", padx=16, pady=(12, 6))
@@ -258,28 +266,80 @@ class DirectorTab(ctk.CTkFrame):
         )
         self.context_entry.pack(fill="x", padx=16, pady=(0, 12))
 
-        # Mode row
-        mode_row = ctk.CTkFrame(card, fg_color="transparent")
-        mode_row.pack(fill="x", padx=16, pady=(0, 10))
+        # Selectors row (Escopo da Curadoria + Foco do Conteúdo lado a lado)
+        sel_row = ctk.CTkFrame(card, fg_color="transparent")
+        sel_row.pack(fill="x", padx=16, pady=(0, 8))
+
+        # Coluna 1: Escopo da Curadoria
+        scope_col = ctk.CTkFrame(sel_row, fg_color="transparent")
+        scope_col.pack(side="left", fill="x", expand=True, padx=(0, 8))
 
         ctk.CTkLabel(
-            mode_row, text="Escopo da Curadoria:",
-            font=ctk.CTkFont(family="Segoe UI", size=12),
-            text_color=COLORS["text_secondary"],
-        ).pack(side="left", padx=(0, 10))
+            scope_col, text="Escopo da Curadoria:",
+            font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
+            text_color=COLORS["text_secondary"], anchor="w",
+        ).pack(fill="x", pady=(0, 4))
 
-        self.mode_var = ctk.StringVar(value="🏆 Top 3 do Episódio (Picos de Hype)")
+        self.mode_var = ctk.StringVar(value="Top 3 do Episódio (Picos de Hype)")
         modes = [
-            "🏆 Top 3 do Episódio (Picos de Hype)",
-            "🧠 Smart Cortes (Curadoria Sincera)",
+            "Top 3 do Episódio (Picos de Hype)",
+            "Smart Cortes (Curadoria Sincera)",
         ]
         ctk.CTkOptionMenu(
-            mode_row, values=modes, variable=self.mode_var,
+            scope_col, values=modes, variable=self.mode_var,
             font=ctk.CTkFont(family="Segoe UI", size=12),
             fg_color=COLORS["bg_dark"], button_color=COLORS["border"],
             button_hover_color=COLORS["accent_director"],
-            height=36, corner_radius=8, width=280,
-        ).pack(side="left")
+            height=36, corner_radius=8,
+        ).pack(fill="x")
+
+        # Coluna 2: Foco do Conteúdo (Listagem Suspensa / Dropdown)
+        focus_col = ctk.CTkFrame(sel_row, fg_color="transparent")
+        focus_col.pack(side="left", fill="x", expand=True, padx=(8, 0))
+
+        ctk.CTkLabel(
+            focus_col, text="Foco do Conteúdo (Gênero do Corte):",
+            font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
+            text_color=COLORS["text_secondary"], anchor="w",
+        ).pack(fill="x", pady=(0, 4))
+
+        self.content_type_var = ctk.StringVar(value="Geral (Padrão Viral)")
+        content_type_options = [
+            "Geral (Padrão Viral)",
+            "Engraçado (Comédia & Humor)",
+            "Ação (Batalhas & Lutas)",
+            "Romance (Química & Tensão)",
+            "Sensual (Ecchi & Fanservice)",
+        ]
+        self.content_type_menu = ctk.CTkOptionMenu(
+            focus_col, values=content_type_options, variable=self.content_type_var,
+            font=ctk.CTkFont(family="Segoe UI", size=12),
+            fg_color=COLORS["bg_dark"], button_color=COLORS["border"],
+            button_hover_color=COLORS["accent_director"],
+            height=36, corner_radius=8,
+            command=self._on_content_type_changed,
+        )
+        self.content_type_menu.pack(fill="x")
+
+        # Linha com badge e descrição dinâmica do foco selecionado
+        desc_row = ctk.CTkFrame(card, fg_color="transparent")
+        desc_row.pack(fill="x", padx=16, pady=(0, 10))
+
+        self.focus_badge_label = ctk.CTkLabel(
+            desc_row, text=" VIRAL ",
+            font=ctk.CTkFont(family="Segoe UI", size=9, weight="bold"),
+            text_color="#60a5fa", fg_color="#141c2b",
+            corner_radius=4, padx=6, pady=2,
+        )
+        self.focus_badge_label.pack(side="left")
+
+        self.focus_desc_label = ctk.CTkLabel(
+            desc_row,
+            text="Foco Geral: Seleciona os pontos mais altos, viradas e o clímax de maior impacto do episódio.",
+            font=ctk.CTkFont(family="Segoe UI", size=11),
+            text_color=COLORS["text_secondary"], anchor="w",
+        )
+        self.focus_desc_label.pack(side="left", padx=(8, 0))
 
         # Modo de Corte (Contexto, Contínuo, Arco Narrativo)
         self._build_cut_mode_selector(card)
@@ -295,6 +355,7 @@ class DirectorTab(ctk.CTkFrame):
         cards_container = ctk.CTkFrame(parent, fg_color="transparent")
         cards_container.pack(fill="x", padx=16, pady=(0, 16))
         cards_container.grid_columnconfigure((0, 1, 2), weight=1, uniform="modes")
+        cards_container.grid_rowconfigure((0, 1), weight=1)
 
         self.cut_mode_var = ctk.StringVar(value="context")
         self.cut_mode_cards = {}
@@ -302,25 +363,54 @@ class DirectorTab(ctk.CTkFrame):
         self.cut_mode_titles = {}
 
         mode_defs = [
-            {
-                "key": "context",
-                "title": "Contexto",
-                "badge": "45s–2m",
-                "desc": "Vídeo com diálogos e narrativa. Perfeito para shorts que contam uma mini-história.",
-                "col": 0,
-            },
+            # Linha 0: Modos Clássicos
             {
                 "key": "continuous",
                 "title": "Contínuo",
-                "badge": "30–90s",
-                "desc": "1 trecho contínuo, sem cortes internos — menos alucinação e falhas de fala. Refine depois na aba Refinador.",
+                "badge": "30–75s",
+                "desc": "1 cena fluida sem cortes internos. Diálogos naturais e ação direta sem falhas.",
+                "row": 0,
+                "col": 0,
+            },
+            {
+                "key": "context",
+                "title": "Contexto",
+                "badge": "45–90s",
+                "desc": "Estrutura In Media Res: gancho imediato nos primeiros 3s, contexto dramático e desfecho.",
+                "row": 0,
                 "col": 1,
             },
             {
                 "key": "narrative_arc",
-                "title": "Mini-Filme (Arco 2–5m)",
+                "title": "Mini-Filme",
                 "badge": "2–5 MIN",
-                "desc": "Identifica um bloco contextualizado e épico de 2 a 5 min (mini-filme com história completa) — ideal para tratar no Refinador.",
+                "desc": "Arco dramático completo (dilema, escalada e clímax). Feito sob medida para o Refinador.",
+                "row": 0,
+                "col": 2,
+            },
+            # Linha 1: Novos Modos Especializados
+            {
+                "key": "multi_part",
+                "title": "Série em Partes",
+                "badge": "PARTE 1, 2, 3",
+                "desc": "Sequência interligada (Parte 1 a 3) com ganchos de continuação para maratonar perfil.",
+                "row": 1,
+                "col": 0,
+            },
+            {
+                "key": "dynamic_montage",
+                "title": "Corte Dinâmico",
+                "badge": "45–70s",
+                "desc": "Montagem ágil sem barriga: alta densidade de falas e ritmo acelerado sem silêncios.",
+                "row": 1,
+                "col": 1,
+            },
+            {
+                "key": "verbal_duel",
+                "title": "Duelo Verbal",
+                "badge": "40–80s",
+                "desc": "Confronto psicológico, bate-boca, quebra de ego e revelação de segredos dramáticos.",
+                "row": 1,
                 "col": 2,
             },
         ]
@@ -334,17 +424,17 @@ class DirectorTab(ctk.CTkFrame):
                 border_color=COLORS["border"],
                 cursor="hand2",
             )
-            card_f.grid(row=0, column=m["col"], sticky="nsew", padx=4)
+            card_f.grid(row=m["row"], column=m["col"], sticky="nsew", padx=4, pady=4)
 
             inner = ctk.CTkFrame(card_f, fg_color="transparent", cursor="hand2")
-            inner.pack(fill="both", expand=True, padx=14, pady=12)
+            inner.pack(fill="both", expand=True, padx=12, pady=10)
 
             t_row = ctk.CTkFrame(inner, fg_color="transparent", cursor="hand2")
-            t_row.pack(fill="x", pady=(0, 6))
+            t_row.pack(fill="x", pady=(0, 4))
 
             lbl_title = ctk.CTkLabel(
                 t_row, text=m["title"],
-                font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
+                font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
                 text_color=COLORS["text_primary"], anchor="w",
                 cursor="hand2",
             )
@@ -364,7 +454,7 @@ class DirectorTab(ctk.CTkFrame):
                 inner, text=m["desc"],
                 font=ctk.CTkFont(family="Segoe UI", size=10),
                 text_color=COLORS["text_secondary"], anchor="w",
-                justify="left", wraplength=250,
+                justify="left", wraplength=230,
                 cursor="hand2",
             )
             lbl_desc.pack(fill="both", expand=True)
@@ -403,7 +493,7 @@ class DirectorTab(ctk.CTkFrame):
                 if badge_info:
                     lbl, base = badge_info
                     lbl.configure(
-                        text=f" ✓ ATIVO ({base}) ",
+                        text=f" [ATIVO: {base}] ",
                         fg_color="#2563eb",
                         text_color="#ffffff",
                     )
@@ -425,12 +515,43 @@ class DirectorTab(ctk.CTkFrame):
                 if title_lbl:
                     title_lbl.configure(text_color=COLORS["text_primary"])
 
+    def _get_selected_content_type(self) -> str:
+        """Map human-readable dropdown selection to technical genre key."""
+        val = self.content_type_var.get() if hasattr(self, "content_type_var") else "general"
+        if "Engraçado" in val or "Comédia" in val or "comedy" in val:
+            return "comedy"
+        elif "Ação" in val or "action" in val:
+            return "action"
+        elif "Romance" in val or "romance" in val:
+            return "romance"
+        elif "Sensual" in val or "Ecchi" in val or "sensual" in val:
+            return "sensual"
+        return "general"
+
+    def _on_content_type_changed(self, choice: str):
+        """Update the visual badge and guidance description when user selects a content focus."""
+        ctype = self._get_selected_content_type()
+        badge_configs = {
+            "general": ("VIRAL", "#60a5fa", "#141c2b", "Foco Geral: Seleciona os pontos mais altos, viradas e o clímax de maior impacto do episódio."),
+            "comedy": ("HUMOR", "#facc15", "#241f0f", "Foco Humor: EXCLUSIVAMENTE piadas, quebra de expectativa, zoeira e reações hilárias (sem cenas sérias)."),
+            "action": ("LUTA", "#fb923c", "#261710", "Foco Ação: EXCLUSIVAMENTE combates, lutas corporais, poderes especiais e adrenalina pura."),
+            "romance": ("LOVE", "#f472b6", "#26121f", "Foco Romance: EXCLUSIVAMENTE tensão romântica, aproximação íntima, confissões e química."),
+            "sensual": ("ECCHI", "#c084fc", "#1f1228", "Foco Sensual: EXCLUSIVAMENTE charme provocante, praia/banho, close-ups e cenas marcantes."),
+        }
+        badge_text, text_c, bg_c, desc = badge_configs.get(ctype, ("FILTRO", "#a1a1aa", "#18181b", choice))
+        if hasattr(self, "focus_badge_label"):
+            self.focus_badge_label.configure(text=f" {badge_text} ", text_color=text_c, fg_color=bg_c)
+        if hasattr(self, "focus_desc_label"):
+            self.focus_desc_label.configure(text=desc)
+
     def _build_action_section(self):
         card = ctk.CTkFrame(self.scroll, fg_color="transparent")
         card.pack(fill="x", pady=(4, 10))
 
         self.analyze_btn = ctk.CTkButton(
-            card, text="🎬  Analisar Episódio com Diretor IA",
+            card, text="Analisar Episódio com Diretor IA",
+            image=icon_manager.get_icon("sparkle", size=(16, 16), color="#09090b"),
+            compound="left",
             font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
             fg_color=COLORS["accent_primary"], hover_color=COLORS["accent_secondary"],
             text_color="#09090b",
@@ -439,8 +560,21 @@ class DirectorTab(ctk.CTkFrame):
         )
         self.analyze_btn.pack(side="left", fill="x", expand=True, padx=(0, 8))
 
+        self.clear_cache_btn = ctk.CTkButton(
+            card, text="Limpar Cache (IA)",
+            image=icon_manager.get_icon("trash", size=(14, 14), color=COLORS["error"]),
+            compound="left",
+            font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
+            fg_color=COLORS["bg_card"], hover_color=COLORS["bg_card_hover"],
+            border_width=1, border_color=COLORS["border"],
+            text_color=COLORS["warning"],
+            height=44, corner_radius=10, width=140,
+            command=self._clear_cache_for_video,
+        )
+        self.clear_cache_btn.pack(side="left", padx=(0, 8))
+
         self.cancel_btn = ctk.CTkButton(
-            card, text="✕ Cancelar",
+            card, text="Cancelar",
             font=ctk.CTkFont(family="Segoe UI", size=12),
             fg_color=COLORS["bg_card"], hover_color=COLORS["bg_card_hover"],
             border_width=1, border_color=COLORS["border"],
@@ -450,6 +584,19 @@ class DirectorTab(ctk.CTkFrame):
             command=self._cancel_analysis,
         )
         self.cancel_btn.pack(side="right")
+
+    def _clear_cache_for_video(self):
+        if not self.input_path:
+            messagebox.showinfo("Cache de IA", "Selecione um vídeo primeiro para limpar o cache.")
+            return
+        try:
+            from ai_cache_hub import ai_cache
+            ai_cache.invalidate(self.input_path)
+            self._log(f"[CACHE] Cache de IA limpo para: {Path(self.input_path).name}!")
+            self._log("[IA] A próxima análise consultará Whisper, Lore e IA do zero.")
+            messagebox.showinfo("Cache Limpo", "Cache de IA deste episódio foi limpo com sucesso!\nA próxima análise gerará cortes e análises do zero.")
+        except Exception as e:
+            self._log(f"Aviso cache: {e}")
 
     def _build_progress_section(self):
         self.progress_card = ctk.CTkFrame(
@@ -568,7 +715,7 @@ class DirectorTab(ctk.CTkFrame):
             return
 
         self.is_processing = True
-        self.analyze_btn.configure(state="disabled", text="⏳ Analisando Episódio...")
+        self.analyze_btn.configure(state="disabled", text="Analisando Episódio...")
         self.cancel_btn.configure(state="normal")
 
         if not self.progress_card.winfo_ismapped():
@@ -590,6 +737,7 @@ class DirectorTab(ctk.CTkFrame):
         context = self.context_entry.get().strip()
         mode_str = "top3" if "Top 3" in self.mode_var.get() else "smart"
         cut_mode_str = self.cut_mode_var.get() if hasattr(self, "cut_mode_var") else "context"
+        content_type_str = self._get_selected_content_type()
         duration = self.current_video_info.duration if self.current_video_info else 0.0
         ffmpeg_bin = find_ffmpeg() or "ffmpeg"
 
@@ -610,6 +758,7 @@ class DirectorTab(ctk.CTkFrame):
                     ffmpeg_bin=ffmpeg_bin,
                     on_progress=_on_progress,
                     on_log=_on_log,
+                    content_type=content_type_str,
                 )
                 self.after(0, lambda: self._on_analysis_finished(True, candidates, transcript, lore))
             except Exception as e:
@@ -623,13 +772,13 @@ class DirectorTab(ctk.CTkFrame):
 
     def _cancel_analysis(self):
         self.is_processing = False
-        self.analyze_btn.configure(state="normal", text="🎬  Analisar Episódio com Diretor IA")
+        self.analyze_btn.configure(state="normal", text="Analisar Episódio com Diretor IA")
         self.cancel_btn.configure(state="disabled")
-        self._log("✕ Operação cancelada.")
+        self._log("Operação cancelada.")
 
     def _on_analysis_finished(self, success: bool, data, transcript: str = "", lore: str = ""):
         self.is_processing = False
-        self.analyze_btn.configure(state="normal", text="🎬  Analisar Episódio com Diretor IA")
+        self.analyze_btn.configure(state="normal", text="Analisar Episódio com Diretor IA")
         self.cancel_btn.configure(state="disabled")
 
         if not success:
@@ -656,7 +805,7 @@ class DirectorTab(ctk.CTkFrame):
 
         self.candidates = data
         if not self.candidates:
-            self._log("⚠ Nenhum corte encontrado com os critérios fornecidos.")
+            self._log("[AVISO] Nenhum corte encontrado com os critérios fornecidos.")
             return
 
         self._render_candidates()
@@ -671,7 +820,7 @@ class DirectorTab(ctk.CTkFrame):
 
         header_lbl = ctk.CTkLabel(
             header_row,
-            text=f"✨ {len(self.candidates)} Melhores Momentos Selecionados pelo Diretor:",
+            text=f"{len(self.candidates)} Melhores Momentos Selecionados pelo Diretor:",
             font=ctk.CTkFont(family="Segoe UI", size=15, weight="bold"),
             text_color=COLORS["text_primary"], anchor="w",
         )
@@ -683,7 +832,8 @@ class DirectorTab(ctk.CTkFrame):
         # Reroll button
         ctk.CTkButton(
             btn_row_right,
-            text="🔄 Novos Cortes",
+            text="Novos Cortes",
+            image=icon_manager.get_icon("refresh", size=(13, 13)), compound="left",
             font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
             fg_color=COLORS["bg_dark"], hover_color=COLORS["bg_card_hover"],
             border_width=1, border_color=COLORS["border_active"],
@@ -692,10 +842,24 @@ class DirectorTab(ctk.CTkFrame):
             command=self._start_reroll,
         ).pack(side="left", padx=(0, 8))
 
+        # Subir ao Topo button
+        ctk.CTkButton(
+            btn_row_right,
+            text="Subir ao Topo",
+            image=icon_manager.get_icon("upscale", size=(13, 13)), compound="left",
+            font=ctk.CTkFont(family="Segoe UI", size=12),
+            fg_color=COLORS["bg_dark"], hover_color=COLORS["bg_card_hover"],
+            border_width=1, border_color=COLORS["border"],
+            text_color=COLORS["text_secondary"],
+            height=32, corner_radius=10,
+            command=self._scroll_to_top,
+        ).pack(side="left", padx=(0, 8))
+
         # Batch export all cuts button
         ctk.CTkButton(
             btn_row_right,
-            text=f"💾 Salvar Todos ({len(self.candidates)})",
+            text=f"Salvar Todos ({len(self.candidates)})",
+            image=icon_manager.get_icon("download", size=(13, 13)), compound="left",
             font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
             fg_color=COLORS["bg_card"], hover_color=COLORS["bg_card_hover"],
             border_width=1, border_color=COLORS["border"],
@@ -706,6 +870,21 @@ class DirectorTab(ctk.CTkFrame):
 
         for idx, cand in enumerate(self.candidates, 1):
             self._build_candidate_card(cand, idx)
+
+        # Rolar suavemente aos resultados recém-gerados
+        self.after(150, self._scroll_to_results)
+
+    def _scroll_to_top(self):
+        try:
+            self.scroll._parent_canvas.yview_moveto(0.0)
+        except Exception:
+            pass
+
+    def _scroll_to_results(self):
+        try:
+            self.scroll._parent_canvas.yview_moveto(0.32)
+        except Exception:
+            pass
 
     def _save_all_candidates(self):
         """Batch extract and save all identified moments to the output folder."""
@@ -723,25 +902,25 @@ class DirectorTab(ctk.CTkFrame):
             return
 
         self.is_processing = True
-        self._log(f"📦 Iniciando extração em lote de {total} momentos...")
+        self._log(f"[LOTE] Iniciando extração em lote de {total} momentos...")
 
         def _batch_worker():
             saved_count = 0
             out_dir_path = ""
             for idx, cand in enumerate(self.candidates, 1):
                 title = cand.get("title") or f"Momento #{idx}"
-                self.after(0, lambda t=title, i=idx: self._log(f"⏳ Extraindo [{i}/{total}]: {t}..."))
+                self.after(0, lambda t=title, i=idx: self._log(f"Extraindo [{i}/{total}]: {t}..."))
                 out_path, err = self._create_cut_file(cand)
                 if out_path:
                     saved_count += 1
                     out_dir_path = os.path.dirname(os.path.abspath(out_path))
-                    self.after(0, lambda p=out_path: self._log(f"   ✓ Salvo: {os.path.basename(p)}"))
+                    self.after(0, lambda p=out_path: self._log(f"   [OK] Salvo: {os.path.basename(p)}"))
                 else:
-                    self.after(0, lambda e=err: self._log(f"   ✕ Falha: {e}"))
+                    self.after(0, lambda e=err: self._log(f"   [FALHA]: {e}"))
 
             def _batch_done():
                 self.is_processing = False
-                self._log(f"✨ Concluído! {saved_count}/{total} cortes salvos com sucesso.")
+                self._log(f"[CONCLUÍDO] {saved_count}/{total} cortes salvos com sucesso.")
                 resp = messagebox.askyesno(
                     "Extração em Lote Concluída",
                     f"{saved_count} de {total} cortes foram salvos com sucesso!\n\nDeseja abrir a pasta agora?"
@@ -777,18 +956,19 @@ class DirectorTab(ctk.CTkFrame):
             return
 
         self.is_processing = True
-        self.analyze_btn.configure(state="disabled", text="⏳ Gerando Novos Cortes...")
+        self.analyze_btn.configure(state="disabled", text="Gerando Novos Cortes...")
 
         if not self.progress_card.winfo_ismapped():
             self.progress_card.pack(fill="x", pady=(0, 10))
 
         self.progress_bar.set(0)
         self._clear_log()
-        self._log(f"🔄 Gerando novos cortes alternativos ({len(self._all_excluded_ranges)} trechos já excluídos)...")
+        self._log(f"[NOVOS CORTES] Gerando cortes alternativos ({len(self._all_excluded_ranges)} trechos já excluídos)...")
 
         context = self.context_entry.get().strip()
         mode_str = "top3" if "Top 3" in self.mode_var.get() else "smart"
         cut_mode_str = self.cut_mode_var.get() if hasattr(self, "cut_mode_var") else "context"
+        content_type_str = self._get_selected_content_type()
         duration = self.current_video_info.duration if self.current_video_info else 0.0
         excluded = list(self._all_excluded_strs)  # snapshot of formatted strings for prompt
 
@@ -810,6 +990,7 @@ class DirectorTab(ctk.CTkFrame):
                     excluded_ranges=excluded,
                     on_progress=_on_progress,
                     on_log=_on_log,
+                    content_type=content_type_str,
                 )
                 self.after(0, lambda: self._on_reroll_finished(True, new_candidates))
             except Exception as e:
@@ -819,14 +1000,14 @@ class DirectorTab(ctk.CTkFrame):
 
     def _on_reroll_finished(self, success: bool, data):
         self.is_processing = False
-        self.analyze_btn.configure(state="normal", text="🎬  Analisar Episódio com Diretor IA")
+        self.analyze_btn.configure(state="normal", text="Analisar Episódio com Diretor IA")
 
         if not success:
             messagebox.showerror("Erro no Reroll", f"Falha ao gerar novos cortes:\n{data}")
             return
 
         if not data:
-            self._log("⚠ Nenhum novo corte encontrado. O vídeo pode não ter mais trechos não mostrados.")
+            self._log("[AVISO] Nenhum novo corte encontrado. O vídeo pode não ter mais trechos não mostrados.")
             messagebox.showinfo(
                 "Sem Novos Cortes",
                 "A IA não encontrou mais trechos alternativos não mostrados anteriormente.\n\n"
@@ -848,7 +1029,7 @@ class DirectorTab(ctk.CTkFrame):
                         self._all_excluded_strs.append(rng_str)
 
         self.candidates = data
-        self._log(f"✨ {len(data)} novos cortes alternativos prontos!")
+        self._log(f"[CONCLUÍDO] {len(data)} novos cortes alternativos prontos!")
         self._render_candidates()
 
     def _build_candidate_card(self, cand: dict, idx: int):
@@ -869,14 +1050,22 @@ class DirectorTab(ctk.CTkFrame):
         score = cand.get("quality_score", 8)
         score_color = "#10b981" if score >= 8.5 else "#f59e0b"
 
-        title_text = str(cand.get("title") or f"Momento #{idx}")
+        title_raw = str(cand.get("title") or f"Momento #{idx}").strip()
+        desc_raw = str(cand.get("description") or "").strip()
+        # Garante que a descrição da cena apareça no título com destaque visual
+        if "—" not in title_raw and "-" not in title_raw and desc_raw and len(title_raw) < 50:
+            title_text = f"{title_raw} — {desc_raw}"
+        else:
+            title_text = title_raw
+
         ctk.CTkLabel(
             top_row, text=f"#{idx}  {title_text}",
-            font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"),
+            font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
             text_color=COLORS["text_primary"], anchor="w",
+            wraplength=760, justify="left",
         ).pack(side="left", fill="x", expand=True)
 
-        badge_text = f"⭐ Nota {score}/10"
+        badge_text = f"Nota {score}/10"
         ctk.CTkLabel(
             top_row, text=f" {badge_text} ",
             font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
@@ -897,7 +1086,7 @@ class DirectorTab(ctk.CTkFrame):
 
         # Time controls (editable)
         ctk.CTkLabel(
-            meta_frame, text="⏱️ Início:",
+            meta_frame, text="Início:",
             font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
             text_color=COLORS["text_secondary"],
         ).pack(side="left", padx=(0, 4))
@@ -912,7 +1101,7 @@ class DirectorTab(ctk.CTkFrame):
         start_entry.pack(side="left", padx=(0, 8))
 
         ctk.CTkLabel(
-            meta_frame, text="➔ Fim:",
+            meta_frame, text="Fim:",
             font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
             text_color=COLORS["text_secondary"],
         ).pack(side="left", padx=(0, 4))
@@ -935,7 +1124,7 @@ class DirectorTab(ctk.CTkFrame):
 
         if is_arc:
             ctk.CTkLabel(
-                meta_frame, text="• 🗺️ Arco Narrativo (Comprimir no Refinador)",
+                meta_frame, text="• Arco Narrativo (Comprimir no Refinador)",
                 font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
                 text_color="#f59e0b",
             ).pack(side="left", padx=(0, 4))
@@ -968,10 +1157,10 @@ class DirectorTab(ctk.CTkFrame):
         end_entry.bind("<Return>", lambda e: _sync_candidate_times())
 
         # Description
-        desc = cand.get("description", "")
-        if desc:
+        desc = cand.get("description", "").strip()
+        if desc and desc not in title_text:
             ctk.CTkLabel(
-                inner, text=desc,
+                inner, text=f"📝 Cena: {desc}",
                 font=ctk.CTkFont(family="Segoe UI", size=11),
                 text_color=COLORS["text_secondary"], anchor="w",
                 wraplength=750, justify="left",
@@ -981,7 +1170,7 @@ class DirectorTab(ctk.CTkFrame):
         reason = cand.get("quality_reasoning", "")
         if reason:
             ctk.CTkLabel(
-                inner, text=f"💡 Por que viraliza: {reason}",
+                inner, text=f"Por que viraliza: {reason}",
                 font=ctk.CTkFont(family="Segoe UI", size=11, slant="italic"),
                 text_color=COLORS["text_muted"], anchor="w",
                 wraplength=750, justify="left",
@@ -996,7 +1185,8 @@ class DirectorTab(ctk.CTkFrame):
 
         # 1. Preview
         btn_prev = ctk.CTkButton(
-            btn_row, text="▶️ Preview",
+            btn_row, text="Preview",
+            image=icon_manager.get_icon("play", size=(13, 13)), compound="left",
             font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
             fg_color=COLORS["bg_dark"], hover_color=COLORS["bg_card_hover"],
             border_width=1, border_color=COLORS["border"],
@@ -1008,7 +1198,8 @@ class DirectorTab(ctk.CTkFrame):
 
         # 2. Salvar Corte Rápido
         btn_cut = ctk.CTkButton(
-            btn_row, text="💾 Salvar Corte",
+            btn_row, text="Salvar Corte",
+            image=icon_manager.get_icon("scissors", size=(13, 13), color="#09090b"), compound="left",
             font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
             fg_color=COLORS["accent_primary"], hover_color=COLORS["accent_secondary"],
             text_color="#09090b",
@@ -1020,7 +1211,8 @@ class DirectorTab(ctk.CTkFrame):
 
         # 3. Salvar Como...
         btn_saveas = ctk.CTkButton(
-            btn_row, text="📁 Salvar Como...",
+            btn_row, text="Salvar Como...",
+            image=icon_manager.get_icon("folder", size=(13, 13)), compound="left",
             font=ctk.CTkFont(family="Segoe UI", size=11),
             fg_color=COLORS["bg_dark"], hover_color=COLORS["bg_card_hover"],
             border_width=1, border_color=COLORS["border"],
@@ -1032,9 +1224,10 @@ class DirectorTab(ctk.CTkFrame):
         btn_refs["saveas"] = btn_saveas
 
         # 4. Refinar (Mastercut)
-        refine_title = "⚡ Condensar Arco no Refinador" if is_arc else "⚡ Refinar (Mastercut)"
+        refine_title = "Condensar Arco no Refinador" if is_arc else "Refinar (Mastercut)"
         btn_refine = ctk.CTkButton(
             btn_row, text=refine_title,
+            image=icon_manager.get_icon("scissors", size=(13, 13), color="#f59e0b"), compound="left",
             font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
             fg_color=COLORS["bg_dark"], hover_color=COLORS["bg_card_hover"],
             border_width=1, border_color=COLORS["border"],
@@ -1047,7 +1240,8 @@ class DirectorTab(ctk.CTkFrame):
 
         # 5. Upscaler
         btn_upscale = ctk.CTkButton(
-            btn_row, text="🚀 Enviar para Upscaler",
+            btn_row, text="Enviar para Upscaler",
+            image=icon_manager.get_icon("upscale", size=(13, 13)), compound="left",
             font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
             fg_color=COLORS["bg_dark"], hover_color=COLORS["bg_card_hover"],
             border_width=1, border_color=COLORS["border"],
@@ -1115,6 +1309,23 @@ class DirectorTab(ctk.CTkFrame):
             ffmpeg_bin=ffmpeg_bin
         )
         if ok and os.path.exists(out_path) and os.path.getsize(out_path) > 1024:
+            try:
+                from ai_cache_hub import ai_cache
+                is_continuous = dur_sec >= 10.0
+                ai_cache.register_cut_origin(out_path, {
+                    "is_continuous": is_continuous,
+                    "continuous_duration": round(dur_sec, 2),
+                    "source_episode": str(Path(clean_input).name),
+                    "source_path": clean_input,
+                    "start_sec": round(start_sec, 2),
+                    "end_sec": round(start_sec + dur_sec, 2),
+                    "title": cand.get("title", ""),
+                    "genre": cand.get("genre", ""),
+                    "quality_score": cand.get("quality_score", 8),
+                    "cut_mode": self.cut_mode_var.get() if hasattr(self, "cut_mode_var") else "context",
+                })
+            except Exception:
+                pass
             return out_path, ""
         return None, err
 
@@ -1141,7 +1352,7 @@ class DirectorTab(ctk.CTkFrame):
 
         orig_text = btn.cget("text") if btn else ""
         if btn:
-            btn.configure(state="disabled", text="⏳ Cortando...")
+            btn.configure(state="disabled", text="Cortando...")
 
         def _worker():
             out_path, err = self._create_cut_file(cand, custom_out_path=custom_out)
@@ -1151,7 +1362,7 @@ class DirectorTab(ctk.CTkFrame):
                     btn.configure(state="normal", text=orig_text)
 
                 if out_path:
-                    self._log(f"✓ Trecho extraído com sucesso: {out_path}")
+                    self._log(f"[OK] Trecho extraído com sucesso: {out_path}")
                     resp = messagebox.askyesno(
                         "Corte Salvo com Sucesso!",
                         f"Trecho extraído e salvo com sucesso!\n\nArquivo:\n{out_path}\n\nDeseja abrir a pasta onde foi salvo?"
@@ -1164,9 +1375,9 @@ class DirectorTab(ctk.CTkFrame):
                             else:
                                 subprocess.Popen(["xdg-open", out_dir])
                         except Exception as e:
-                            self._log(f"⚠ Não foi possível abrir pasta: {e}")
+                            self._log(f"[AVISO] Não foi possível abrir pasta: {e}")
                 else:
-                    self._log(f"✕ Falha ao cortar trecho: {err}")
+                    self._log(f"[ERRO] Falha ao cortar trecho: {err}")
                     messagebox.showerror("Erro ao Cortar", f"Falha ao extrair vídeo com FFmpeg:\n\n{err}")
 
             self.after(0, _ui_done)
@@ -1177,7 +1388,7 @@ class DirectorTab(ctk.CTkFrame):
         """Cut the candidate clip and transfer directly to Refiner (Mastercut) tab."""
         orig_text = btn.cget("text") if btn else ""
         if btn:
-            btn.configure(state="disabled", text="⏳ Preparando...")
+            btn.configure(state="disabled", text="Preparando...")
 
         def _worker():
             out_path, err = self._create_cut_file(cand)
@@ -1187,11 +1398,11 @@ class DirectorTab(ctk.CTkFrame):
                     btn.configure(state="normal", text=orig_text)
 
                 if not out_path:
-                    self._log(f"✕ Erro ao preparar corte para o Refinador: {err}")
+                    self._log(f"[ERRO] Erro ao preparar corte para o Refinador: {err}")
                     messagebox.showerror("Erro", f"Falha ao gerar o corte do trecho:\n{err}")
                     return
 
-                self._log(f"✓ Corte pronto e transferido para o Refinador: {out_path}")
+                self._log(f"[OK] Corte pronto e transferido para o Refinador: {out_path}")
                 max_dur = self.current_video_info.duration if self.current_video_info else 0.0
                 start_sec, dur_sec, _, _, _ = parse_candidate_times(cand, max_duration=max_dur)
                 is_arc = dur_sec >= 120 or (hasattr(self, "cut_mode_var") and self.cut_mode_var.get() == "narrative_arc")
@@ -1199,15 +1410,15 @@ class DirectorTab(ctk.CTkFrame):
                 if self.main_app and hasattr(self.main_app, "refiner_tab"):
                     self.main_app.refiner_tab._load_video(out_path)
                     if is_arc and hasattr(self.main_app.refiner_tab, "target_duration_var"):
-                        self.main_app.refiner_tab.target_duration_var.set("🎬 Tratar Mini-Filme / Resumo 50% (Até 2:30 min)")
+                        self.main_app.refiner_tab.target_duration_var.set("Tratar Mini-Filme / Resumo 50% (Até 2:30 min)")
                         self.main_app.refiner_tab._on_setting_changed()
 
-                    self.main_app.tabview.set("✂️  Refinador (Mastercut)")
+                    self.main_app.tabview.set("Refinador Mastercut")
                     if is_arc:
                         msg = (
-                            f"🎬 Mini-Filme / Arco extraído ({format_time(dur_sec)}) e carregado no Refinador!\n\n"
+                            f"Mini-Filme / Arco extraído ({format_time(dur_sec)}) e carregado no Refinador!\n\n"
                             f"Arquivo: {os.path.basename(out_path)}\n\n"
-                            "💡 Opção 'Tratar Mini-Filme / Resumo 50%' pré-selecionada automaticamente!\n"
+                            "Opção 'Tratar Mini-Filme / Resumo 50%' pré-selecionada automaticamente!\n"
                             "Clique em 'Gerar Mastercut' para condensar este arco num resumo cinematográfico de até 2:30 min com o suco da história!"
                         )
                     else:
@@ -1227,7 +1438,7 @@ class DirectorTab(ctk.CTkFrame):
         """Cut the candidate clip and transfer directly to Upscaling tab."""
         orig_text = btn.cget("text") if btn else ""
         if btn:
-            btn.configure(state="disabled", text="⏳ Preparando...")
+            btn.configure(state="disabled", text="Preparando...")
 
         def _worker():
             out_path, err = self._create_cut_file(cand)
@@ -1237,16 +1448,16 @@ class DirectorTab(ctk.CTkFrame):
                     btn.configure(state="normal", text=orig_text)
 
                 if not out_path:
-                    self._log(f"✕ Erro ao preparar corte para o Upscaler: {err}")
+                    self._log(f"[ERRO] Erro ao preparar corte para o Upscaler: {err}")
                     messagebox.showerror("Erro", f"Falha ao gerar o corte do trecho:\n{err}")
                     return
 
-                self._log(f"✓ Corte pronto e transferido para o Upscaler: {out_path}")
+                self._log(f"[OK] Corte pronto e transferido para o Upscaler: {out_path}")
                 if self.main_app:
                     self.main_app._load_video(out_path)
-                    self.main_app.tabview.set("⬆  Upscaling")
+                    self.main_app.tabview.set("Upscaling")
                     self.main_app._set_status(
-                        f"✓ Corte carregado no Upscaler: {os.path.basename(out_path)}",
+                        f"[OK] Corte carregado no Upscaler: {os.path.basename(out_path)}",
                         COLORS["success"]
                     )
                     messagebox.showinfo(

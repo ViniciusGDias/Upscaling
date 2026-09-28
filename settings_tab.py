@@ -25,6 +25,7 @@ from settings_manager import (
     test_openrouter_connection,
     AVAILABLE_GEMINI_MODELS
 )
+import icon_manager
 from engine_manager import (
     check_all_engines,
     download_and_install_ffmpeg
@@ -47,8 +48,8 @@ COLORS = {
     "warning": "#f59e0b",
     "error": "#ef4444",
     "text_primary": "#fafafa",
-    "text_secondary": "#71717a",
-    "text_muted": "#3f3f46",
+    "text_secondary": "#a1a1aa",
+    "text_muted": "#a1a1aa",
     "border": "#27272a",
     "border_active": "#52525b",
     "console_bg": "#050505",
@@ -91,7 +92,8 @@ class SettingsTab(ctk.CTkFrame):
 
         ctk.CTkLabel(
             title_row,
-            text="⚙️ Configurações & Motores",
+            text=" Configurações & Motores",
+            image=icon_manager.get_icon("settings", size=(22, 22), color="#10b981"), compound="left",
             font=ctk.CTkFont(family="Segoe UI", size=22, weight="bold"),
             text_color=COLORS["text_primary"],
         ).pack(side="left")
@@ -140,7 +142,7 @@ class SettingsTab(ctk.CTkFrame):
 
         ctk.CTkLabel(
             top_row,
-            text="🚀 Guia Rápido para Novo Usuário (Primeiros Passos)",
+            text="Guia Rápido para Novo Usuário (Primeiros Passos)",
             font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
             text_color=COLORS["text_primary"],
         ).pack(side="left")
@@ -175,7 +177,7 @@ class SettingsTab(ctk.CTkFrame):
 
         ctk.CTkLabel(
             title_row,
-            text="🧠 Configuração da API & Modelos de IA",
+            text="Configuração da API & Modelos de IA",
             font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"),
             text_color=COLORS["text_primary"],
         ).pack(side="left")
@@ -204,7 +206,7 @@ class SettingsTab(ctk.CTkFrame):
 
         get_gemini_btn = ctk.CTkButton(
             link_row,
-            text="🌐 Obter Chave Grátis no Google AI Studio →",
+            text="Obter Chave Grátis no Google AI Studio ->",
             font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
             fg_color="#18181b",
             hover_color=COLORS["border_active"],
@@ -279,7 +281,7 @@ class SettingsTab(ctk.CTkFrame):
 
         ctk.CTkLabel(
             fb_header,
-            text="🛡️ Provedores de Fallback Gratuito (Anti-Parada)",
+            text="Provedores de Fallback Gratuito (Anti-Parada)",
             font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
             text_color="#4ade80",
         ).pack(side="left")
@@ -311,7 +313,7 @@ class SettingsTab(ctk.CTkFrame):
         self.groq_entry.pack(side="left", fill="x", expand=True, padx=(0, 8))
 
         groq_btn = ctk.CTkButton(
-            groq_row, text="Obter Chave Groq →",
+            groq_row, text="Obter Chave Groq ->",
             font=ctk.CTkFont(family="Segoe UI", size=10),
             fg_color="#1f1f23", hover_color=COLORS["border_active"],
             text_color="#fb923c", corner_radius=6, height=26, width=125,
@@ -338,7 +340,7 @@ class SettingsTab(ctk.CTkFrame):
         self.openrouter_entry.pack(side="left", fill="x", expand=True, padx=(0, 8))
 
         or_btn = ctk.CTkButton(
-            or_row, text="Obter Chave OpenRouter →",
+            or_row, text="Obter Chave OpenRouter ->",
             font=ctk.CTkFont(family="Segoe UI", size=10),
             fg_color="#1f1f23", hover_color=COLORS["border_active"],
             text_color="#c084fc", corner_radius=6, height=26, width=125,
@@ -365,7 +367,7 @@ class SettingsTab(ctk.CTkFrame):
         self.felo_entry.pack(side="left", fill="x", expand=True, padx=(0, 8))
 
         felo_btn = ctk.CTkButton(
-            felo_row, text="Obter Chave Felo →",
+            felo_row, text="Obter Chave Felo ->",
             font=ctk.CTkFont(family="Segoe UI", size=10),
             fg_color="#1f1f23", hover_color=COLORS["border_active"],
             text_color="#34d399", corner_radius=6, height=26, width=125,
@@ -388,7 +390,7 @@ class SettingsTab(ctk.CTkFrame):
 
         self.test_ai_btn = ctk.CTkButton(
             status_row,
-            text="🧪 Testar Conexão",
+            text="Testar Conexão",
             font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
             fg_color="#1f1f23",
             hover_color=COLORS["border_active"],
@@ -402,7 +404,8 @@ class SettingsTab(ctk.CTkFrame):
 
         self.save_settings_btn = ctk.CTkButton(
             status_row,
-            text="💾 Salvar Configurações",
+            text="Salvar Configurações",
+            image=icon_manager.get_icon("check", size=(14, 14), color="#09090b"), compound="left",
             font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
             fg_color=COLORS["accent_primary"],
             hover_color=COLORS["accent_secondary"],
@@ -426,14 +429,15 @@ class SettingsTab(ctk.CTkFrame):
 
         ctk.CTkLabel(
             top_row,
-            text="⚡ Motores & Dependências do Sistema",
+            text="Motores & Dependências do Sistema",
             font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"),
             text_color=COLORS["text_primary"],
         ).pack(side="left")
 
         refresh_engines_btn = ctk.CTkButton(
             top_row,
-            text="🔄 Re-verificar",
+            text="Re-verificar",
+            image=icon_manager.get_icon("refresh", size=(13, 13)), compound="left",
             font=ctk.CTkFont(family="Segoe UI", size=10),
             fg_color="#18181b",
             hover_color=COLORS["border_active"],
@@ -477,7 +481,7 @@ class SettingsTab(ctk.CTkFrame):
 
         ctk.CTkLabel(
             top_row,
-            text="🚀 Atualizações do Aplicativo",
+            text="Atualizações do Aplicativo",
             font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"),
             text_color=COLORS["text_primary"],
         ).pack(side="left")
@@ -503,7 +507,8 @@ class SettingsTab(ctk.CTkFrame):
 
         self.download_update_btn = ctk.CTkButton(
             body_row,
-            text="⬇️ Baixar Nova Versão",
+            text="Baixar Nova Versão",
+            image=icon_manager.get_icon("download", size=(14, 14), color="#ffffff"), compound="left",
             font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
             fg_color=COLORS["success"],
             hover_color="#16a34a",
@@ -515,7 +520,7 @@ class SettingsTab(ctk.CTkFrame):
 
         self.check_update_btn = ctk.CTkButton(
             body_row,
-            text="🔄 Verificar Agora",
+            text="Verificar Agora",
             font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
             fg_color="#1f1f23",
             hover_color=COLORS["border_active"],
@@ -604,11 +609,11 @@ class SettingsTab(ctk.CTkFrame):
         )
 
         if success:
-            self.ai_test_status.configure(text=f"✓ {msg}", text_color=COLORS["success"])
-            self._log(f"✓ Configurações salvas. {msg}")
+            self.ai_test_status.configure(text=f"[OK] {msg}", text_color=COLORS["success"])
+            self._log(f"[OK] Configurações salvas. {msg}")
             messagebox.showinfo("Configurações Salvas", f"{msg}\n\nTodas as ferramentas já estão utilizando as novas configurações.")
         else:
-            self.ai_test_status.configure(text=f"✕ {msg}", text_color=COLORS["error"])
+            self.ai_test_status.configure(text=f"[FALHA] {msg}", text_color=COLORS["error"])
             messagebox.showerror("Erro ao Salvar", msg)
 
     def _test_api_connection(self):
@@ -621,7 +626,7 @@ class SettingsTab(ctk.CTkFrame):
             messagebox.showwarning("Nenhuma Chave", "Por favor, insira ao menos uma chave da API do Gemini ou Groq antes de testar.")
             return
 
-        self.test_ai_btn.configure(state="disabled", text="⏳ Testando...")
+        self.test_ai_btn.configure(state="disabled", text="Testando...")
         self.ai_test_status.configure(text="Conectando aos servidores do Google / Groq...", text_color=COLORS["warning"])
 
         def _worker():
@@ -642,16 +647,16 @@ class SettingsTab(ctk.CTkFrame):
                 results.append(("Groq", ok_groq, msg_groq))
 
             def _update_ui():
-                self.test_ai_btn.configure(state="normal", text="🧪 Testar Conexão")
+                self.test_ai_btn.configure(state="normal", text="Testar Conexão")
                 all_ok = all(ok for _, ok, _ in results)
-                status_texts = [f"{name}: {'✓ ' if ok else '✕ '}{m}" for name, ok, m in results]
+                status_texts = [f"{name}: {'[OK] ' if ok else '[FALHA] '}{m}" for name, ok, m in results]
                 combined_msg = " | ".join(status_texts)
                 self.ai_test_status.configure(
                     text=combined_msg,
                     text_color=COLORS["success"] if all_ok else COLORS["warning"]
                 )
                 if all_ok:
-                    messagebox.showinfo("Teste de Conexão Bem-Sucedido! ✓", f"Tudo funcionando perfeitamente:\n\n" + "\n".join(status_texts))
+                    messagebox.showinfo("Teste de Conexão Bem-Sucedido!", f"Tudo funcionando perfeitamente:\n\n" + "\n".join(status_texts))
                 else:
                     messagebox.showwarning("Resultado do Teste", "\n".join(status_texts))
 
@@ -669,29 +674,29 @@ class SettingsTab(ctk.CTkFrame):
         # 1. FFmpeg
         ff = engines["ffmpeg"]
         self._render_engine_card(
-            title="🎬 FFmpeg & FFprobe (Processador de Vídeo e Áudio)",
+            title="FFmpeg & FFprobe (Processador de Vídeo e Áudio)",
             desc="Essencial para cortes, renderização, separação e compressão de mídia.",
             is_ok=ff["installed"],
             detail=f"Versão: {ff['version']} ({ff['path']})" if ff["installed"] else "Não encontrado no sistema.",
-            action_btn_text="⬇️ Baixar FFmpeg Automaticamente (1-Clique)" if not ff["installed"] else None,
+            action_btn_text="Baixar FFmpeg Automaticamente (1-Clique)" if not ff["installed"] else None,
             action_cmd=self._auto_download_ffmpeg if not ff["installed"] else None,
         )
 
         # 2. Real-CUGAN
         cugan = engines["realcugan"]
         self._render_engine_card(
-            title="⚡ Real-CUGAN Vulkan (Motor 4K para Anime)",
+            title="Real-CUGAN Vulkan (Motor 4K para Anime)",
             desc="Upscaling ultrarrápido para animes e desenhos com modelos Pro e SE.",
             is_ok=cugan["installed"],
             detail="Binário e modelos prontos em ./bin/realcugan/" if cugan["installed"] else "Motor sob demanda (~14 MB). Baixe se for usar upscaling.",
-            action_btn_text="⬇️ Baixar Motor 4K (~14 MB)" if not cugan["installed"] else None,
+            action_btn_text="Baixar Motor 4K (~14 MB)" if not cugan["installed"] else None,
             action_cmd=self._auto_download_realcugan if not cugan["installed"] else None,
         )
 
         # 3. CUDA & GPU
         cuda = engines["cuda"]
         if cuda["has_gpu"]:
-            gpu_status_tag = f"✓ {cuda['device_name']}"
+            gpu_status_tag = f"[GPU] {cuda['device_name']}"
             if cuda["vram_gb"] > 0:
                 gpu_status_tag += f" ({cuda['vram_gb']} GB VRAM)"
             gpu_detail = "Placa NVIDIA detectada. Aceleração Vulkan (Real-CUGAN) e NVENC 100% ativas."
@@ -702,18 +707,18 @@ class SettingsTab(ctk.CTkFrame):
             gpu_detail = "Nenhuma GPU NVIDIA detectada. Processamento em CPU."
 
         self._render_engine_card(
-            title="🖥️ Aceleração por Hardware (GPU / CUDA)",
+            title="Aceleração por Hardware (GPU / CUDA)",
             desc="Processamento acelerado por placa de vídeo NVIDIA.",
             is_ok=cuda["has_gpu"],
             detail=f"{gpu_status_tag} · {gpu_detail}",
-            action_btn_text="📖 Como Instalar PyTorch CUDA" if (cuda["has_gpu"] and not cuda["torch_cuda"]) else None,
+            action_btn_text="Como Instalar PyTorch CUDA" if (cuda["has_gpu"] and not cuda["torch_cuda"]) else None,
             action_cmd=self._show_pytorch_cuda_dialog if (cuda["has_gpu"] and not cuda["torch_cuda"]) else None,
         )
 
         # 4. Whisper
         wh = engines["whisper"]
         self._render_engine_card(
-            title="🧠 Faster-Whisper (Transcrição e Sincronia de Falas)",
+            title="Faster-Whisper (Transcrição e Sincronia de Falas)",
             desc="Mapeamento de palavras e legendas com timestamps exatos.",
             is_ok=wh["available"],
             detail=wh.get("detail", "Pronto para uso local."),
@@ -722,11 +727,11 @@ class SettingsTab(ctk.CTkFrame):
         # 5. Demucs
         dem = engines["demucs"]
         self._render_engine_card(
-            title="🎧 Demucs (Separação Vocal e Instrumental Meta AI)",
+            title="Demucs (Separação Vocal e Instrumental Meta AI)",
             desc="Isolamento de vozes e trilhas sonoras (Opcional).",
             is_ok=dem["available"],
             detail="Pronto para isolamento de canais." if dem["available"] else "Motor opcional não instalado. Requer PyTorch CUDA.",
-            action_btn_text="📖 Como Instalar Demucs" if not dem["available"] else None,
+            action_btn_text="Como Instalar Demucs" if not dem["available"] else None,
             action_cmd=self._show_pytorch_cuda_dialog if not dem["available"] else None,
         )
 
@@ -744,13 +749,13 @@ class SettingsTab(ctk.CTkFrame):
         # Title
         ctk.CTkLabel(
             dialog,
-            text="⚡ Motores Opcionais: PyTorch (CUDA) & Demucs",
+            text="Motores Opcionais: PyTorch (CUDA) & Demucs",
             font=ctk.CTkFont(family="Segoe UI", size=15, weight="bold"),
             text_color=COLORS["text_primary"],
         ).pack(anchor="w", padx=20, pady=(18, 4))
 
         info_text = (
-            "💡 Dica de Hardware (GTX 1650 / RTX / etc):\n"
+            "Dica de Hardware (GTX 1650 / RTX / etc):\n"
             "• O Real-CUGAN (Upscaler 4K) e o Faster-Whisper já rodam nativamente acelerados pela sua GPU via Vulkan e CTranslate2, sem necessidade do PyTorch!\n"
             "• O PyTorch com CUDA só é necessário caso você queira usar a aba 'Separação de Áudio' (Demucs) ou modelos pesados de Real-ESRGAN.\n"
             "• Para manter o instalador base do Urahara ultraleve (213 MB em vez de 2 GB), você pode instalar o PyTorch quando desejar usando os passos abaixo:"
@@ -789,12 +794,12 @@ class SettingsTab(ctk.CTkFrame):
             self.clipboard_clear()
             self.clipboard_append(cmd_text)
             self.update()
-            copy_btn.configure(text="✓ Comando Copiado!", fg_color=COLORS["success"])
-            self.after(2500, lambda: copy_btn.configure(text="📋 Copiar Comando", fg_color=COLORS["accent_primary"]))
+            copy_btn.configure(text="Comando Copiado!", fg_color=COLORS["success"])
+            self.after(2500, lambda: copy_btn.configure(text="Copiar Comando", fg_color=COLORS["accent_primary"]))
 
         copy_btn = ctk.CTkButton(
             btn_row,
-            text="📋 Copiar Comando",
+            text="Copiar Comando",
             font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
             fg_color=COLORS["accent_primary"],
             hover_color=COLORS["accent_secondary"],
@@ -807,7 +812,7 @@ class SettingsTab(ctk.CTkFrame):
         def _generate_bat():
             bat_p = create_pytorch_install_script()
             messagebox.showinfo(
-                "Script Criado com Sucesso! ✓",
+                "Script Criado com Sucesso!",
                 f"O arquivo de instalação em 1-clique foi gerado em:\n{bat_p}\n\nBasta dar 2 cliques nele para instalar o PyTorch CUDA e Demucs automaticamente!"
             )
             import subprocess
@@ -815,7 +820,7 @@ class SettingsTab(ctk.CTkFrame):
 
         bat_btn = ctk.CTkButton(
             btn_row,
-            text="⚡ Gerar Script .bat na Pasta do App",
+            text="Gerar Script .bat na Pasta do App",
             font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
             fg_color="#1f1f23",
             hover_color=COLORS["border_active"],
@@ -827,7 +832,7 @@ class SettingsTab(ctk.CTkFrame):
 
         web_btn = ctk.CTkButton(
             btn_row,
-            text="🌐 Site do PyTorch →",
+            text="Site do PyTorch ->",
             font=ctk.CTkFont(family="Segoe UI", size=11),
             fg_color="transparent",
             hover_color="#18181b",
@@ -850,7 +855,7 @@ class SettingsTab(ctk.CTkFrame):
         title_frame = ctk.CTkFrame(left, fg_color="transparent")
         title_frame.pack(fill="x")
 
-        status_tag = "✓ Pronto" if is_ok else "⚠️ Pendente"
+        status_tag = "[PRONTO]" if is_ok else "[PENDENTE]"
         tag_color = COLORS["success"] if is_ok else COLORS["warning"]
 
         ctk.CTkLabel(
@@ -904,7 +909,7 @@ class SettingsTab(ctk.CTkFrame):
                 self.engine_prog_frame.pack_forget()
                 self.refresh_engine_status()
                 if success:
-                    messagebox.showinfo("FFmpeg Instalado! ✓", f"{msg}\n\nO FFmpeg já está disponível e pronto para uso em todas as abas.")
+                    messagebox.showinfo("FFmpeg Instalado!", f"{msg}\n\nO FFmpeg já está disponível e pronto para uso em todas as abas.")
                     if self.main_app and hasattr(self.main_app, "_check_ffmpeg"):
                         self.main_app._check_ffmpeg()
                 else:
@@ -931,7 +936,7 @@ class SettingsTab(ctk.CTkFrame):
                 self.engine_prog_frame.pack_forget()
                 self.refresh_engine_status()
                 if success:
-                    messagebox.showinfo("Real-CUGAN Instalado! ✓", f"{msg}\n\nO motor 4K para animes já está pronto para uso!")
+                    messagebox.showinfo("Real-CUGAN Instalado!", f"{msg}\n\nO motor 4K para animes já está pronto para uso!")
                 else:
                     messagebox.showerror("Erro no Download", msg)
             self.after(0, _done)
@@ -941,32 +946,32 @@ class SettingsTab(ctk.CTkFrame):
 
     def _check_for_updates_ui(self):
         """User clicked 'Verificar Agora' button."""
-        self.check_update_btn.configure(state="disabled", text="⏳ Verificando...")
+        self.check_update_btn.configure(state="disabled", text="Verificando...")
         self.update_status_label.configure(text="Consultando lançamentos no GitHub...", text_color=COLORS["warning"])
 
         def _worker():
             res = check_for_updates()
 
             def _update():
-                self.check_update_btn.configure(state="normal", text="🔄 Verificar Agora")
-                if res["has_update"]:
-                    self._latest_download_url = res["download_url"]
+                self.check_update_btn.configure(state="normal", text="Verificar Agora")
+                if res.get("has_update"):
+                    self._latest_download_url = res.get("download_url")
+                    latest = res.get("latest_version")
                     self.update_status_label.configure(
-                        text=f"🚀 Nova versão disponível: v{res['latest_version']} (Você está na v{CURRENT_VERSION})",
+                        text=f"Nova versão disponível: v{latest} (Você está na v{CURRENT_VERSION})",
                         text_color=COLORS["success"]
                     )
-                    self.download_update_btn.pack(side="right", padx=(0, 8))
-                    msg_box = (
-                        f"Uma nova versão ({res['release_title']}) foi lançada!\n\n"
-                        f"Versão Atual: v{CURRENT_VERSION}\n"
-                        f"Nova Versão: v{res['latest_version']}\n\n"
-                        f"Deseja abrir a página de download agora?"
+                    self.download_update_btn.configure(
+                        text=f"Atualizar para v{latest} (Direto no App)",
+                        command=lambda r=res: self._open_update_dialog(r)
                     )
-                    if messagebox.askyesno("Atualização Disponível!", msg_box):
-                        open_download_page(res["download_url"])
+                    self.download_update_btn.pack(side="right", padx=(0, 8))
+
+                    # Abre o diálogo interativo de atualização in-app
+                    self._open_update_dialog(res)
                 else:
                     self.update_status_label.configure(
-                        text=f"✓ Você já está utilizando a versão mais recente (v{CURRENT_VERSION}).",
+                        text=f"Você já está utilizando a versão mais recente (v{CURRENT_VERSION}).",
                         text_color=COLORS["text_secondary"]
                     )
                     self.download_update_btn.pack_forget()
@@ -975,3 +980,11 @@ class SettingsTab(ctk.CTkFrame):
             self.after(0, _update)
 
         threading.Thread(target=_worker, daemon=True).start()
+
+    def _open_update_dialog(self, res: dict):
+        """Abre o diálogo de atualização com download direto e barra de progresso."""
+        try:
+            from update_dialog import UpdateDialog
+            UpdateDialog(self.winfo_toplevel(), res)
+        except Exception:
+            open_download_page(res.get("download_url"))

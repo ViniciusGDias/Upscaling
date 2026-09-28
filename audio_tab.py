@@ -6,6 +6,7 @@ import customtkinter as ctk
 from tkinter import filedialog, messagebox
 import os
 import time
+import icon_manager
 
 from audio_separator import (
     AudioSeparator,
@@ -30,8 +31,8 @@ COLORS = {
     "warning": "#f59e0b",
     "error": "#ef4444",
     "text_primary": "#fafafa",
-    "text_secondary": "#71717a",
-    "text_muted": "#3f3f46",
+    "text_secondary": "#a1a1aa",
+    "text_muted": "#a1a1aa",
     "border": "#27272a",
     "border_active": "#52525b",
     "console_bg": "#050505",
@@ -80,7 +81,8 @@ class AudioSeparationTab(ctk.CTkFrame):
         row.pack(fill="x")
 
         ctk.CTkLabel(
-            row, text="🎧  Separação de Áudio",
+            row, text=" Separação de Áudio",
+            image=icon_manager.get_icon("audio", size=(24, 24), color="#10b981"), compound="left",
             font=ctk.CTkFont(family="Segoe UI", size=24, weight="bold"),
             text_color=COLORS["text_primary"],
         ).pack(side="left")
@@ -107,7 +109,7 @@ class AudioSeparationTab(ctk.CTkFrame):
         card.pack(fill="x", pady=(0, 10))
 
         ctk.CTkLabel(
-            card, text="📁  Arquivo de Entrada (Áudio ou Vídeo)",
+            card, text="Arquivo de Entrada (Áudio ou Vídeo)",
             font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"),
             text_color=COLORS["text_primary"], anchor="w",
         ).pack(fill="x", padx=16, pady=(12, 8))
@@ -139,7 +141,7 @@ class AudioSeparationTab(ctk.CTkFrame):
         # Hidden initially
 
         ctk.CTkLabel(
-            self.info_card, text="🎵  Informações do Áudio",
+            self.info_card, text="Informações do Áudio",
             font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"),
             text_color=COLORS["text_primary"], anchor="w",
         ).pack(fill="x", padx=16, pady=(12, 8))
@@ -175,7 +177,7 @@ class AudioSeparationTab(ctk.CTkFrame):
         card.pack(fill="x", pady=(0, 10))
 
         ctk.CTkLabel(
-            card, text="⚙️  Configurações de Separação",
+            card, text="Configurações de Separação",
             font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"),
             text_color=COLORS["text_primary"], anchor="w",
         ).pack(fill="x", padx=16, pady=(12, 8))
@@ -216,7 +218,7 @@ class AudioSeparationTab(ctk.CTkFrame):
         # Mode descriptions
         desc = ctk.CTkLabel(
             card,
-            text="💡 Dica: 'Só a Voz' isola diálogos. 'Só Instrumental' remove a voz. "
+            text="Dica: 'Só a Voz' isola diálogos. 'Só Instrumental' remove a voz. "
                  "'Voz + Efeitos' mantém a voz e sons ambiente sem a música.",
             font=ctk.CTkFont(size=11), text_color=COLORS["text_muted"],
             anchor="w", wraplength=700,
@@ -229,7 +231,7 @@ class AudioSeparationTab(ctk.CTkFrame):
         card.pack(fill="x", pady=(0, 10))
 
         ctk.CTkLabel(
-            card, text="💾  Pasta de Saída",
+            card, text="Pasta de Saída",
             font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"),
             text_color=COLORS["text_primary"], anchor="w",
         ).pack(fill="x", padx=16, pady=(12, 8))
@@ -260,7 +262,8 @@ class AudioSeparationTab(ctk.CTkFrame):
         af.pack(fill="x", pady=(12, 12))
 
         self.start_btn = ctk.CTkButton(
-            af, text="🎧  Iniciar Separação",
+            af, text="Iniciar Separação",
+            image=icon_manager.get_icon("play", size=(16, 16), color="#09090b"), compound="left",
             font=ctk.CTkFont(family="Segoe UI", size=15, weight="bold"),
             fg_color=COLORS["accent_primary"], hover_color=COLORS["accent_secondary"],
             text_color="#09090b",
@@ -269,7 +272,7 @@ class AudioSeparationTab(ctk.CTkFrame):
         self.start_btn.pack(side="left", fill="x", expand=True, padx=(0, 8))
 
         self.cancel_btn = ctk.CTkButton(
-            af, text="✕  Cancelar",
+            af, text="Cancelar",
             font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
             fg_color=COLORS["bg_card"], hover_color=COLORS["bg_card_hover"],
             border_width=1, border_color=COLORS["border"],
@@ -285,7 +288,7 @@ class AudioSeparationTab(ctk.CTkFrame):
         # Hidden initially
 
         ctk.CTkLabel(
-            self.progress_card, text="📊  Progresso",
+            self.progress_card, text="Progresso",
             font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"),
             text_color=COLORS["text_primary"], anchor="w",
         ).pack(fill="x", padx=16, pady=(12, 8))
@@ -414,7 +417,7 @@ class AudioSeparationTab(ctk.CTkFrame):
                 from engine_manager import create_pytorch_install_script
                 bat_p = create_pytorch_install_script()
                 messagebox.showinfo(
-                    "Script Criado com Sucesso! ✓",
+                    "Script Criado com Sucesso!",
                     f"O instalador rápido foi gerado em:\n{bat_p}\n\n"
                     "Basta dar 2 cliques no arquivo 'instalar_motores_ia.bat' para instalar o PyTorch CUDA e o Demucs automaticamente no seu Windows!"
                 )
@@ -442,7 +445,7 @@ class AudioSeparationTab(ctk.CTkFrame):
         fmt = OUTPUT_FORMATS[fmt_key]
 
         self.is_processing = True
-        self.start_btn.configure(state="disabled", text="⏳  Processando...")
+        self.start_btn.configure(state="disabled", text="Processando...")
         self.cancel_btn.configure(state="normal")
 
         if not self.progress_card.winfo_ismapped():
@@ -478,7 +481,7 @@ class AudioSeparationTab(ctk.CTkFrame):
     def _cancel(self):
         if self.is_processing and messagebox.askyesno("Cancelar", "Cancelar a separação?"):
             self.separator.cancel()
-            self._on_log("⚠ Cancelamento solicitado...")
+            self._on_log("[AVISO] Cancelamento solicitado...")
 
     def _on_progress(self, pct, status):
         self.after(0, self._update_progress, pct, status)
@@ -497,7 +500,7 @@ class AudioSeparationTab(ctk.CTkFrame):
     def _finish(self, success, msg):
         self.is_processing = False
         self._stop_elapsed()
-        self.start_btn.configure(state="normal", text="🎧  Iniciar Separação")
+        self.start_btn.configure(state="normal", text="Iniciar Separação")
         self.cancel_btn.configure(state="disabled")
 
         elapsed = time.time() - self._start_time
@@ -506,15 +509,15 @@ class AudioSeparationTab(ctk.CTkFrame):
         if success:
             self.progress_bar.set(1.0)
             self.pct_label.configure(text="100%")
-            self.status_label.configure(text="✓ Concluído!")
+            self.status_label.configure(text="[OK] Concluído!")
             self._log(f"Tempo total: {format_time(elapsed)}")
 
             output_dir = self.output_entry.get().strip()
-            if messagebox.askyesno("Concluído! ✓", f"{msg}\n\nAbrir pasta?"):
+            if messagebox.askyesno("Concluído!", f"{msg}\n\nAbrir pasta?"):
                 os.startfile(output_dir)
         else:
-            self.status_label.configure(text="✕ Falhou")
-            self._log(f"✕ ERRO: {msg}")
+            self.status_label.configure(text="[FALHA] Falhou")
+            self._log(f"[ERRO]: {msg}")
             messagebox.showerror("Erro", msg)
 
     def _update_elapsed(self):

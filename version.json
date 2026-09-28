@@ -1,8 +1,16 @@
 {
-  "version": "1.0.2",
+  "version": "1.0.3",
   "name": "Urahara",
-  "release_date": "2026-09-14",
+  "release_date": "2026-09-28",
   "changelog": [
+    "Gerador & Editor de Thumbnail do Shorts (1080x1920): Prévia visual direta na tela, seletor de segundo/frame exato, copiar para área de transferência e salvar em 1 clique.",
+    "6 Modos Especializados no Diretor IA: Contínuo (30-75s), Contexto In Media Res (45-90s), Mini-Filme (2-5m), Série em Partes (1, 2, 3), Corte Dinâmico e Duelo Verbal & Revelação.",
+    "Blindagem de Títulos com Descrição de Cena: Títulos virais compostos ricos com identificação explícita de personagens e ação dramática em toda a interface.",
+    "Otimização Extrema de Tokens (0 Tokens em Reuso): Cache persistente instantâneo para cortes e transcrições já analisadas.",
+    "Blindagem Anti-Copyright 2026: Fatiamento em pausas de respiração para cortes contínuos do Diretor IA.",
+    "Cache Persistente de Origem de Corte: O Refinador reconhece e protege cortes de episódios automaticamente até remoção manual.",
+    "Pacote Viral 2026: Dynamic Breathing Camera Zoom, Granulação Fina e Micro-EQ DSP Anti-SoundMatch.",
+    "Atualizador In-App 100% Automático: Download direto no app com barra de progresso e reinício automático sem abrir o navegador.",
     "Novo modo Mini-Filme no Diretor IA: cortes contextuais de até 5 minutos com retenção máxima.",
     "Novo modo Tratar Mini-Filme no Refinador: resumo inteligente e contextual em 50% (máx 2:30 min).",
     "Correção de faixas e metadados fantasmas no FFmpeg: elimina divergência de duração exibida nos players.",
@@ -11,7 +19,7 @@
     "Terminal de progresso e log de eventos restaurado e visível em tempo real no Refinador.",
     "Opção de Loop Contextual vs Sem Loop no Refinador (Mastercut com replay contínuo).",
     "Correção definitiva de dessincronização labial e áudio no modo Anti-Copyright.",
-    "Instalador ultra-leve (~213 MB) com inicialização instantânea.",
+    "Instalador ultra-leve com inicialização instantânea.",
     "Motores opcionais sob demanda (Real-CUGAN 4K e FFmpeg instaláveis em 1 clique).",
     "Suporte nativo a placas NVIDIA GTX 1650 (CTranslate2 e Vulkan sem estouro de VRAM)."
   ],

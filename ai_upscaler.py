@@ -20,6 +20,7 @@ import shutil
 import threading
 import tempfile
 import sys
+import time
 import types
 from typing import Callable, Optional
 
@@ -548,6 +549,47 @@ class AIVideoUpscaler:
                 _log("─────────────────────────")
                 _log("🎞️ Extraindo frames do vídeo...")
 
+                # ── Pre-flight: clean orphan temp dirs from crashed runs ────
+                _temp_root = tempfile.gettempdir()
+                _cleaned_gb = 0.0
+                try:
+                    for _entry in os.listdir(_temp_root):
+                        if _entry.startswith("ai_upscale_"):
+                            _orphan = os.path.join(_temp_root, _entry)
+                            try:
+                                _sz = sum(
+                                    os.path.getsize(os.path.join(r, f))
+                                    for r, _, files in os.walk(_orphan)
+                                    for f in files
+                                )
+                                shutil.rmtree(_orphan, ignore_errors=True)
+                                _cleaned_gb += _sz / (1024 ** 3)
+                            except Exception:
+                                pass
+                    if _cleaned_gb > 0.05:
+                        _log(f"🧹 Limpeza automática: {_cleaned_gb:.1f} GB de pastas temporárias antigas removidas.")
+                except Exception:
+                    pass
+
+                # ── Pre-flight: disk space check ────────────────────────────
+                try:
+                    _disk = shutil.disk_usage(_temp_root)
+                    _free_gb = _disk.free / (1024 ** 3)
+                    if _free_gb < 5:
+                        err_disk = (
+                            f"💾 DISCO QUASE CHEIO! Apenas {_free_gb:.1f} GB livres em {_temp_root}.\n"
+                            "   O upscaling precisa de 15–80 GB de espaço temporário.\n"
+                            "   ➜ Libere espaço ou altere a variável TEMP para outro disco com mais espaço."
+                        )
+                        _log(err_disk)
+                        if on_complete:
+                            on_complete(False, f"❌ Disco cheio ({_free_gb:.1f} GB livres). Libere espaço e tente novamente.")
+                        return
+                    elif _free_gb < 20:
+                        _log(f"⚠️  Aviso: apenas {_free_gb:.1f} GB livres em disco. Vídeos longos podem falhar por falta de espaço.")
+                except Exception:
+                    pass
+
                 tmp_dir = tempfile.mkdtemp(prefix="ai_upscale_")
                 tmp_frames_dir = os.path.join(tmp_dir, "frames")
                 tmp_upscaled_dir = os.path.join(tmp_dir, "upscaled")
@@ -801,9 +843,20 @@ class AIVideoUpscaler:
                 )
                 if result.returncode != 0:
                     err_msg = result.stderr.decode(errors='replace') if result.stderr else "Erro desconhecido"
-                    _log(f"✕ Erro ao recompilar: {err_msg[-300:]}")
-                    if on_complete:
-                        on_complete(False, "Erro ao recompilar o vídeo.")
+                    # Detect disk-full condition and show a clear message
+                    err_lower = err_msg.lower()
+                    if "no space left on device" in err_lower or "not enough space" in err_lower or "enospc" in err_lower:
+                        disk_msg = (
+                            "💾 DISCO CHEIO! Não há espaço suficiente em disco para salvar o vídeo upscalado.\n"
+                            "   ➜ Libere espaço no disco de saída ou escolha uma pasta de saída em outro disco com mais espaço."
+                        )
+                        _log(disk_msg)
+                        if on_complete:
+                            on_complete(False, "❌ Disco cheio! Libere espaço e tente novamente.")
+                    else:
+                        _log(f"✕ Erro ao recompilar: {err_msg[-300:]}")
+                        if on_complete:
+                            on_complete(False, "Erro ao recompilar o vídeo.")
                     return
 
                 # ── Step 5: Merge audio ─────────────────────────────────────
