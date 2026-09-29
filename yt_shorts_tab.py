@@ -542,13 +542,28 @@ class YTShortsAnalyzerTab(ctk.CTkFrame):
         except Exception as e:
             self._log(f"Erro ao adaptar para Instagram: {e}")
 
-    def _show_loading_state(self):
-        """Exibe card de carregamento com animação enquanto a IA processa o vídeo."""
-        for w in self.right_scroll.winfo_children():
+    def _clear_results_panel(self):
+        """Limpa de forma 100% segura todos os widgets de resultados sem quebrar referências internas."""
+        if hasattr(self, "analysis_pbar") and self.analysis_pbar:
             try:
-                w.destroy()
+                self.analysis_pbar.stop()
             except Exception:
                 pass
+            self.analysis_pbar = None
+
+        self._active_thumb_card = None
+        self.placeholder_frame = None
+
+        for w in list(self.right_scroll.winfo_children()):
+            try:
+                if w.winfo_exists():
+                    w.destroy()
+            except Exception:
+                pass
+
+    def _show_loading_state(self):
+        """Exibe card de carregamento com animação enquanto a IA processa o vídeo."""
+        self._clear_results_panel()
 
         card = ctk.CTkFrame(self.right_scroll, fg_color=COLOR_CARD, corner_radius=10, border_width=1, border_color="#8b5cf6")
         card.pack(fill="x", padx=12, pady=40)
@@ -587,11 +602,7 @@ class YTShortsAnalyzerTab(ctk.CTkFrame):
 
     def _render_error_card(self, error_msg: str, raw_response: str = ""):
         """Renderiza card de erro seguro com botões de recuperação para nunca deixar a tela preta."""
-        for w in self.right_scroll.winfo_children():
-            try:
-                w.destroy()
-            except Exception:
-                pass
+        self._clear_results_panel()
 
         err_box = ctk.CTkFrame(self.right_scroll, fg_color=COLOR_CARD, corner_radius=10, border_width=1, border_color="#ef4444")
         err_box.pack(fill="x", padx=10, pady=20)
@@ -641,11 +652,7 @@ class YTShortsAnalyzerTab(ctk.CTkFrame):
         tb.configure(state="disabled")
 
     def _render_results(self, data: dict):
-        for w in self.right_scroll.winfo_children():
-            try:
-                w.destroy()
-            except Exception:
-                pass
+        self._clear_results_panel()
 
         if not data or ("video_analysis" not in data and "optimization" not in data) or data.get("parse_error"):
             raw = str(data.get("raw_response", data) if data else "Resposta vazia da API")
@@ -656,8 +663,10 @@ class YTShortsAnalyzerTab(ctk.CTkFrame):
         try:
             self._render_results_content(data)
         except Exception as e:
-            self._log(f"[ERRO] Erro ao renderizar resultados: {e}")
-            self._render_error_card(f"Erro visual ao montar interface: {e}")
+            import traceback
+            tb = traceback.format_exc()
+            self._log(f"[ERRO] Erro ao renderizar resultados: {e}\n{tb}")
+            self._render_error_card(f"Erro visual ao montar interface: {e}", raw_response=tb)
 
     def _render_results_content(self, data: dict):
         # ── Card de Capa de Alto CTR (1080x1920) ──
@@ -1128,8 +1137,11 @@ class YTShortsAnalyzerTab(ctk.CTkFrame):
                 t = titles[0]
                 title = t.get("title", "") if isinstance(t, dict) else str(t)
 
-        if hasattr(self, "placeholder_frame") and self.placeholder_frame.winfo_ismapped():
-            self.placeholder_frame.pack_forget()
+        try:
+            if hasattr(self, "placeholder_frame") and self.placeholder_frame and self.placeholder_frame.winfo_exists():
+                self.placeholder_frame.pack_forget()
+        except Exception:
+            pass
 
         self._reextract_thumb(timestamp_sec=sec, overlay_text=title)
 
@@ -1282,15 +1294,20 @@ class YTShortsAnalyzerTab(ctk.CTkFrame):
         self._current_text_style = text_style
 
         # Esconde placeholder
-        if hasattr(self, "placeholder_frame") and self.placeholder_frame.winfo_ismapped():
-            self.placeholder_frame.pack_forget()
+        try:
+            if hasattr(self, "placeholder_frame") and self.placeholder_frame and self.placeholder_frame.winfo_exists():
+                self.placeholder_frame.pack_forget()
+        except Exception:
+            pass
 
         # Remove card anterior se existir
-        if hasattr(self, "_active_thumb_card") and self._active_thumb_card and self._active_thumb_card.winfo_exists():
+        if hasattr(self, "_active_thumb_card") and self._active_thumb_card:
             try:
-                self._active_thumb_card.destroy()
+                if self._active_thumb_card.winfo_exists():
+                    self._active_thumb_card.destroy()
             except Exception:
                 pass
+            self._active_thumb_card = None
 
         thumb_card = ctk.CTkFrame(self.right_scroll, fg_color="#141108", corner_radius=12, border_width=1, border_color="#f59e0b")
         thumb_card.pack(fill="x", padx=5, pady=(0, 10))
