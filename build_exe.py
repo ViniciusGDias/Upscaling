@@ -58,6 +58,7 @@ PyInstaller.__main__.run([
     f'--add-data={ctk_path};customtkinter/',
     '--hidden-import=windnd',
     '--hidden-import=soundfile',
+    '--hidden-import=pygame',
     '--exclude-module=torch',
     '--exclude-module=torchvision',
     '--exclude-module=torchaudio',

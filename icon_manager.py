@@ -86,6 +86,16 @@ def _draw_vector_canvas(name: str, color: str) -> Image.Image:
         for bx, top, bot in bars:
             d.line([_pt(bx, top), _pt(bx, bot)], fill=color, width=bw)
 
+    elif name_clean in ("volume", "speaker", "audio_on"):
+        d.polygon([_pt(4, 9), _pt(8, 9), _pt(13, 5), _pt(13, 19), _pt(8, 15), _pt(4, 15)], fill=color)
+        d.arc(_box(11, 7, 18, 17), start=-45, end=45, fill=color, width=lw)
+        d.arc(_box(9, 4, 21, 20), start=-45, end=45, fill=color, width=lw)
+
+    elif name_clean in ("mute", "volume_x", "volume_off"):
+        d.polygon([_pt(4, 9), _pt(8, 9), _pt(13, 5), _pt(13, 19), _pt(8, 15), _pt(4, 15)], fill=color)
+        d.line([_pt(16, 9), _pt(21, 15)], fill=color, width=lw)
+        d.line([_pt(21, 9), _pt(16, 15)], fill=color, width=lw)
+
     elif name_clean in ("instagram", "camera"):
         d.rounded_rectangle(_box(4, 4, 20, 20), radius=int(4.5 * s), outline=color, width=lw)
         d.ellipse(_box(8.5, 8.5, 15.5, 15.5), outline=color, width=lw)

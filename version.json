@@ -1,8 +1,10 @@
 {
-  "version": "1.0.3",
+  "version": "1.0.4",
   "name": "Urahara",
   "release_date": "2026-09-28",
   "changelog": [
+    "Áudio Sincronizado nos Mini-Players Integrados: Reprodução de som estéreo real com controle de Mute/Volume instantâneo e sincronização perfeita nos players do Studio, YouTube Shorts, Instagram Reels e Revisor de Legendas.",
+    "Correção definitiva de 'bad window path name' no renderizador de resultados de IA das abas de Shorts e Reels.",
     "Mini-Player de Vídeo Integrado no Studio & Revisor de Legendas: Assista e sincronize as falas em tempo real com controle de linha do tempo e scrub frame-a-frame.",
     "Correção Anti-Tela Preta na Análise de YouTube Shorts & Instagram Reels: Card de carregamento animado em tempo real e tratamento de erros com recuperação de 1 clique.",
     "Thumbnail Studio 9:16 para YouTube Shorts: Enquadramento com foco no personagem, blur lateral, tipografia viral e safe zones.",
