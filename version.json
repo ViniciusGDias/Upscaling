@@ -1,8 +1,12 @@
 {
-  "version": "1.0.5",
+  "version": "1.0.6",
   "name": "Urahara",
-  "release_date": "2026-09-29",
+  "release_date": "2026-09-30",
   "changelog": [
+    "Refinador com 4 Estilos Editoriais & Retenção Viral: Linear Direto, Hook de Abertura (Anti-Início Lento), Loop Contextual (Replay Infinito) e Edição Viral Pro (Super Senior Editor).",
+    "Hook de Abertura (Anti-Início Lento): Extrai teaser de 2 a 3 segundos do clímax épico para os primeiros segundos e corta silêncios ou inícios mortos da narrativa, garantindo que o vídeo comece direto na ação.",
+    "Edição Viral Pro (Super Senior Editor): IA organiza a narrativa com corte de gorduras, gancho de alta adrenalina no início, ritmo acelerado e fechamento em loop infinito para retenção extrema (>100%).",
+    "Transição Visual Suave em Flash Branco: Corte limpo entre o hook teaser e o início da narrativa, com áudio 100% original preservado (sem efeitos sonoros adicionados).",
     "Cross-Cache 24h Inteligente (YouTube Shorts <-> Instagram Reels): Análises, títulos, hashtags e capas 1080x1920 geradas em uma aba são instantaneamente reaproveitadas na outra com 0 tokens gastos.",
     "Correção de Travamento no Fim do Vídeo: Substituição de Lock reentrante (RLock) e finalização segura com reset automático ao término do player.",
     "Otimização Extrema de Performance do Player: Redimensionamento Linear 5x mais rápido, leitura de frames sequenciais sem lag na CPU e throttling leve de interface.",

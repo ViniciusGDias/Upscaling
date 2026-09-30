@@ -22,6 +22,13 @@ try:
 except ImportError:
     api_health = None
 
+EDITORIAL_MODES = {
+    "linear": "Linear Direto (Sem Loop)",
+    "hook": "Hook de Abertura (Anti-Início Lento: Teaser 0-3s)",
+    "loop": "Loop Contextual (Replay Infinito: Conecta Fim ao Início)",
+    "viral_editor": "Edição Viral Pro (Super Senior Editor: Hook + Reordenação + Loop)",
+}
+
 
 def _get_ffmpeg_bin(cmd: str = "ffmpeg") -> str:
     """Return path to ffmpeg or ffprobe executable, checking engine_manager, app bin, and system PATH."""
@@ -957,6 +964,7 @@ def call_ai_mastercut_timeline(
     refine_mode="balanced",
     target_duration_mode="auto",
     enable_loop=False,
+    editorial_mode="linear",
     on_log=None
 ):
     """
@@ -1038,12 +1046,30 @@ Use esse conhecimento de anime/série para identificar com precisão os personag
             "Corte apenas tempos mortos e gorduras, preservando o sentido e o suco da história!"
         )
 
-    loop_instruction = ""
-    if enable_loop:
-        loop_instruction = """
+    editorial_instruction = ""
+    if editorial_mode == "hook":
+        editorial_instruction = """
+5. **ESTRUTURA DE HOOK DE ABERTURA (ANTI-INÍCIO LENTO & RETENÇÃO IMEDIATA)**:
+   - O vídeo original pode ter início sem fala, em silêncio ou em ritmo lento.
+   - O SEU PRIMEIRO CORTE (segmento 0) DEVE SER UM HOOK TEASER EXPLOSIVO (2.0s a 3.5s) extraído do clímax, da fala mais impactante ou da cena de maior ação/tensão!
+   - Em seguida (a partir do segmento 1), narre a história cortando qualquer início estático ou silêncio vazio de introdução.
+   - O espectador deve ser fisgado nos primeiros 2 segundos e continuar assistindo para ver como aquele momento aconteceu!
+"""
+    elif editorial_mode == "loop" or (enable_loop and editorial_mode == "linear"):
+        editorial_instruction = """
 5. **ESTRUTURA DE LOOP CONTEXTUAL (REPLAY PERFEITO PARA SHORTS/REELS/TIKTOK)**:
    - Este vídeo será montado com Loop Contextual Infinito.
    - O desfecho/clímax final (últimos 3s a 5s) deve ter uma fala marcante ou clímax coeso que possa servir de abertura/gancho e conectar o final do clipe de volta com o início!
+"""
+    elif editorial_mode == "viral_editor":
+        editorial_instruction = """
+5. **ESTRUTURA SUPER SENIOR VIRAL EDITOR (EDIÇÃO PRO PARA SHORTS/TIKTOK/REELS)**:
+   - Você é um editor profissional sênior focado em viralização massiva e retenção extrema (>100%).
+   - Monte a timeline da seguinte forma:
+     1. **SEGMENTO 0 (HOOK TEASER 2.0s a 3.5s)**: O pico absoluto de adrenalina, a fala mais chocante ou revelação épica do vídeo para estourar a retenção nos primeiros segundos.
+     2. **SEGMENTO 1 EM DIANTE (NARRATIVA ENXUTA)**: Se o vídeo original demorava para começar ou tinha segundos mudos, ELIMINE essa gordura e inicie direto na ação/fala.
+     3. **RITMO ACELERADO & ESCALADA**: Conecte réplicas rápidas e cortes dinâmicos. Sem tempos mortos.
+     4. **FECHAMENTO EM LOOP**: O último segmento deve encerrar de modo que engate magneticamente de volta no replay do início (loop contínuo)!
 """
 
     mini_movie_instruction = ""
@@ -1107,7 +1133,7 @@ DADOS DO VÍDEO BRUTO:
    - Mantenha a narrativa coesa, com início/gancho, conflito/desenvolvimento e clímax.
 4. **DIVISÃO DINÂMICA**: Divida a timeline em múltiplos cortes cirúrgicos (3 a 8 segmentos) que juntos preencham a duração entre {min_dur:.1f}s e {max_dur:.1f}s.
 {mini_movie_instruction}
-{loop_instruction}
+{editorial_instruction}
 Retorne EXCLUSIVAMENTE um objeto JSON no seguinte formato (sem comentários, apenas JSON puro):
 {{
   "ai_viral": [
@@ -1657,6 +1683,153 @@ def apply_contextual_loop(
     return result
 
 
+def apply_hook_opening(
+    refined: list,
+    all_words: list,
+    video_duration: float,
+    action_blocks: list = None,
+    visual_scenes: list = None,
+    on_log=None
+) -> list:
+    """
+    Transforms Mastercut to start with an explosive hook teaser (2.0s - 3.5s)
+    taken from the video's climax or most dynamic moment, placed at 0.0s.
+    Cuts any initial dead silence from the narrative body so it begins with immediate energy.
+    """
+    if not refined or len(refined) < 1:
+        return refined
+
+    # If first segment is already clearly a hook (under 4.5s and tagged as hook)
+    first_seg = refined[0]
+    first_seg_dur = first_seg["end"] - first_seg["start"]
+    first_txt = str(first_seg.get("text", "")).lower()
+    if ("hook" in first_txt or "teaser" in first_txt) and first_seg_dur <= 4.5:
+        if on_log:
+            on_log(f"[HOOK] Hook de abertura detectado na timeline da IA: {first_seg['start']:.2f}s -> {first_seg['end']:.2f}s ({first_seg_dur:.1f}s)")
+        return refined
+
+    h_start = None
+    h_end = None
+    hook_text = "[Hook de Abertura / Teaser]"
+
+    # Option A: Visual scenes of high impact in second half
+    if visual_scenes:
+        climax_scenes = [
+            vs for vs in visual_scenes
+            if vs.get("importance") == "high" and vs.get("start", 0) >= video_duration * 0.35
+        ]
+        if climax_scenes:
+            best_vs = climax_scenes[-1]
+            vs_s = best_vs.get("start", 0.0)
+            vs_e = best_vs.get("end", vs_s + 3.0)
+            h_start = vs_s
+            h_end = min(vs_e, vs_s + 3.2)
+            hook_text = f"[Hook Visual: {best_vs.get('description', 'Cena de Alto Impacto')[:40]}]"
+
+    # Option B: High-energy action block
+    if h_start is None and action_blocks:
+        climax_actions = [ab for ab in action_blocks if ab.get("start", 0) >= video_duration * 0.35]
+        if climax_actions:
+            best_ab = climax_actions[-1]
+            h_start = best_ab.get("start", 0.0)
+            h_end = min(best_ab.get("end", h_start + 3.0), h_start + 3.2)
+            hook_text = "[Hook de Ação / Clímax]"
+
+    # Option C: Dynamic speech or last segment in refined
+    if h_start is None:
+        target_seg = refined[-1] if len(refined) == 1 or (refined[-1]["end"] - refined[-1]["start"] >= 2.5) else refined[-2]
+        s_dur = target_seg["end"] - target_seg["start"]
+        if s_dur >= 3.0:
+            h_start = round(max(target_seg["start"], target_seg["end"] - 3.2), 3)
+            h_end = target_seg["end"]
+        else:
+            h_start = target_seg["start"]
+            h_end = target_seg["end"]
+
+    # Align hook boundaries with words if available
+    if all_words and h_start is not None and h_end is not None:
+        sub_words = [w for w in all_words if (h_start - 0.3) <= w["start"] and w["end"] <= (h_end + 0.3)]
+        if sub_words:
+            h_start = round(max(0.0, sub_words[0]["start"] - 0.06), 3)
+            h_end = round(min(video_duration, sub_words[-1]["end"] + 0.18), 3)
+
+    h_dur = (h_end - h_start) if (h_start is not None and h_end is not None) else 0.0
+    if h_dur < 1.5 or h_start is None or h_end is None:
+        h_start = round(max(0.0, video_duration * 0.65), 3)
+        h_end = round(min(video_duration, h_start + 2.8), 3)
+
+    hook_seg = {
+        "start": h_start,
+        "end": h_end,
+        "text": hook_text
+    }
+
+    # Prepare narrative segments:
+    narrative = [dict(s) for s in refined]
+    if all_words and narrative:
+        first_w = all_words[0]
+        # If the first speech starts noticeably after narrative start (> 0.8s of silence), trim it
+        if narrative[0]["start"] < first_w["start"] - 0.6:
+            new_s = round(max(0.0, first_w["start"] - 0.15), 3)
+            if new_s < narrative[0]["end"] - 0.5:
+                if on_log:
+                    on_log(f"[ANTI-INÍCIO LENTO] Início mudo cortado: {narrative[0]['start']:.2f}s -> {new_s:.2f}s (Narrativa começa direto na fala!)")
+                narrative[0]["start"] = new_s
+
+    result = [hook_seg] + narrative
+
+    if on_log:
+        on_log(f"[HOOK] Hook de Abertura criado: {h_start:.2f}s -> {h_end:.2f}s ({h_end - h_start:.1f}s)")
+        on_log("   • O vídeo agora começa com o momento mais forte, com transição visual em flash para a história!")
+
+    return sanitize_final_segments(result)
+
+
+def apply_viral_editor_structure(
+    refined: list,
+    all_words: list,
+    video_duration: float,
+    action_blocks: list = None,
+    visual_scenes: list = None,
+    on_log=None
+) -> list:
+    """
+    Super Senior Viral Editor:
+    1. Extracts explosive hook at 0.0s (teaser from climax).
+    2. Trims slow/silent intros from narrative.
+    3. Retains / reorders high-energy narrative moments.
+    4. Connects ending to loop cleanly into the hook for infinite replay.
+    """
+    if not refined or len(refined) < 1:
+        return refined
+
+    # First apply hook opening to ensure explosive start and trim dead intro
+    with_hook = apply_hook_opening(
+        refined=refined,
+        all_words=all_words,
+        video_duration=video_duration,
+        action_blocks=action_blocks,
+        visual_scenes=visual_scenes,
+        on_log=on_log
+    )
+
+    # If the hook was sliced from the end/climax, make sure the end of the video
+    # connects cleanly into the hook without duplicate overlap
+    if len(with_hook) >= 2:
+        hook_seg = with_hook[0]
+        last_seg = with_hook[-1]
+        if abs(last_seg["end"] - hook_seg["end"]) < 0.25 and (last_seg["end"] - hook_seg["start"]) >= 1.5:
+            if hook_seg["start"] > last_seg["start"] + 0.8:
+                last_seg["end"] = hook_seg["start"]
+            elif len(with_hook) > 2:
+                with_hook.pop()
+
+    if on_log:
+        on_log("[VIRAL PRO] Edição Viral Pro montada com sucesso: Hook + Eliminação de Silêncio + Loop de Replay!")
+
+    return sanitize_final_segments(with_hook)
+
+
 def build_refined_segments(
     all_words,
     video_duration,
@@ -1666,6 +1839,7 @@ def build_refined_segments(
     refine_mode="balanced",
     target_duration_mode="auto",
     enable_loop=False,
+    editorial_mode="linear",
     anti_copyright=True,
     is_continuous_clip=False,
     on_log=None
@@ -1677,7 +1851,8 @@ def build_refined_segments(
     """
     min_dur, max_dur = calculate_mastercut_bounds(video_duration, refine_mode, target_duration_mode)
     if on_log:
-        on_log(f"[META] Meta de duração do Mastercut: {min_dur:.1f}s a {max_dur:.1f}s (Modo: {refine_mode})")
+        mode_label = EDITORIAL_MODES.get(editorial_mode, "Linear Direto")
+        on_log(f"[META] Meta de duração do Mastercut: {min_dur:.1f}s a {max_dur:.1f}s (Ritmo: {refine_mode} | Editorial: {mode_label})")
 
     timeline = call_ai_mastercut_timeline(
         all_words,
@@ -1688,6 +1863,7 @@ def build_refined_segments(
         refine_mode=refine_mode,
         target_duration_mode=target_duration_mode,
         enable_loop=enable_loop,
+        editorial_mode=editorial_mode,
         on_log=on_log
     )
 
@@ -1797,15 +1973,10 @@ def build_refined_segments(
                 t_acc += seg_d
             else:
                 remaining = max_dur - t_acc
-                # Se o vídeo for curto (<= 40s) ou o modo for de preservação (soft/max_retention),
-                # ou a diferença para terminar a frase for de até 4.0s: NUNCA cortar a frase no meio!
-                # Preserva o segmento inteiro para não mutilar a fala nem o clímax!
                 if video_duration <= 40.0 or refine_mode == "soft" or target_duration_mode == "max_retention" or (t_acc + seg_d <= max_dur + 4.0):
                     trimmed.append(s)
                     t_acc += seg_d
                     break
-                # Caso precise podar um segmento longo (> 4s de excesso),
-                # encontra a última palavra completa em all_words para não decepar nenhuma palavra ao meio
                 elif remaining >= 2.0:
                     safe_cut_end = None
                     if all_words:
@@ -1832,12 +2003,30 @@ def build_refined_segments(
             on_log=on_log
         )
 
-    # Apply contextual loop if requested
-    if enable_loop:
+    # Apply requested editorial mode
+    if editorial_mode == "hook":
+        refined = apply_hook_opening(
+            refined=refined,
+            all_words=all_words,
+            video_duration=video_duration,
+            action_blocks=action_blocks,
+            visual_scenes=visual_scenes,
+            on_log=on_log
+        )
+    elif editorial_mode == "loop" or (enable_loop and editorial_mode == "linear"):
         refined = apply_contextual_loop(
             refined=refined,
             all_words=all_words,
             video_duration=video_duration,
+            on_log=on_log
+        )
+    elif editorial_mode == "viral_editor":
+        refined = apply_viral_editor_structure(
+            refined=refined,
+            all_words=all_words,
+            video_duration=video_duration,
+            action_blocks=action_blocks,
+            visual_scenes=visual_scenes,
             on_log=on_log
         )
 
@@ -1861,6 +2050,7 @@ def render_mastercut_video(
     demucs_isolation: bool = False,
     anti_copyright: bool = False,
     enable_loop: bool = False,
+    editorial_mode: str = "linear",
     on_progress=None,
     on_log=None
 ) -> dict:
@@ -1896,10 +2086,29 @@ def render_mastercut_video(
     filter_complex = []
     concat_inputs = []
 
+    has_hook_transition = (editorial_mode in ("hook", "viral_editor")) and (n >= 2)
+
     for i, seg in enumerate(segments):
         s = seg["start"]
         e = seg["end"]
-        filter_complex.append(f"[0:v]trim=start={s:.3f}:end={e:.3f},setpts=PTS-STARTPTS[v{i}]")
+        dur_i = e - s
+
+        # Transição visual suave em flash branco entre o Hook (índice 0) e a história (índice 1)
+        # REGRA ESTRITA: ZERO SFX / ZERO EFEITOS SONOROS (áudio original 100% puro e intocado)
+        if has_hook_transition and i == 0:
+            fade_dur = min(0.12, max(0.04, dur_i / 4.0))
+            fade_st = max(0.0, dur_i - fade_dur)
+            filter_complex.append(
+                f"[0:v]trim=start={s:.3f}:end={e:.3f},setpts=PTS-STARTPTS,fade=t=out:st={fade_st:.3f}:d={fade_dur:.3f}:color=white[v{i}]"
+            )
+        elif has_hook_transition and i == 1:
+            fade_in_dur = min(0.08, max(0.04, dur_i / 4.0))
+            filter_complex.append(
+                f"[0:v]trim=start={s:.3f}:end={e:.3f},setpts=PTS-STARTPTS,fade=t=in:st=0:d={fade_in_dur:.3f}:color=white[v{i}]"
+            )
+        else:
+            filter_complex.append(f"[0:v]trim=start={s:.3f}:end={e:.3f},setpts=PTS-STARTPTS[v{i}]")
+
         if has_audio:
             filter_complex.append(f"[0:a]atrim=start={s:.3f}:end={e:.3f},asetpts=PTS-STARTPTS[a{i}]")
             concat_inputs.append(f"[v{i}][a{i}]")
@@ -1984,8 +2193,8 @@ def render_mastercut_video(
         ]
 
     if on_log:
-        loop_tag = " [Loop Contextual]" if enable_loop else ""
-        on_log(f"[RENDER] Renderizando Mastercut com {n} cortes selecionados{loop_tag}...")
+        mode_tag = f" [{EDITORIAL_MODES.get(editorial_mode, editorial_mode)}]" if editorial_mode != "linear" else ""
+        on_log(f"[RENDER] Renderizando Mastercut com {n} cortes selecionados{mode_tag}...")
     if on_progress:
         on_progress(0.70, f"Renderizando Mastercut com {n} cortes via FFmpeg...")
 
@@ -2057,6 +2266,8 @@ def render_mastercut_video(
         "vocal_isolation": vocal_isolation,
         "anti_copyright": anti_copyright,
         "enable_loop": enable_loop,
+        "editorial_mode": editorial_mode,
+        "editorial_mode_label": EDITORIAL_MODES.get(editorial_mode, "Linear Direto"),
         "loop_mode": "Contextual (Replay Infinito)" if enable_loop else "Sem Loop (Direto)",
         "segments": segments
     }
@@ -2092,12 +2303,16 @@ class MastercutPipeline:
         refine_mode: str = "balanced",
         target_duration_mode: str = "auto",
         enable_loop: bool = False,
+        editorial_mode: str = "linear",
         is_continuous_clip: bool = False,
         on_progress=None,
         on_log=None
     ) -> dict:
         self.is_running = True
         self._cancelled = False
+
+        if editorial_mode in ("loop", "viral_editor"):
+            enable_loop = True
 
         try:
             # Pre-flight check: ensure FFmpeg and FFprobe are available
@@ -2161,6 +2376,7 @@ class MastercutPipeline:
                 refine_mode=refine_mode,
                 target_duration_mode=target_duration_mode,
                 enable_loop=enable_loop,
+                editorial_mode=editorial_mode,
                 anti_copyright=anti_copyright,
                 is_continuous_clip=is_continuous_clip,
                 on_log=on_log
@@ -2185,6 +2401,7 @@ class MastercutPipeline:
                 demucs_isolation=demucs_isolation,
                 anti_copyright=anti_copyright,
                 enable_loop=enable_loop,
+                editorial_mode=editorial_mode,
                 on_progress=on_progress,
                 on_log=on_log
             )

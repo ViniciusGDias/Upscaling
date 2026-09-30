@@ -366,23 +366,25 @@ class RefinerMastercutTab(ctk.CTkFrame):
         )
         self.target_duration_menu.pack(fill="x")
 
-        # Loop Contextual Mode
-        loop_row = ctk.CTkFrame(inner, fg_color="transparent")
-        loop_row.pack(fill="x", pady=(0, 12))
+        # Editorial Mode & Viral Retention Menu
+        editorial_row = ctk.CTkFrame(inner, fg_color="transparent")
+        editorial_row.pack(fill="x", pady=(0, 12))
 
         ctk.CTkLabel(
-            loop_row, text="Formato de Loop (Replay Automático):",
+            editorial_row, text="Estilo Editorial & Retenção Viral:",
             font=ctk.CTkFont(family="Segoe UI", size=12),
             text_color=COLORS["text_secondary"], anchor="w",
         ).pack(fill="x", pady=(0, 4))
 
-        self.loop_mode_var = ctk.StringVar(value="Sem Loop (Mastercut Direto)")
-        self.loop_mode_menu = ctk.CTkOptionMenu(
-            loop_row,
-            variable=self.loop_mode_var,
+        self.editorial_mode_var = ctk.StringVar(value="Linear Direto (Sem Loop)")
+        self.editorial_mode_menu = ctk.CTkOptionMenu(
+            editorial_row,
+            variable=self.editorial_mode_var,
             values=[
-                "Sem Loop (Mastercut Direto)",
-                "Com Loop Contextual (Fatia clímax final e move para abertura em 0.0s)",
+                "Linear Direto (Sem Loop)",
+                "Hook de Abertura (Anti-Início Lento: Teaser 0-3s)",
+                "Loop Contextual (Replay Infinito: Conecta Fim ao Início)",
+                "Edição Viral Pro (Super Senior Editor: Hook + Reordenação + Loop)",
             ],
             font=ctk.CTkFont(family="Segoe UI", size=12),
             fg_color=COLORS["bg_dark"], button_color=COLORS["bg_dark"],
@@ -393,7 +395,8 @@ class RefinerMastercutTab(ctk.CTkFrame):
             height=34, corner_radius=8,
             command=self._on_setting_changed,
         )
-        self.loop_mode_menu.pack(fill="x")
+        self.editorial_mode_menu.pack(fill="x")
+        self.loop_mode_var = self.editorial_mode_var
 
         # Toggles row: Vocal Isolation + Anti-Copyright
         toggles_row = ctk.CTkFrame(inner, fg_color="transparent")
@@ -793,6 +796,16 @@ class RefinerMastercutTab(ctk.CTkFrame):
             return "short"
         return "auto"
 
+    def _get_editorial_mode_key(self) -> str:
+        val = self.editorial_mode_var.get() if hasattr(self, "editorial_mode_var") else ""
+        if "Hook de Abertura" in val:
+            return "hook"
+        if "Loop Contextual" in val:
+            return "loop"
+        if "Edição Viral" in val or "Super Senior" in val:
+            return "viral_editor"
+        return "linear"
+
     def _on_setting_changed(self, *args):
         self._update_duration_hint()
 
@@ -803,6 +816,7 @@ class RefinerMastercutTab(ctk.CTkFrame):
         dur = self.current_video_info.duration if self.current_video_info else 0.0
         mode_key = self._get_refine_mode_key()
         dur_key = self._get_target_duration_key()
+        ed_key = self._get_editorial_mode_key()
 
         if dur <= 0.0:
             self.hint_label.configure(
@@ -840,9 +854,12 @@ class RefinerMastercutTab(ctk.CTkFrame):
                 f"(Modo: {mode_name}). Proteção de narrativa ativa para garantir início, desenvolvimento e clímax."
             )
 
-        loop_val = self.loop_mode_var.get() if hasattr(self, "loop_mode_var") else ""
-        if "Com Loop" in loop_val:
-            msg += "\nLoop Contextual Ativo: O clímax e frase final serão posicionados como abertura (0.0s), conectando perfeitamente o fim ao início para replay infinito (>100% retenção no Shorts/Reels/TikTok)."
+        if ed_key == "hook":
+            msg += "\n🎯 Hook de Abertura Ativo: Um teaser de 2-3s do momento mais intenso será posicionado em 0.0s com transição visual em flash, cortando inícios lentos/mudos e fisgando a atenção imediatamente."
+        elif ed_key == "loop":
+            msg += "\n🔁 Loop Contextual Ativo: O clímax e frase final serão posicionados como abertura (0.0s), conectando perfeitamente o fim ao início para replay infinito (>100% retenção no Shorts/Reels/TikTok)."
+        elif ed_key == "viral_editor":
+            msg += "\n⚡ Edição Viral Pro Ativa: Modo Super Senior Editor! Hook de alto impacto no início + transição flash suave + corte de silêncio inicial + narrativa eletrizante + fechamento em loop infinito."
 
         self.hint_label.configure(text=msg)
 
@@ -927,15 +944,15 @@ class RefinerMastercutTab(ctk.CTkFrame):
 
         refine_mode = self._get_refine_mode_key()
         target_dur = self._get_target_duration_key()
-        loop_val = self.loop_mode_var.get() if hasattr(self, "loop_mode_var") else ""
-        enable_loop = "com loop" in loop_val.lower()
+        editorial_mode = self._get_editorial_mode_key()
+        enable_loop = editorial_mode in ("loop", "viral_editor")
 
         self._clear_log()
         self._log(f"════════ Refinador: Mastercut Concentrado ════════")
-        self._log(f"Entrada: {self.input_path}")
-        self._log(f"Saída:   {self.output_path}")
-        self._log(f"Modo:    {refine_mode} | Duração Alvo: {target_dur}")
-        self._log(f"Loop:    {'Com Loop Contextual (Replay Infinito)' if enable_loop else 'Sem Loop (Mastercut Direto)'}")
+        self._log(f"Entrada:    {self.input_path}")
+        self._log(f"Saída:      {self.output_path}")
+        self._log(f"Ritmo:      {refine_mode} | Duração Alvo: {target_dur}")
+        self._log(f"Editorial:  {self.editorial_mode_var.get()}")
 
         vocal_iso = self.vocal_isolation_var.get()
         demucs_iso = self.demucs_isolation_var.get()
@@ -968,6 +985,7 @@ class RefinerMastercutTab(ctk.CTkFrame):
                     refine_mode=refine_mode,
                     target_duration_mode=target_dur,
                     enable_loop=enable_loop,
+                    editorial_mode=editorial_mode,
                     is_continuous_clip=is_continuous_clip,
                     on_progress=lambda p, msg: self.after(0, self._on_progress_update, p, msg),
                     on_log=lambda msg: self.after(0, self._log, msg),
@@ -995,10 +1013,11 @@ class RefinerMastercutTab(ctk.CTkFrame):
         pct = stats["time_saved_percent"]
         segs = stats["segments_count"]
         size = stats["size_mb"]
-        loop_badge = " | Loop Contextual Ativo" if stats.get("enable_loop") else ""
+        ed_label = stats.get("editorial_mode_label") or ("Loop Contextual" if stats.get("enable_loop") else "")
+        ed_badge = f" | {ed_label}" if ed_label else ""
 
         self.stats_label.configure(
-            text=f"Duração: {dur_before} -> {dur_after} ({pct}% economizado) | {segs} cortes | Tamanho: {size} MB{loop_badge}"
+            text=f"Duração: {dur_before} -> {dur_after} ({pct}% economizado) | {segs} cortes | Tamanho: {size} MB{ed_badge}"
         )
         self.result_card.pack(fill="x", pady=(0, 10))
         self.after(150, lambda: self.scroll._parent_canvas.yview_moveto(0.55))
