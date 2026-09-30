@@ -100,7 +100,7 @@ def main():
         print(f"   ✓ Inno Setup encontrado: {iscc}")
         iss_file = APP_DIR / "installer.iss"
         if iss_file.exists():
-            res_iscc = subprocess.run([iscc, str(iss_file)], cwd=str(APP_DIR))
+            res_iscc = subprocess.run([iscc, f"/DMyAppVersion={ver}", str(iss_file)], cwd=str(APP_DIR))
             if res_iscc.returncode == 0:
                 setup_path = APP_DIR / "setup_output" / f"Urahara_Setup_v{ver}.exe"
                 print(f"   🎉 Instalador criado com sucesso: {setup_path}")
