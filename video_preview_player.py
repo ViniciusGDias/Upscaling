@@ -94,7 +94,7 @@ class VideoPreviewPlayer(ctk.CTkFrame):
         self._is_scrubbing: bool = False
         self._was_playing_before_scrub: bool = False
         self._after_id = None
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._last_ctk_img = None
 
         # Estado de Áudio (Pygame Mixer)
@@ -261,9 +261,16 @@ class VideoPreviewPlayer(ctk.CTkFrame):
             self._duration = self._total_frames / self._fps
             self._current_frame_idx = 0
 
+            w = int(self._cap.get(cv2.CAP_PROP_FRAME_WIDTH)) or self.max_width
+            h = int(self._cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or self.max_height
+            scale = min(self.max_width / w, self.max_height / h)
+            self._target_w = max(10, int(w * scale))
+            self._target_h = max(10, int(h * scale))
+            self._last_rendered_sec = -1
+
             self.slider.configure(to=self._total_frames - 1)
             self.slider.set(0)
-            self._update_time_label(0)
+            self._update_time_label(0, force=True)
 
         # Mostra o primeiro frame imediatamente
         self._show_frame_at(0)
@@ -355,9 +362,12 @@ class VideoPreviewPlayer(ctk.CTkFrame):
         if self._is_scrubbing:
             self._show_frame_at(val)
 
-    def _update_time_label(self, frame_idx: int):
+    def _update_time_label(self, frame_idx: int, force: bool = False):
         curr_sec = frame_idx / self._fps if self._fps else 0.0
-        self.time_lbl.configure(text=f"{_format_time(curr_sec)} / {_format_time(self._duration)}")
+        sec_int = int(curr_sec)
+        if force or getattr(self, "_last_rendered_sec", -1) != sec_int:
+            self._last_rendered_sec = sec_int
+            self.time_lbl.configure(text=f"{_format_time(curr_sec)} / {_format_time(self._duration)}")
 
     def _show_frame_at(self, frame_idx: int):
         with self._lock:
@@ -370,25 +380,20 @@ class VideoPreviewPlayer(ctk.CTkFrame):
             self._current_frame_idx = frame_idx
 
         self._render_frame(frame)
-        self._update_time_label(frame_idx)
+        self._update_time_label(frame_idx, force=True)
         if not self._is_scrubbing:
             self.slider.set(frame_idx)
 
     def _render_frame(self, bgr_frame):
         try:
-            h, w = bgr_frame.shape[:2]
-            if w <= 0 or h <= 0:
-                return
+            target_w = getattr(self, "_target_w", self.max_width)
+            target_h = getattr(self, "_target_h", self.max_height)
 
-            # Ajusta aspecto mantendo proporção até max_width x max_height
-            scale = min(self.max_width / w, self.max_height / h)
-            nw = max(10, int(w * scale))
-            nh = max(10, int(h * scale))
-
-            resized = cv2.resize(bgr_frame, (nw, nh), interpolation=cv2.INTER_AREA)
+            # INTER_LINEAR é ~5x mais rápido que INTER_AREA e fluido para reprodução de vídeo
+            resized = cv2.resize(bgr_frame, (target_w, target_h), interpolation=cv2.INTER_LINEAR)
             rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
             pil_img = Image.fromarray(rgb)
-            ctk_img = ctk.CTkImage(light_image=pil_img, dark_image=pil_img, size=(nw, nh))
+            ctk_img = ctk.CTkImage(light_image=pil_img, dark_image=pil_img, size=(target_w, target_h))
 
             self.display_label.configure(image=ctk_img, text="")
             self._last_ctk_img = ctk_img
@@ -456,11 +461,12 @@ class VideoPreviewPlayer(ctk.CTkFrame):
         self._current_frame_idx = 0
 
     def rewind(self):
+        """Reinicia o vídeo para o início."""
         was_playing = self._is_playing
-        self.stop()
+        self.pause()
         self._show_frame_at(0)
         if was_playing:
-            self.play()
+            self.after(50, self.play)
 
     def seek_seconds(self, sec: float):
         """Pula para um segundo específico do vídeo com sincronização de áudio."""
@@ -473,48 +479,74 @@ class VideoPreviewPlayer(ctk.CTkFrame):
         if self._is_playing:
             self._start_audio_playback(sec)
 
+    def _on_playback_ended(self):
+        """Finaliza a reprodução com segurança ao término do vídeo/áudio sem travar a interface."""
+        self.pause()
+        self._show_frame_at(0)
+
     def _play_loop(self):
         if not self._is_playing:
             return
 
+        ended = False
+        frame_to_render = None
+
         with self._lock:
             if self._cap is None or not self._cap.isOpened():
-                self.pause()
-                return
-
-            if self._has_audio and self._audio_ready and _AUDIO_AVAILABLE:
+                ended = True
+            elif self._has_audio and self._audio_ready and _AUDIO_AVAILABLE:
                 pos_ms = pygame.mixer.music.get_pos()
                 if pos_ms >= 0:
                     curr_sec = self._audio_start_sec + (pos_ms / 1000.0)
                     target_frame = int(curr_sec * self._fps)
                     if target_frame >= self._total_frames:
-                        self.rewind()
+                        ended = True
+                    elif target_frame == self._current_frame_idx:
+                        # Se ainda estiver no mesmo frame já desenhado, aguarda próximo ciclo
+                        delay_ms = max(10, int(350.0 / self._fps))
+                        self._after_id = self.after(delay_ms, self._play_loop)
                         return
-                    if abs(target_frame - self._current_frame_idx) > 1:
-                        self._cap.set(cv2.CAP_PROP_POS_FRAMES, target_frame)
-                    ret, frame = self._cap.read()
-                    if not ret or frame is None:
-                        self.rewind()
-                        return
-                    self._current_frame_idx = target_frame
+                    else:
+                        delta = target_frame - self._current_frame_idx
+                        if delta == 1:
+                            ret, frame = self._cap.read()
+                        elif 1 < delta <= 4:
+                            for _ in range(delta - 1):
+                                self._cap.grab()
+                            ret, frame = self._cap.retrieve()
+                        else:
+                            self._cap.set(cv2.CAP_PROP_POS_FRAMES, target_frame)
+                            ret, frame = self._cap.read()
+
+                        if not ret or frame is None:
+                            ended = True
+                        else:
+                            self._current_frame_idx = target_frame
+                            frame_to_render = frame
                 else:
-                    # Final do áudio atingido -> reinicia
-                    self.rewind()
-                    return
+                    ended = True
             else:
                 ret, frame = self._cap.read()
-                if not ret or frame is None:
-                    self.rewind()
-                    return
-                self._current_frame_idx += 1
+                if not ret or frame is None or self._current_frame_idx + 1 >= self._total_frames:
+                    ended = True
+                else:
+                    self._current_frame_idx += 1
+                    frame_to_render = frame
 
-        self._render_frame(frame)
+        if ended:
+            self._on_playback_ended()
+            return
+
+        if frame_to_render is not None:
+            self._render_frame(frame_to_render)
+
         if not self._is_scrubbing:
-            self.slider.set(self._current_frame_idx)
+            if self._current_frame_idx % 4 == 0:
+                self.slider.set(self._current_frame_idx)
         self._update_time_label(self._current_frame_idx)
 
-        # Intervalo calculado para sincronização fluida (mínimo de 20ms)
-        delay_ms = max(20, int(1000.0 / self._fps))
+        # Intervalo calculado para sincronização fluida e leve
+        delay_ms = max(15, int(1000.0 / self._fps))
         self._after_id = self.after(delay_ms, self._play_loop)
 
     def open_in_system_player(self):

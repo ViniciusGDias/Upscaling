@@ -350,9 +350,12 @@ class InstagramAnalyzerTab(ctk.CTkFrame):
 
         try:
             from ai_cache_hub import ai_cache
-            has_cache = ai_cache.has(path, "instagram_analysis")
-            if has_cache:
+            has_direct = ai_cache.has(path, "instagram_analysis")
+            has_cross = ai_cache.has(path, "yt_shorts_analysis")
+            if has_direct:
                 self.cache_status_badge.configure(text="[⚡ CACHE SALVO (24h)]", text_color="#10b981")
+            elif has_cross:
+                self.cache_status_badge.configure(text="[⚡ CACHE SALVO (Shorts)]", text_color="#10b981")
             else:
                 self.cache_status_badge.configure(text="[CACHE: VAZIO]", text_color="#71717a")
         except Exception:
@@ -367,9 +370,10 @@ class InstagramAnalyzerTab(ctk.CTkFrame):
         try:
             from ai_cache_hub import ai_cache
             ai_cache.invalidate(path, "instagram_analysis")
+            ai_cache.invalidate(path, "yt_shorts_analysis")
             ai_cache.invalidate(path, "viral_metadata")
             self._update_cache_badge(path)
-            self._log(f"🧹 [Cache] Cache de Instagram limpo com sucesso para: {os.path.basename(path)}")
+            self._log(f"🧹 [Cache] Cache limpo com sucesso para: {os.path.basename(path)}")
         except Exception as e:
             self._log(f"[ERRO] Falha ao limpar cache: {e}")
 

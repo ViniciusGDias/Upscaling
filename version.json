@@ -1,8 +1,11 @@
 {
-  "version": "1.0.4",
+  "version": "1.0.5",
   "name": "Urahara",
-  "release_date": "2026-09-28",
+  "release_date": "2026-09-29",
   "changelog": [
+    "Cross-Cache 24h Inteligente (YouTube Shorts <-> Instagram Reels): Análises, títulos, hashtags e capas 1080x1920 geradas em uma aba são instantaneamente reaproveitadas na outra com 0 tokens gastos.",
+    "Correção de Travamento no Fim do Vídeo: Substituição de Lock reentrante (RLock) e finalização segura com reset automático ao término do player.",
+    "Otimização Extrema de Performance do Player: Redimensionamento Linear 5x mais rápido, leitura de frames sequenciais sem lag na CPU e throttling leve de interface.",
     "Áudio Sincronizado nos Mini-Players Integrados: Reprodução de som estéreo real com controle de Mute/Volume instantâneo e sincronização perfeita nos players do Studio, YouTube Shorts, Instagram Reels e Revisor de Legendas.",
     "Correção definitiva de 'bad window path name' no renderizador de resultados de IA das abas de Shorts e Reels.",
     "Mini-Player de Vídeo Integrado no Studio & Revisor de Legendas: Assista e sincronize as falas em tempo real com controle de linha do tempo e scrub frame-a-frame.",

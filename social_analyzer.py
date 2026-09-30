@@ -555,7 +555,7 @@ def adapt_yt_to_instagram(yt_data: Dict[str, Any]) -> Dict[str, Any]:
 
     first_cta = descriptions[0].get("cta", "Salve para ver depois e compartilhe na DM!") if descriptions else "Compartilhe na DM!"
 
-    return {
+    res = {
         "source_network": "youtube_shorts",
         "adapted_for": "instagram_reels",
         "content_summary": va.get("content_summary", ""),
@@ -572,6 +572,11 @@ def adapt_yt_to_instagram(yt_data: Dict[str, Any]) -> Dict[str, Any]:
         "call_to_actions": [first_cta],
         "viral_tricks": opt.get("retention_tricks", [])
     }
+    if "_thumbnail_path" in yt_data:
+        res["_thumbnail_path"] = yt_data["_thumbnail_path"]
+        res["_thumbnail_sec"] = yt_data.get("_thumbnail_sec", 1.5)
+        res["_thumbnail_text"] = yt_data.get("_thumbnail_text", "")
+    return res
 
 
 def adapt_instagram_to_yt(insta_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -604,7 +609,7 @@ def adapt_instagram_to_yt(insta_data: Dict[str, Any]) -> Dict[str, Any]:
         "why_works": "Adaptado do Reels mantendo narrativa e direcionando CTA para inscritos"
     }]
 
-    return {
+    res = {
         "source_network": "instagram_reels",
         "adapted_for": "youtube_shorts",
         "video_analysis": {
@@ -625,6 +630,11 @@ def adapt_instagram_to_yt(insta_data: Dict[str, Any]) -> Dict[str, Any]:
         "tags": yt_tags[:15],
         "video_captions": video_caps
     }
+    if "_thumbnail_path" in insta_data:
+        res["_thumbnail_path"] = insta_data["_thumbnail_path"]
+        res["_thumbnail_sec"] = insta_data.get("_thumbnail_sec", 1.5)
+        res["_thumbnail_text"] = insta_data.get("_thumbnail_text", "")
+    return res
 
 
 def analyze_instagram_video(
@@ -659,6 +669,16 @@ def analyze_instagram_video(
             ("hook_analysis" in cached_res or "suggested_captions" in cached_res)):
             _log("⚡ [Cache Inteligente 24h] Análise Instagram recuperada instantaneamente (0 tokens gastos)!")
             return cached_res
+
+        # Cross-cache: verifica se o vídeo já foi analisado na aba YouTube Shorts
+        cached_yt = ai_cache.get(video_path, "yt_shorts_analysis")
+        if (cached_yt and isinstance(cached_yt, dict) and
+            not cached_yt.get("parse_error") and
+            ("video_analysis" in cached_yt or "optimization" in cached_yt)):
+            _log("⚡ [Cross-Cache 24h] Análise do YouTube Shorts encontrada para este vídeo! Reutilizando dados para o Instagram Reels instantaneamente (0 tokens gastos)!")
+            adapted = adapt_yt_to_instagram(cached_yt)
+            ai_cache.set(video_path, "instagram_analysis", adapted)
+            return adapted
 
     _log("📸 Iniciando análise para Instagram Reels...")
     _log(f"   Arquivo: {os.path.basename(video_path)}")
@@ -781,6 +801,13 @@ def analyze_instagram_video(
 
     if ai_cache and data and not data.get("parse_error") and ("hook_analysis" in data or "suggested_captions" in data):
         ai_cache.set(video_path, "instagram_analysis", data)
+        # Sincroniza cross-cache para o YouTube Shorts instantaneamente
+        try:
+            adapted_yt = adapt_instagram_to_yt(data)
+            if adapted_yt:
+                ai_cache.set(video_path, "yt_shorts_analysis", adapted_yt)
+        except Exception:
+            pass
         # Salva metadados virais para compartilhamento
         viral_info = {
             "title": data.get("title") or data.get("hook_text") or "",
@@ -829,6 +856,16 @@ def analyze_yt_shorts_video(
             ("video_analysis" in cached_res or "optimization" in cached_res)):
             _log("⚡ [Cache Inteligente 24h] Análise YouTube Shorts recuperada instantaneamente (0 tokens gastos)!")
             return cached_res
+
+        # Cross-cache: verifica se o vídeo já foi analisado na aba Instagram Reels
+        cached_insta = ai_cache.get(video_path, "instagram_analysis")
+        if (cached_insta and isinstance(cached_insta, dict) and
+            not cached_insta.get("parse_error") and
+            ("hook_analysis" in cached_insta or "suggested_captions" in cached_insta)):
+            _log("⚡ [Cross-Cache 24h] Análise do Instagram Reels encontrada para este vídeo! Reutilizando dados para o YouTube Shorts instantaneamente (0 tokens gastos)!")
+            adapted = adapt_instagram_to_yt(cached_insta)
+            ai_cache.set(video_path, "yt_shorts_analysis", adapted)
+            return adapted
 
     _log("▶️ Iniciando análise para YouTube Shorts...")
     _log(f"   Arquivo: {os.path.basename(video_path)}")
@@ -965,6 +1002,13 @@ def analyze_yt_shorts_video(
 
     if ai_cache and data and not data.get("parse_error") and ("video_analysis" in data or "optimization" in data):
         ai_cache.set(video_path, "yt_shorts_analysis", data)
+        # Sincroniza cross-cache para o Instagram Reels instantaneamente
+        try:
+            adapted_insta = adapt_yt_to_instagram(data)
+            if adapted_insta:
+                ai_cache.set(video_path, "instagram_analysis", adapted_insta)
+        except Exception:
+            pass
         # Salva metadados virais para compartilhamento
         viral_info = {
             "title": chosen_title,
