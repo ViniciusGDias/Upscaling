@@ -48,6 +48,22 @@ Você é o maior especialista mundial em conteúdo viral para o Instagram (Reels
    - Uso de tópicos/tópicos de marcação de conteúdo (topics).
 """
 
+DORAMA_INSTAGRAM_CONTEXT = """
+Você é o maior especialista mundial em conteúdo viral de Doramas e K-Dramas para o Instagram Reels.
+Você conhece profundamente a comunidade 'dorameira', o algoritmo do Reels e as dinâmicas de engajamento do Instagram:
+1. ALGORITMO DO INSTAGRAM REELS PARA DORAMAS:
+   - Envios por Direct (DM): Fãs de dorama compartilham massivamente cenas marcantes com amigas ("amiga olha essa cena", "precisa assistir esse dorama"). Esse é o sinal de maior peso no Reels.
+   - Salvamentos (Saves): Recomendações de doramas ("onde assistir", "melhores doramas de romance") geram altíssima taxa de salvamento.
+   - Watch Time & Replays: Cenas com química palpável, olhares intensos e beijos são assistidas repetidas vezes.
+2. ESTRATÉGIA DE GANCHOS (0-2s) PARA DORAMAS:
+   - Gancho com dilema ou choque emocional: "O dia em que ele percebeu que nunca mais veria ela...", "A cena que fez todo mundo chorar em 2024".
+   - Frases provocativas na tela: Texto grande e legível no primeiro segundo para prender o olhar antes de passar.
+   - OSTs e Áudios em Alta: Destaque a importância da música de fundo (trilhas sonoras e baladas coreanas famosas).
+3. LEGENDAS E COPYWRITING VIRAL:
+   - Conexão emocional genuína, perguntando a opinião da audiência ("Você perdoaria essa atitude?", "Qual nota você dá pra esse casal?").
+   - Hashtags estratégicas: 3 a 5 tags essenciais como #dorama #kdrama #doramascoreanos #seriescoreanas e a hashtag oficial da obra.
+"""
+
 YOUTUBE_SHORTS_CONTEXT = """
 Você é o maior especialista mundial em conteúdo viral para o YouTube Shorts. Você possui conhecimento profundo sobre:
 1. ALGORITMO DO YOUTUBE SHORTS:
@@ -67,16 +83,20 @@ Você é o maior especialista mundial em conteúdo viral para o YouTube Shorts. 
 """
 
 DORAMA_YOUTUBE_CONTEXT = """
-Você é o maior especialista mundial em conteúdo viral de doramas (K-Drama, C-Drama, J-Drama, Thai Drama) para o YouTube Shorts.
-Você conhece TODOS os doramas populares, seus arcos emocionais, e sabe identificar os momentos que geram mais engajamento.
-1. ALGORITMO DO YOUTUBE SHORTS:
-   - O Shorts prioriza Retenção de Público e Taxa de Visualização vs. Rejeição (>70-80%).
-   - Vídeos com loop imperceptível e >100% retenção viralizam massivamente.
-2. PADRÕES VIRAIS DE DORAMAS NO SHORTS:
-   - CENAS ROMÂNTICAS: Primeiro beijo, declaração de amor, reencontros, tensão de proximidade.
-   - DRAMA EMOCIONAL: Choro, traição, sacrifício, separação dolorosa.
-   - PLOT TWISTS: Revelação de segredos e identidade.
-   - TRILHA / OST: Músicas coreanas que elevam a emoção.
+Você é o maior especialista mundial em conteúdo viral de Doramas (K-Drama, C-Drama, J-Drama, Thai Drama) para o YouTube Shorts.
+Você conhece TODOS os doramas de sucesso (da Netflix, Viki, tvN, JTBC, SBS), seus tropos narrativos e a psicologia do público dorameiro.
+
+1. ALGORITMO DO YOUTUBE SHORTS PARA DORAMAS:
+   - Retenção Emocional: Dorameiras assistem vídeos até o fim quando há química forte, tensão romântica, indignação ou choro.
+   - Pinned Comment Engagement: O maior segredo viral de Doramas no Shorts é o Comentário Fixado com o Nome do Dorama + Onde Assistir + Uma Pergunta Provocadora ("Você perdoaria?"). Isso gera centenas de comentários e impulsiona o algoritmo.
+   - Compartilhamento & Replay: Cenas de término, primeiro beijo ou vingança geram taxas de visualização vs. rejeição acima de 85%.
+
+2. PADRÕES E TROPAS VIRAIS DE DORAMAS:
+   - ROMANCE & QUÍMICA: Primeiro beijo, declaração tímida, toque acidental de mãos, olhar fixo, "vou cuidar de você".
+   - CEO ARROGANTE & PROTETOR: O chefe frio que perde o controle e defende a mocinha na frente de todo mundo.
+   - VINGANÇA & SUPERAÇÃO: A protagonista humilhada pela família rica ou vilã que dá a volta por cima de salto alto.
+   - CHORO & SEPARAÇÃO: Despedida dolorosa no aeroporto/chuva, quebra de promessa, sacrifício por amor.
+   - SEGREDO & IDENTIDADE: Quando descobrem quem ele/ela realmente é (herdeiro secreto, policial disfarçado, etc.).
 """
 
 
@@ -231,15 +251,20 @@ def _parse_ai_json(text: str) -> Dict[str, Any]:
 def build_instagram_analysis_prompt(
     context: str = "",
     work_name: str = "",
+    category: str = "anime",
     enriched_context: str = "",
     transcript: str = "",
     language_en: bool = False,
     language: str = "pt"
 ) -> str:
-    """Build prompt for Instagram Reels analysis with rich pop culture / anime API grounding."""
+    """Build prompt for Instagram Reels analysis with rich pop culture / anime / dorama API grounding."""
+    cat_lower = (category or "").strip().lower()
+    is_dorama = "dorama" in cat_lower or "kdrama" in cat_lower or "k-drama" in cat_lower
+    base_context = DORAMA_INSTAGRAM_CONTEXT if is_dorama else INSTAGRAM_CONTEXT
+
     ctx_parts = []
     if work_name:
-        ctx_parts.append(f"Obra/Anime/Série: {work_name}")
+        ctx_parts.append(f"Obra/Anime/Dorama/Série: {work_name}")
     if context:
         ctx_parts.append(f"Contexto do criador: {context}")
     if enriched_context:
@@ -255,7 +280,7 @@ def build_instagram_analysis_prompt(
     else:
         lang_instruction = "Sua resposta e análise devem ser escritas inteiramente em PORTUGUÊS DO BRASIL."
 
-    return f"""{INSTAGRAM_CONTEXT}
+    return f"""{base_context}
 TAREFA: Analise o vídeo com base na transcrição de falas, no contexto da obra e nos metadados fornecidos e entregue uma estratégia completa de otimização para viralizar no Instagram Reels.
 {ctx_instruction}
 {lang_instruction}
@@ -362,6 +387,23 @@ def build_yt_shorts_analysis_prompt(
     else:
         lang_instruction = "Sua resposta e análise devem ser escritas inteiramente em PORTUGUÊS DO BRASIL."
 
+    if is_dorama:
+        title_instruction = """FÓRMULA DE OURO PARA 5 TÍTULOS DE DORAMA (K-DRAMA / C-DRAMA) NO SHORTS:
+1. Curiosidade & Choque: ex: "Ela pensava que ele era pobre, até descobrir a verdade... 😱💔 #shorts #kdrama"
+2. Romance & Proteção: ex: "Ele enfrentou a família inteira só pra defender ela 🥺❤️ #dorama #shorts"
+3. CEO / Chefe Rendido: ex: "Quando o CEO frio percebe que é louco por ela 😳🍿 #kdrama #shorts"
+4. Vingança & Superação: ex: "Tentaram humilhar ela, mas a resposta foi ÉPICA! 🔥👠 #dorama #shorts"
+5. Emoção & Lágrimas: ex: "Essa cena partiu o coração de qualquer dorameira... 😭💔 #dorama #shorts"
+TODOS os 5 títulos devem conter #shorts, emojis emocionais (💔, 🥺, 😱, 😭, ❤️, 😳) e forte gancho dramático!"""
+        comment_format_hint = f"🎬 {work_label}: [Nome em Português] ([Nome Internacional / Inglês])\\n📺 Onde Assistir: [Netflix / Viki / Disney+ / etc.]\\n🍿 Cena / Episódio: [Nº aproximado]\\n\\n💬 Me contem dorameiras: o que vocês fariam nessa situação? Você perdoaria? Deixa sua opinião aqui embaixo! 👇❤️\\n\\n#dorama #kdrama #doramascoreanos #seriescoreanas #shorts"
+        caption_hint = "Frase curta e de ALTO IMPACTO EMOCIONAL (máx 6-8 palavras) que faz a dorameira parar o scroll (ex: 'A dor nos olhos dela... 💔' ou 'Ele defendeu ela na frente de todos! 🥺❤️')"
+        desc_hint = f"CORPO COMPLETO da descrição para dorameiras: Storytelling envolvente da cena + Ficha Técnica (🎬 Dorama: [Nome] | 📺 Onde assistir: [Streaming]) + CTA provocador nos comentários + hashtags ({work_tag} {extra_tags} #seriescoreanas #shorts)."
+    else:
+        title_instruction = "Gere 5 títulos Shorts altamente clicáveis com #shorts e emojis."
+        comment_format_hint = f"{work_label}: [Nome Real]\\n\\n{work_tag} #[NomeSemEspaco] {extra_tags} #trend #shorts #viral\\n\\nPergunta engajadora específica sobre a cena para fazer os espectadores responderem nos comentários?"
+        caption_hint = "Frase curta e IMPACTANTE (máx 8-10 palavras) para texto sobreposto no topo do vídeo que impede o scroll"
+        desc_hint = f"CORPO COMPLETO da descrição (300-800 chars). Storytelling envolvente que complemente o vídeo, quebras de linha visuais, emojis a cada 1-2 linhas, perguntas retóricas para gerar comentários e palavras-chave para o algoritmo do YouTube Shorts."
+
     return f"""{base_context}
 TAREFA: Analise este vídeo e forneça uma estratégia impecável de otimização para viralizar no YouTube Shorts.
 {ctx_instruction}
@@ -393,8 +435,8 @@ Responda EXATAMENTE neste formato JSON:
     }},
     "titles": [
         {{
-            "title": "Título Shorts Chamativo com #shorts e emojis",
-            "style": "Curiosidade / Hype / Suspense / Épico",
+            "title": "Título Shorts Chamativo com #shorts e emojis ({title_instruction})",
+            "style": "Curiosidade / Hype / Suspense / Épico / Emocional",
             "why_works": "Por que esse título chama cliques no feed"
         }}
     ],
@@ -402,9 +444,9 @@ Responda EXATAMENTE neste formato JSON:
         {{
             "style": "Estilo da descrição (ex: Storytelling Emocional / Curiosidade & Hype / Análise Épica)",
             "first_line": "PRIMEIRA LINHA DA DESCRIÇÃO — parte que aparece ANTES do 'ver mais' no Shorts. Deve ser IRRESISTÍVEL e CURTA (máx 80 chars) com gancho e emoji.",
-            "body": "CORPO COMPLETO da descrição (300-800 chars). Storytelling envolvente que complemente o vídeo, quebras de linha visuais, emojis a cada 1-2 linhas, perguntas retóricas para gerar comentários e palavras-chave para o algoritmo do YouTube Shorts.",
+            "body": "{desc_hint}",
             "cta": "CALL-TO-ACTION forte e específico (ex: 'Inscreva-se no canal para não perder os próximos vídeos! Deixe seu like e comente o que achou!')",
-            "hashtags_inline": "#shorts {work_tag} #edit #[personagem] #[nome] — mix de hashtags estratégicas para o final da descrição",
+            "hashtags_inline": "#shorts {work_tag} {extra_tags} #seriescoreanas #[personagem] #[nome] — mix de hashtags estratégicas para o final da descrição",
             "full_caption": "A DESCRIÇÃO COMPLETA PRONTA PRA COLAR NO YOUTUBE: first_line + quebra de linha + body + quebra de linha + CTA + quebra de linha + hashtags_inline — tudo junto e perfeitamente formatado com quebras de linha reais.",
             "why_works": "Explicação de por que essa descrição potencializa o SEO e o engajamento no algoritmo do Shorts"
         }}
@@ -414,14 +456,14 @@ Responda EXATAMENTE neste formato JSON:
     ],
     "video_captions": [
         {{
-            "text": "Frase curta e IMPACTANTE (máx 8-10 palavras) para texto sobreposto no topo do vídeo que impede o scroll",
+            "text": "{caption_hint}",
             "style": "Choque / Curiosidade / Hype / Provocação / Emoção",
             "why_viral": "Por que essa frase gera retenção visual imediata e impede o swipe"
         }}
     ],
     "suggested_comments": [
         {{
-            "comment": "{work_label}: [Nome Real]\\n\\n{work_tag} #[NomeSemEspaco] {extra_tags} #trend #shorts #viral\\n\\nPergunta engajadora específica sobre a cena para fazer os espectadores responderem nos comentários?"
+            "comment": "{comment_format_hint}"
         }}
     ],
     "improvement_roadmap": [
@@ -641,6 +683,7 @@ def analyze_instagram_video(
     video_path: str,
     context: str = "",
     work_name: str = "",
+    category: str = "anime",
     language_en: bool = False,
     language: str = "pt",
     force_refresh: bool = False,
@@ -769,15 +812,16 @@ def analyze_instagram_video(
     enriched_context = ""
     target_work = work_name.strip() or context.strip()
     if target_work and len(target_work) >= 2:
-        enriched_context = get_enriched_context_for_prompt(target_work, on_log=_log)
+        enriched_context = get_enriched_context_for_prompt(target_work, category=category, on_log=_log)
         if enriched_context:
-            _log("✓ Lore e metadados oficiais integrados ao prompt do Instagram!")
+            _log(f"✓ Lore e metadados oficiais ({category}) integrados ao prompt do Instagram!")
 
     # 3. Build prompt and call AI
     _log("🧠 IA avaliando métricas do Instagram (DMs, Saves, Watch Time e Estética)...")
     prompt = build_instagram_analysis_prompt(
         context=context,
         work_name=work_name,
+        category=category,
         enriched_context=enriched_context,
         transcript=transcript,
         language_en=language_en,

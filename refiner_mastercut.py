@@ -27,7 +27,105 @@ EDITORIAL_MODES = {
     "hook": "Hook de Abertura (Anti-Início Lento: Teaser 0-3s)",
     "loop": "Loop Contextual (Replay Infinito: Conecta Fim ao Início)",
     "viral_editor": "Edição Viral Pro (Super Senior Editor: Hook + Reordenação + Loop)",
+    "dorama": "Dorama Emocional (Diálogos Íntegros & Pausas Dramáticas)",
 }
+
+HOOK_TEASER_RESERVE = 3.0
+
+# Unified edit styles: each profile is ONE coherent recipe (pacing + target length + structure).
+# The UI exposes only these, so pacing, duration and editorial structure can never contradict each other.
+EDIT_PROFILES = {
+    "dorama": {
+        "label": "Dorama Dramático & Emocional (K-Drama / Romance)",
+        "tagline": "Preserva a química, diálogos completos e olhares de tensão sem cortes bruscos.",
+        "flow": "Gancho Emocional → Conflito/Romance → Clímax Dramático",
+        "refine_mode": "soft", "target_duration_mode": "standard", "editorial_mode": "dorama",
+        "explain": "Especialmente calibrado para Doramas e K-Dramas: mantém a tensão dramática e a química entre os atores, "
+                   "preserva pausas expressivas naturais (sem acelerar ou picotar falas), mantém réplicas completas "
+                   "e foca nos momentos de maior comoção, revelação ou romance.",
+    },
+    "viral": {
+        "label": "Edição Viral Pro (TikTok / Reels / Shorts)",
+        "tagline": "Gancho imediato + ritmo anti-tédio + retenção máxima sem repetições.",
+        "flow": "Início Explosivo → Pacing Acelerado → Clímax (Zero Tédio)",
+        "refine_mode": "aggressive", "target_duration_mode": "standard", "editorial_mode": "viral_editor",
+        "explain": "A fórmula viral definitiva para redes sociais: elimina enrolações e silêncios iniciais para prender o scroll no segundo 0, "
+                   "mantém cortes ágeis nas pausas, preserva a coerência da história (sem repetições confusas) e finaliza no pico do clímax.",
+    },
+    "narrative": {
+        "label": "Mastercut Narrativo",
+        "tagline": "História 100% cronológica, sem repetições nem confusão.",
+        "flow": "Início → Conflito → Clímax (Linear)",
+        "refine_mode": "balanced", "target_duration_mode": "standard", "editorial_mode": "linear",
+        "explain": "Edição limpa e cinematográfica: elimina silêncios mortos, pausas vazias e hesitações, "
+                   "mantendo todas as falas importantes e a ordem cronológica natural da cena.",
+    },
+    "dynamic": {
+        "label": "Ritmo Acelerado (Shorts / Reels)",
+        "tagline": "Cortes mais rápidos nas pausas, focado na ação e diálogos fortes.",
+        "flow": "Ação Rápida (Cronológica)",
+        "refine_mode": "aggressive", "target_duration_mode": "short", "editorial_mode": "linear",
+        "explain": "Corta de forma cirúrgica qualquer silêncio (>0.25s), mantendo a ordem da história "
+                   "mas com ritmo acelerado e direto ao ponto (~30s a 45s).",
+    },
+    "mini_movie": {
+        "label": "Mini-Filme (Arco Completo)",
+        "tagline": "Resumo cinematográfico em 4 atos (~50%, até 2:30 min).",
+        "flow": "Abertura → Tensão → Clímax → Desfecho",
+        "refine_mode": "balanced", "target_duration_mode": "mini_movie", "editorial_mode": "linear",
+        "explain": "Para cenas e lutas longas (2 a 5 minutos): condensa o arco narrativo em 4 atos, "
+                   "preservando o contexto e o impacto do desfecho sem picotar a história.",
+    },
+    "dialogue": {
+        "label": "Preservar Diálogos (Corte Suave)",
+        "tagline": "Mantém 100% das falas, apara apenas pausas mortas longas.",
+        "flow": "Diálogos Íntegros (Original)",
+        "refine_mode": "soft", "target_duration_mode": "max_retention", "editorial_mode": "linear",
+        "explain": "Corte mínimo e respeitoso: apenas elimina tempos mortos (>0.4s), "
+                   "preservando integralmente as conversas, réplicas e o clima da cena.",
+    },
+    "hook": {
+        "label": "Com Gancho de Abertura (Teaser)",
+        "tagline": "Abre com um teaser de 3s antes de começar a cena.",
+        "flow": "Teaser 3s → História Completa",
+        "refine_mode": "balanced", "target_duration_mode": "standard", "editorial_mode": "hook",
+        "explain": "Coloca um teaser de 3 segundos do ponto mais intenso no início para prender a atenção, "
+                   "e em seguida toca a história.",
+    },
+    "loop": {
+        "label": "Loop Infinito (Replay TikTok)",
+        "tagline": "A frase final vira abertura para replay contínuo.",
+        "flow": "Final → História → (repete)",
+        "refine_mode": "balanced", "target_duration_mode": "auto", "editorial_mode": "loop",
+        "explain": "Move a última fala para o início, fazendo com que o final do vídeo conecte perfeitamente "
+                   "no início quando reproduzido em repetição contínua.",
+    },
+    "auto": {
+        "label": "Automático",
+        "tagline": "A IA analisa o vídeo e escolhe o melhor corte cronológico.",
+        "flow": "Curto → Ágil · Médio → Viral Pro · Longo → Mini-Filme",
+    },
+}
+
+# Legacy key aliases for backward compatibility
+_LEGACY_PROFILE_ALIASES = {
+    "story_hook": "dialogue",
+    "flash": "dynamic",
+    "clean": "dialogue",
+}
+
+
+def resolve_edit_profile(profile_key: str, video_duration: float, is_arc: bool = False) -> tuple:
+    """Returns (resolved_key, profile). 'auto' picks the recipe that fits the clip length."""
+    key = profile_key if profile_key in EDIT_PROFILES else _LEGACY_PROFILE_ALIASES.get(profile_key, "auto")
+    if key == "auto":
+        if is_arc or video_duration >= 110.0:
+            key = "mini_movie"
+        elif 0 < video_duration <= 40.0:
+            key = "dynamic"
+        else:
+            key = "narrative"
+    return key, EDIT_PROFILES[key]
 
 
 def _get_ffmpeg_bin(cmd: str = "ffmpeg") -> str:
@@ -106,7 +204,7 @@ def _run_ffmpeg_with_nvenc_fallback(cmd: list, timeout: int = 600, on_log=None) 
                 if str(cmd[i]) == "-c:v" and i + 1 < len(cmd) and str(cmd[i+1]) == "h264_nvenc":
                     fallback_cmd.extend(["-c:v", "libx264"])
                     i += 2
-                elif str(cmd[i]) == "-preset" and i + 1 < len(cmd) and str(cmd[i+1]) == "p4":
+                elif str(cmd[i]) == "-preset" and i + 1 < len(cmd) and (str(cmd[i+1]).startswith("p") or str(cmd[i+1]) in ("default", "slow", "medium", "fast")):
                     fallback_cmd.extend(["-preset", "fast"])
                     i += 2
                 elif str(cmd[i]) == "-cq" and i + 1 < len(cmd):
@@ -199,10 +297,10 @@ def _parse_time_seconds(val):
 
 def _extract_chunk_bounds(chunk: dict):
     """
-    Extracts start, end, and text from a chunk dictionary supporting various key aliases.
+    Extracts start, end, text, and camera framing from a chunk dictionary supporting various key aliases.
     """
     if not isinstance(chunk, dict):
-        return None, None, ""
+        return None, None, "", "wide"
     s_raw = None
     for k in ("start", "start_time", "inicio", "startTime", "from", "t_start", "comeco", "in"):
         if k in chunk:
@@ -218,9 +316,20 @@ def _extract_chunk_bounds(chunk: dict):
         if k in chunk and chunk[k]:
             t_raw = str(chunk[k])
             break
+    f_raw = "wide"
+    for k in ("framing", "camera", "shot", "enquadramento", "plano", "angle", "zoom"):
+        if k in chunk and chunk[k]:
+            val = str(chunk[k]).strip().lower()
+            if "punch" in val or "close" in val or "zoom" in val or "impact" in val:
+                f_raw = "punch"
+            elif "react" in val or "reacao" in val or "face" in val:
+                f_raw = "reaction"
+            else:
+                f_raw = "wide"
+            break
     s = _parse_time_seconds(s_raw)
     e = _parse_time_seconds(e_raw)
-    return s, e, t_raw
+    return s, e, t_raw, f_raw
 
 
 def detect_speech_segments(video_path: str, on_progress=None, on_log=None):
@@ -700,18 +809,21 @@ def _get_api_keys() -> list:
     return keys
 
 
-def group_words_by_speech_gaps(all_words: list, max_gap: float = 0.35) -> list:
+def group_words_by_speech_gaps(all_words: list, max_gap: float = 0.35, is_dorama: bool = False) -> list:
     """
     Groups individual words into coherent speech phrases, breaking whenever
     silence between consecutive words exceeds max_gap seconds.
+    If is_dorama is True and standard max_gap is passed, expands to 0.65s to preserve emotional acting pauses.
     """
+    if is_dorama and max_gap <= 0.40:
+        max_gap = 0.65
     if not all_words:
         return []
 
     groups = []
     curr_start = all_words[0]["start"]
     curr_end = all_words[0]["end"]
-    curr_text = [all_words[0]["text"]]
+    curr_text = [all_words[0].get("text") or all_words[0].get("word", "")]
 
     for i in range(1, len(all_words)):
         w = all_words[i]
@@ -719,7 +831,7 @@ def group_words_by_speech_gaps(all_words: list, max_gap: float = 0.35) -> list:
         gap = w["start"] - prev_w["end"]
         if gap <= max_gap:
             curr_end = w["end"]
-            curr_text.append(w["text"])
+            curr_text.append(w.get("text") or w.get("word", ""))
         else:
             dur = round(curr_end - curr_start, 3)
             if dur > 0.1:
@@ -732,7 +844,7 @@ def group_words_by_speech_gaps(all_words: list, max_gap: float = 0.35) -> list:
                 })
             curr_start = w["start"]
             curr_end = w["end"]
-            curr_text = [w["text"]]
+            curr_text = [w.get("text") or w.get("word", "")]
 
     dur = round(curr_end - curr_start, 3)
     if dur > 0.1:
@@ -806,9 +918,9 @@ def align_segments_to_speech_boundaries(segments: list, all_words: list, video_d
                     e_t = min(video_duration, last_w["end"] + 0.18)
 
         aligned.append({
+            **seg,
             "start": round(s_t, 3),
             "end": round(min(video_duration, e_t), 3),
-            "text": seg.get("text", "")
         })
 
     return _merge_segments(aligned, min_gap=0.15)
@@ -822,6 +934,7 @@ def sanitize_final_segments(segments: list, min_gap: float = 0.18) -> list:
     2. Gaps minúsculos (< 0.18s) que causam soluços/cortes falsos sejam fundidos suavemente.
     3. Segmentos com duração microscópica (< 0.35s) sejam eliminados.
     4. Todos os cortes sejam estritamente crescentes e limpos no tempo.
+    5. Tags de cinematografia (framing) sejam preservadas.
     """
     if not segments:
         return segments
@@ -830,10 +943,11 @@ def sanitize_final_segments(segments: list, min_gap: float = 0.18) -> list:
     for s in sorted_segs:
         st = round(s["start"], 3)
         en = round(s["end"], 3)
+        framing = s.get("framing", "wide")
         if en <= st + 0.30:
             continue
         if not clean:
-            clean.append({"start": st, "end": en, "text": s.get("text", "")})
+            clean.append({"start": st, "end": en, "text": s.get("text", ""), "framing": framing})
             continue
         prev = clean[-1]
         if st < prev["end"]:
@@ -851,8 +965,80 @@ def sanitize_final_segments(segments: list, min_gap: float = 0.18) -> list:
             if t_s and t_s not in t_prev:
                 prev["text"] = f"{t_prev} {t_s}".strip()
         else:
-            clean.append({"start": st, "end": en, "text": s.get("text", "")})
+            clean.append({"start": st, "end": en, "text": s.get("text", ""), "framing": framing})
     return clean
+
+
+def finalize_ordered_segments(segments: list, min_gap: float = 0.18) -> list:
+    """
+    Order-preserving cleanup for edited timelines (hook / loop already placed).
+    Unlike sanitize_final_segments it NEVER re-sorts, so intentional jumps
+    (teaser at 0s, loop tail moved to the front) survive. It only:
+    - trims forward overlaps with the previous piece (prevents stutter)
+    - merges pieces contiguous in the source that share the same role
+    - drops micro segments (< 0.30s)
+    """
+    clean = []
+    for seg in segments or []:
+        st, en = round(seg["start"], 3), round(seg["end"], 3)
+        if clean:
+            prev = clean[-1]
+            if prev["start"] <= st < prev["end"]:
+                st = prev["end"]
+            if prev.get("role") == seg.get("role") and 0 <= st - prev["end"] < min_gap:
+                prev["end"] = max(prev["end"], en)
+                continue
+        if en - st < 0.30:
+            continue
+        clean.append({**seg, "start": st, "end": en})
+    return clean
+
+
+def split_long_segments_for_multicam(segments: list, max_shot_dur: float = 3.8, is_dorama: bool = False) -> list:
+    """
+    Simulação de 2ª Câmera de Estúdio (Dynamic Multi-Camera Smart Punch-In):
+    Garante que NENHUM plano contínuo ultrapasse max_shot_dur (3.8s anime / 6.0s dorama).
+    Se uma fala for longa, ela é dividida visualmente mantendo o áudio 100% contínuo,
+    íntegro e perfeitamente sincronizado, preservando o ritmo natural dos atores.
+    """
+    if is_dorama and max_shot_dur <= 4.0:
+        max_shot_dur = 6.0
+    if not segments:
+        return segments
+    res = []
+    framing_seq = ["wide", "punch", "wide", "reaction", "punch"]
+    seq_idx = 0
+    for s in segments:
+        st = s["start"]
+        en = s["end"]
+        txt = s.get("text", "")
+        dur = en - st
+        # "wide" is the parser default, so only explicit punch/reaction from the AI overrides the rotation
+        explicit = s.get("framing")
+        assigned_framing = explicit if explicit in ("punch", "reaction") else framing_seq[seq_idx % len(framing_seq)]
+        seq_idx += 1
+
+        if dur <= max_shot_dur:
+            s_copy = dict(s)
+            s_copy["framing"] = assigned_framing
+            res.append(s_copy)
+        else:
+            # Divide a cena em sub-takes de câmera mantendo áudio contínuo
+            n_sub = int(dur / max_shot_dur) + 1
+            sub_len = dur / n_sub
+            curr_st = st
+            for j in range(n_sub):
+                curr_en = round(min(en, curr_st + sub_len), 3)
+                sub_f = "punch" if j % 2 == 1 else ("wide" if assigned_framing != "wide" else "reaction")
+                res.append({
+                    **s,
+                    "start": round(curr_st, 3),
+                    "end": curr_en,
+                    "text": txt if j == 0 else f"{txt} (cont.)",
+                    "framing": sub_f
+                })
+                curr_st = curr_en
+    return res
 
 
 def calculate_mastercut_bounds(
@@ -889,13 +1075,13 @@ def calculate_mastercut_bounds(
             max_d = min(v_dur * 0.92, max(min_d + 4.0, v_dur * 0.88))
         return round(min_d, 1), round(max_d, 1)
     elif target_duration_mode == "standard":
-        # Padrão Shorts: 35s a 60s, teto flexível
+        # Padrão Shorts: 35s a 90s, teto flexível para evitar mutilação de cenas boas
         if v_dur <= 40.0:
-            min_d = max(12.0, v_dur * 0.65)
+            min_d = max(12.0, v_dur * 0.70)
             max_d = v_dur
         else:
             min_d = min(35.0, v_dur * 0.50)
-            max_d = min(v_dur * 0.75, 60.0)
+            max_d = min(v_dur * 0.85, 90.0)
         return round(max(14.0, min_d), 1), round(max(min_d + 4.0, max_d), 1)
     elif target_duration_mode == "short":
         # Curto & Rápido: 20s a 35s
@@ -965,6 +1151,7 @@ def call_ai_mastercut_timeline(
     target_duration_mode="auto",
     enable_loop=False,
     editorial_mode="linear",
+    is_dorama=False,
     on_log=None
 ):
     """
@@ -974,10 +1161,23 @@ def call_ai_mastercut_timeline(
     """
     action_blocks = action_blocks or []
     visual_scenes = visual_scenes or []
+
+    # Auto-detect Dorama if not explicitly specified
+    if not is_dorama:
+        ctx_lower = str(video_context or "").lower()
+        is_dorama = (
+            refine_mode == "dorama"
+            or editorial_mode == "dorama"
+            or any(k in ctx_lower for k in ("dorama", "kdrama", "k-drama", "coreano", "c-drama", "j-drama", "doramas"))
+        )
+
     min_dur, max_dur = calculate_mastercut_bounds(video_duration, refine_mode, target_duration_mode)
 
     # Build grouped dialogue sentences with precise acoustic boundaries
+    # Para doramas, pausas naturais de até 0.60s são mantidas como parte da mesma frase emocional
     speech_summary = []
+    speech_gap_thresh = 0.60 if is_dorama else 0.40
+    speech_len_thresh = 6.5 if is_dorama else 4.5
     if all_words:
         curr_phrase = []
         p_start = None
@@ -987,7 +1187,7 @@ def call_ai_mastercut_timeline(
             curr_phrase.append(w["text"])
             is_last = (i == len(all_words) - 1)
             next_gap = (all_words[i + 1]["start"] - w["end"]) if not is_last else 999.0
-            if is_last or w["text"].endswith(('.', '!', '?', '…')) or next_gap >= 0.40 or (w["end"] - p_start > 4.5):
+            if is_last or w["text"].endswith(('.', '!', '?', '…')) or next_gap >= speech_gap_thresh or (w["end"] - p_start > speech_len_thresh):
                 p_text = " ".join(curr_phrase)
                 speech_summary.append(f"[{p_start:.2f}s -> {w['end']:.2f}s] \"{p_text}\"")
                 curr_phrase = []
@@ -995,7 +1195,8 @@ def call_ai_mastercut_timeline(
 
     action_summary = []
     for ab in action_blocks:
-        action_summary.append(f"[{ab['start']:.2f}s -> {ab['end']:.2f}s] (Cena de Luta/Ação)")
+        lbl = "(Momento Chave Dramático / Tensão)" if is_dorama else "(Cena de Luta/Ação)"
+        action_summary.append(f"[{ab['start']:.2f}s -> {ab['end']:.2f}s] {lbl}")
 
     # Build visual scene descriptions (AI Vision analysis of silent intervals)
     visual_summary = []
@@ -1019,23 +1220,25 @@ def call_ai_mastercut_timeline(
         extra_meta = ""
         try:
             from metadata_enricher import get_enriched_context_for_prompt
-            extra_meta = get_enriched_context_for_prompt(video_context.strip(), on_log=on_log)
+            cat_hint = "dorama" if is_dorama else "anime"
+            extra_meta = get_enriched_context_for_prompt(video_context.strip(), category=cat_hint, on_log=on_log)
         except Exception:
             pass
 
         ctx_block = f"""
-[CONTEXTO DA OBRA / ANIME / EPISÓDIO]
+[CONTEXTO DA OBRA / {'DORAMA' if is_dorama else 'ANIME'} / EPISÓDIO]
 Contexto informado: {video_context.strip()}
 {extra_meta}
-Use esse conhecimento de anime/série para identificar com precisão os personagens falando, técnicas/poderes, o arco narrativo e as falas/reações mais marcantes desta cena!
+Use esse conhecimento de {'dorama/série' if is_dorama else 'anime/série'} para identificar com precisão os personagens falando, técnicas/poderes/química, o arco narrativo e as falas/reações mais marcantes desta cena!
 """
         if on_log:
-            on_log(f"[CONTEXTO] Contexto aplicado à IA: '{video_context.strip()}'")
+            on_log(f"[CONTEXTO] Contexto {'de Dorama ' if is_dorama else ''}aplicado à IA: '{video_context.strip()}'")
 
     mode_descriptions = {
         "soft": "PRESERVAÇÃO MÁXIMA DE CONTEÚDO (Anti-Silêncio). Mantenha praticamente todas as falas, conversas e reações. Elimine estritamente pausas mortas (>0.35s) e silêncios.",
         "balanced": "EQUILIBRADO / RITMO DINÂMICO (Padrão). Elimine pausas mortas e partes mornas, mas MANTENHA as falas completas, réplicas entre personagens e momentos importantes. Não corte em excesso!",
         "aggressive": "AGRESSIVO / O SUCO PURO. Condensa para extrair apenas o clímax absoluto e momentos mais eletrizantes.",
+        "dorama": "DORAMA DRAMÁTICO / ROMANCE & TENSÃO. Mantenha os diálogos íntegros, as réplicas completas (pergunta + resposta) e as pausas emocionais/olhares de reação entre os personagens sem picotar a atuação.",
     }
     mode_guide = mode_descriptions.get(refine_mode, mode_descriptions["balanced"])
     if target_duration_mode == "mini_movie":
@@ -1046,30 +1249,31 @@ Use esse conhecimento de anime/série para identificar com precisão os personag
             "Corte apenas tempos mortos e gorduras, preservando o sentido e o suco da história!"
         )
 
+    # The AI only SELECTS (chronologically). Hook/loop placement is done deterministically afterwards,
+    # otherwise the chronological merge would silently swallow an AI-placed teaser.
     editorial_instruction = ""
-    if editorial_mode == "hook":
-        editorial_instruction = """
-5. **ESTRUTURA DE HOOK DE ABERTURA (ANTI-INÍCIO LENTO & RETENÇÃO IMEDIATA)**:
-   - O vídeo original pode ter início sem fala, em silêncio ou em ritmo lento.
-   - O SEU PRIMEIRO CORTE (segmento 0) DEVE SER UM HOOK TEASER EXPLOSIVO (2.0s a 3.5s) extraído do clímax, da fala mais impactante ou da cena de maior ação/tensão!
-   - Em seguida (a partir do segmento 1), narre a história cortando qualquer início estático ou silêncio vazio de introdução.
-   - O espectador deve ser fisgado nos primeiros 2 segundos e continuar assistindo para ver como aquele momento aconteceu!
+    if editorial_mode in ("hook", "viral_editor"):
+        loop_line = (
+            "\n   - O ÚLTIMO corte deve terminar numa fala/reação marcante e completa: ela será a ponte do loop de replay."
+            if editorial_mode == "viral_editor" else ""
+        )
+        editorial_instruction = f"""
+5. **ESTRUTURA EDITORIAL (o gancho é montado automaticamente depois)**:
+   - Devolva os cortes SEMPRE em ORDEM CRONOLÓGICA. NÃO mova nenhum trecho para o início: o editor extrai o gancho de abertura depois.
+   - GARANTA que a fala mais impactante / clímax esteja INCLUÍDA inteira na seleção (é dela que sai o gancho de ~3s).
+   - Comece direto na primeira fala ou ação relevante, sem silêncio ou introdução morna.{loop_line}
 """
     elif editorial_mode == "loop" or (enable_loop and editorial_mode == "linear"):
         editorial_instruction = """
-5. **ESTRUTURA DE LOOP CONTEXTUAL (REPLAY PERFEITO PARA SHORTS/REELS/TIKTOK)**:
-   - Este vídeo será montado com Loop Contextual Infinito.
-   - O desfecho/clímax final (últimos 3s a 5s) deve ter uma fala marcante ou clímax coeso que possa servir de abertura/gancho e conectar o final do clipe de volta com o início!
+5. **ESTRUTURA DE LOOP CONTEXTUAL (montada automaticamente depois)**:
+   - Devolva os cortes em ORDEM CRONOLÓGICA.
+   - O desfecho (últimos 3s a 5s) deve ser uma fala marcante e coesa: ela será movida para a abertura e conectará o fim do vídeo de volta ao início.
 """
-    elif editorial_mode == "viral_editor":
+    elif editorial_mode == "dorama" or is_dorama:
         editorial_instruction = """
-5. **ESTRUTURA SUPER SENIOR VIRAL EDITOR (EDIÇÃO PRO PARA SHORTS/TIKTOK/REELS)**:
-   - Você é um editor profissional sênior focado em viralização massiva e retenção extrema (>100%).
-   - Monte a timeline da seguinte forma:
-     1. **SEGMENTO 0 (HOOK TEASER 2.0s a 3.5s)**: O pico absoluto de adrenalina, a fala mais chocante ou revelação épica do vídeo para estourar a retenção nos primeiros segundos.
-     2. **SEGMENTO 1 EM DIANTE (NARRATIVA ENXUTA)**: Se o vídeo original demorava para começar ou tinha segundos mudos, ELIMINE essa gordura e inicie direto na ação/fala.
-     3. **RITMO ACELERADO & ESCALADA**: Conecte réplicas rápidas e cortes dinâmicos. Sem tempos mortos.
-     4. **FECHAMENTO EM LOOP**: O último segmento deve encerrar de modo que engate magneticamente de volta no replay do início (loop contínuo)!
+5. **ESTRUTURA NARRATIVA DE DORAMA**:
+   - Devolva os cortes em ORDEM CRONOLÓGICA natural da cena.
+   - Preserva o arco emocional: Começo da conversa/conflito -> Intensificação da emoção/química -> Clímax ou frase arrebatadora final.
 """
 
     mini_movie_instruction = ""
@@ -1082,7 +1286,7 @@ Use esse conhecimento de anime/série para identificar com precisão os personag
   2. **ATO 2 - ESCALADA & CONFRONTO (~25% a 30%)**: Os melhores momentos de tensão, troca de falas e início da ação.
   3. **ATO 3 - CLÍMAX EXPLOSIVO (~30% a 35%)**: O ápice do confronto, revelação chocante ou momento de maior impacto.
   4. **ATO 4 - DESFECHO & REAÇÃO (~15% a 20%)**: As consequências do clímax, reação de impacto e fechamento da cena.
-- **CORTE AS GORDURAS**: Silêncios prolongados, caminhadas vazias e encaradas estáticas devem ser cortados. Mantenha os momentos de fala, ação e reações com ritmo acelerado e imersivo.
+  5. **CORTE AS GORDURAS**: Silêncios prolongados, caminhadas vazias e encaradas estáticas sem emoção. Mantenha diálogos e reações vivos.
 """
 
     # Build forced inclusion block for high-impact silent scenes
@@ -1096,51 +1300,78 @@ Use esse conhecimento de anime/série para identificar com precisão os personag
             )
         forced_scenes_block = (
             "\n⚠️ CENAS SILENCIOSAS DE ALTO IMPACTO (OBRIGATÓRIO preservar!):\n"
-            "As cenas abaixo foram analisadas por IA Vision e identificadas como momentos épicos, "
-            "mesmo sem diálogo. NÃO as remova — elas são o clímax visual do vídeo:\n"
+            "As cenas abaixo foram analisadas por IA Vision e identificadas como momentos marcantes "
+            "(olhar tenso, lágrima, abraço, beijo ou revelação), mesmo sem diálogo. NÃO as remova:\n"
             + "\n".join(forced_lines)
             + "\n"
         )
 
-    prompt = f"""Você é o EDITOR CHEFE SUPREMO DE CINEMA E CONTEÚDO VIRAL.
-Seu objetivo é criar o **MASTERCUT CONCENTRADO ("O SUCO DO VÍDEO")** deste vídeo.
+    if is_dorama:
+        director_title = "DIRETOR DE MONTAGEM E CINEMATOGRAFIA ESPECIALIZADO EM DORAMAS E K-DRAMAS"
+        golden_rules = """⛔ REGRAS DE OURO DA MONTAGEM DE DORAMAS E K-DRAMAS (ATUAÇÃO & EMOÇÃO):
+1. **PRESERVAÇÃO DA TENSÃO DRAMÁTICA E OLHARES (2.0s A 6.0s POR CORTE)**:
+   - Em Doramas, as pausas entre falas (0.4s a 0.8s), os olhares em choque, respirações e lágrimas NÃO SÃO tempos mortos: são o coração da cena!
+   - NUNCA retalhe a atuação em pedaços ultracurtos de 1s ou 2s. Deixe os planos respirarem entre 2.5s e 5.5s para que o público sinta a química, a dor ou a raiva.
+2. **RÉPLICAS COMPLETAS (DIALÉTICA INTEGRAL)**:
+   - Mantenha a troca de diálogos entre os protagonistas inteira. Cortar uma pergunta sem a resposta ou picotar a confissão destrói o sentido da cena. NUNCA quebre pares dialógicos.
+3. **TAGS DE CINEMATOGRAFIA EMOCIONAL MULTI-CÂMERA ("framing")**:
+   - Para CADA segmento, use os enquadramentos focados em atuação humana:
+     * "punch": Smart Close-Up (+12% zoom) para a fala de maior impacto, lágrimas nos olhos, confissão romântica ou revelação chocante.
+     * "reaction": Plano Médio de Reação (+6% zoom) para o choque do parceiro, troca de olhares tensos ou resposta emocional.
+     * "wide": Plano Aberto (+3% zoom) para o casal, abraço, beijo, confronto físico ou início do diálogo.
+   - Alterne suavemente entre falas e reações ("wide" -> "punch" -> "reaction" -> "punch").
+4. **GANCHO EMOCIONAL NO FRAME 0**:
+   - Comece direto na frase de choque, pergunta provocadora ou lágrima inicial para prender o scroll no primeiro segundo. NUNCA comece no meio de uma frase.
+5. **FECHAMENTO DRAMÁTICO / MIC DROP**:
+   - Termine no ápice da discussão, na revelação chocante ou na troca de olhares definitiva. NUNCA deixe a frase pela metade no final do clipe! O desfecho deve ter impacto absoluto."""
+    else:
+        director_title = "SUPER SENIOR EDITOR CINEMÁTICO E VIRAL para YouTube Shorts, Reels e TikTok"
+        golden_rules = """⛔ REGRAS DE OURO DA ENGENHARIA NARRATIVA VIRAL & ANTI-COPYRIGHT:
+1. **DINÂMICA DIALÉTICA E PESO DRAMÁTICO (NÃO SEJA UM ROBÔ CORTADOR)**:
+   - O maior erro de IA é cortar silêncios que na verdade são 'Tensão Dramática'. Se um personagem faz uma ameaça ("Você vai pagar por isso"), a pausa antes da resposta ("Eu traí?") é OBRIGATÓRIA.
+   - NÃO retalhe frases. Mantenha as réplicas, debates e o arco emocional. Cada corte deve ter um propósito narrativo.
+2. **MICRO-BEATS DINÂMICOS (MÁXIMO 3.8s POR CORTE)**:
+   - Elimine silêncios verdadeiramente vazios/mortos, mas deixe os cortes respirarem de 1.8s a 3.8s para não parecer que o vídeo foi picotado por um triturador.
+3. **TAGS DE CINEMATOGRAFIA MULTI-CÂMERA ("framing")**:
+   - "punch": Smart Close-Up (+14% zoom) para clímax, gritos, ameaças, mic drops ou revelações.
+   - "wide": Plano Aberto (+4% zoom) para contexto, ação rápida ou apresentação.
+   - "reaction": Plano Médio (+8% zoom) para deboche, ironia, choque ou contra-ataque verbal.
+   - ALTERNE os enquadramentos entre falas para simular uma direção multi-câmera viva ("wide" -> "punch" -> "reaction").
+4. **O HOOK E O INÍCIO (FRAME 0)**:
+   - Comece direto na ação ou fala mais impactante. Se o começo for parado, você deve escolher um "punchline" absoluto para iniciar.
+5. **O CLÍMAX FINAL (MIC DROP ABSOLUTO)**:
+   - O corte FINAL do vídeo DEVE encerrar perfeitamente. NUNCA deixe o final abrupto no meio de uma frase! Escolha a melhor frase de impacto, deixe o eco final da palavra terminar e feche o clipe com excelência."""
+
+    prompt = f"""Você é o {director_title}.
+Este clipe foi pré-selecionado pelo Diretor IA e representa uma cena de ouro.
+Seu objetivo é transformar esta cena em um **MASTERCUT VIRAL DE ALTA RETENÇÃO (>100%) E TOTALMENTE BLINDADO CONTRA CONTENT ID / REUSED CONTENT**.
 {ctx_block}
 DADOS DO VÍDEO BRUTO:
-- Duração Original: {video_duration:.1f} segundos (A LINHA DO TEMPO VAI ESTRITAMENTE DE 0.0s ATÉ {video_duration:.1f}s)
+- Duração Original do Clipe: {video_duration:.1f} segundos (A LINHA DO TEMPO VAI ESTRITAMENTE DE 0.0s ATÉ {video_duration:.1f}s)
 
 📣 DIÁLOGOS TRANSCRITOS:
 {chr(10).join(speech_summary) if speech_summary else "[Sem falas detectadas - use os cortes visuais como referência principal]"}
 
 🎬 CENAS VISUAIS ANALISADAS POR IA (incluindo momentos SEM FALA):
-{chr(10).join(visual_summary) if visual_summary else (chr(10).join(f"[{ab['start']:.2f}s -> {ab['end']:.2f}s] ⚔️ Cena de Ação/Luta" for ab in action_blocks) if action_blocks else "[Análise visual não disponível]")}
+{chr(10).join(visual_summary) if visual_summary else (chr(10).join(f"[{ab['start']:.2f}s -> {ab['end']:.2f}s] {'💕 Tensão Dramática' if is_dorama else '⚔️ Cena de Ação/Luta'}" for ab in action_blocks) if action_blocks else "[Análise visual não disponível]")}
 {forced_scenes_block}
 🎯 DIRETRIZ ESTRITA DE DURAÇÃO FINAL:
-- Duração do Vídeo Original: {video_duration:.1f} segundos.
+- Duração do Clipe: {video_duration:.1f} segundos.
 - Modo de Refino Selecionado: {mode_guide}
 - DURAÇÃO TOTAL OBRIGATÓRIA DA SOMA DOS SEGMENTOS: entre {min_dur:.1f}s e {max_dur:.1f}s.
 
-⛔ REGRAS CRÍTICAS DE TIMESTAMPS E ANTI-MUTILAÇÃO:
-1. **LIMITES OBRIGATÓRIOS DOS TIMESTAMPS**:
-   - Este clipe tem EXATAMENTE {video_duration:.1f} segundos no total.
-   - Os valores de "start" e "end" DEVEM ser números decimais em segundos entre 0.0 e {video_duration:.1f}.
-   - NUNCA use timestamps do episódio original completo (ex: 120s, 300s, 800s, 1500s). Os cortes DEVEM ser relativos a ESTE clipe, começando em 0.0s e terminando no máximo em {video_duration:.1f}s!
-2. **PISO MÍNIMO INVIOLÁVEL**: É TERMINANTEMENTE PROIBIDO retornar um tempo total inferior a {min_dur:.1f}s!
-   Se o vídeo original tem {video_duration:.1f}s, você NUNCA deve gerar apenas 15s, 19s ou 25s jogando fora momentos cruciais.
-3. **COMO REFINAR SEM PERDER O SENTIDO**:
-   - Um bom Mastercut acelera o ritmo CORTANDO SILÊNCIOS MORTOS (>0.35s entre falas) E MOMENTOS MUNDANOS (personagem apenas andando, cenas estáticas sem tensão).
-   - NÃO corte diálogos no meio, não tire réplicas entre personagens e não descarte reações épicas.
-   - NUNCA corte cenas de golpe/ataque, poderes especiais, transformações, momentos românticos épicos ou revelações — mesmo que não haja fala!
-   - Mantenha a narrativa coesa, com início/gancho, conflito/desenvolvimento e clímax.
-4. **DIVISÃO DINÂMICA**: Divida a timeline em múltiplos cortes cirúrgicos (3 a 8 segmentos) que juntos preencham a duração entre {min_dur:.1f}s e {max_dur:.1f}s.
+{golden_rules}
+
 {mini_movie_instruction}
 {editorial_instruction}
+
 Retorne EXCLUSIVAMENTE um objeto JSON no seguinte formato (sem comentários, apenas JSON puro):
 {{
   "ai_viral": [
-    {{"start": 1.50, "end": 14.80, "text": "Abertura com diálogo de impacto e gancho"}},
-    {{"start": 16.20, "end": 28.50, "text": "Desenvolvimento do conflito e réplicas de falas"}},
-    {{"start": 30.10, "end": 42.40, "text": "Clímax: golpe/poder/ação sem corte"}},
-    {{"start": 44.00, "end": 54.50, "text": "Desfecho épico e reação final dos personagens"}}
+    {{"start": 0.00, "end": 2.60, "framing": "punch", "text": "Hook impactante com fala ou choque imediato"}},
+    {{"start": 2.70, "end": 5.20, "framing": "wide", "text": "Réplica firme do personagem"}},
+    {{"start": 5.25, "end": 8.10, "framing": "punch", "text": "Clímax da discussão e revelação"}},
+    {{"start": 8.15, "end": 11.00, "framing": "reaction", "text": "Desfecho com gancho para loop"}}
   ]
 }}
 """
@@ -1318,15 +1549,17 @@ def build_heuristic_mastercut(
     min_dur=38.0,
     max_dur=55.0,
     refine_mode="balanced",
+    is_dorama=False,
     on_log=None
 ):
     """
     Local heuristic fallback when no LLM is available or connected.
-    Finds dialogue segments with minimum silence (>0.35s cut), prioritizing natural speech continuity.
+    Finds dialogue segments with minimum silence (>0.35s cut, or >0.65s for dorama), prioritizing natural speech continuity.
     Guaranteed NEVER to return an empty list.
     """
     if on_log:
-        on_log("[MASTERCUT] Construindo Mastercut inteligente via algoritmo de densidade de diálogo e corte de silêncio...")
+        d_lbl = " [Modo Dorama: Pausas Preservadas]" if is_dorama else ""
+        on_log(f"[MASTERCUT] Construindo Mastercut inteligente via algoritmo de densidade de diálogo e corte de silêncio{d_lbl}...")
 
     def _create_visual_cuts():
         if video_duration <= min_dur + 1.0:
@@ -1352,7 +1585,8 @@ def build_heuristic_mastercut(
     if not all_words:
         return _create_visual_cuts()
 
-    groups = group_words_by_speech_gaps(all_words, max_gap=0.35)
+    gap_val = 0.65 if (is_dorama or refine_mode in ("soft", "dorama")) else 0.35
+    groups = group_words_by_speech_gaps(all_words, max_gap=gap_val, is_dorama=is_dorama)
     if not groups:
         return _create_visual_cuts()
 
@@ -1515,6 +1749,7 @@ def apply_anti_copyright_continuous_splits(
     max_continuous_sec: float = 12.0,
     video_duration: float = 0.0,
     is_continuous_clip: bool = False,
+    is_dorama: bool = False,
     on_log=None
 ) -> list:
     """
@@ -1525,6 +1760,8 @@ def apply_anti_copyright_continuous_splits(
     aplica a proteção mesmo em clipes curtos (20s a 60s) para evitar detecção no YouTube/TikTok.
     Garante que jamais ocorra sobreposição temporal (overlap) ou picote na fala humana.
     """
+    if is_dorama and max_continuous_sec < 8.0:
+        max_continuous_sec = 8.0
     if not segments:
         return segments
 
@@ -1580,9 +1817,9 @@ def apply_anti_copyright_continuous_splits(
 
             if best_split_end > curr_start + 1.5 and best_next_start < s_end - 0.8:
                 result.append({
+                    **seg,
                     "start": round(curr_start, 3),
                     "end": round(best_split_end, 3),
-                    "text": seg.get("text", "")
                 })
                 splits_count += 1
                 curr_start = best_next_start
@@ -1591,15 +1828,16 @@ def apply_anti_copyright_continuous_splits(
 
         if s_end > curr_start + 0.4:
             result.append({
+                **seg,
                 "start": round(curr_start, 3),
                 "end": round(s_end, 3),
-                "text": seg.get("text", "")
             })
 
     if splits_count > 0 and on_log:
         on_log(f"[ANTI-COPYRIGHT]: {splits_count} corte(s) longos divididos em pausas naturais de silêncio!")
 
-    return sanitize_final_segments(result)
+    # Runs after the editorial stage, so order must be preserved (no re-sort)
+    return finalize_ordered_segments(result)
 
 
 
@@ -1656,7 +1894,8 @@ def apply_contextual_loop(
         h_start = round(max(last_seg["start"], h_end - 2.8), 3)
         hook_len = h_end - h_start
 
-    result = [dict(s) for s in refined[:-1]]
+    last_seg["role"] = "story"
+    result = [{**s, "role": "story"} for s in refined[:-1]]
     remaining_last_seg_dur = h_start - last_seg["start"]
 
     if remaining_last_seg_dur >= 0.8:
@@ -1671,7 +1910,9 @@ def apply_contextual_loop(
     hook_segment = {
         "start": h_start,
         "end": h_end,
-        "text": "[Hook de Loop Contextual]"
+        "text": "[Hook de Loop Contextual]",
+        "role": "hook",
+        "framing": "punch",
     }
     result.insert(0, hook_segment)
 
@@ -1680,7 +1921,7 @@ def apply_contextual_loop(
         on_log(f"   • Hook de Abertura: {h_start:.2f}s -> {h_end:.2f}s ({hook_len:.1f}s)")
         on_log(f"   • O final do vídeo agora conecta perfeitamente com o início para repetição infinita!")
 
-    return result
+    return finalize_ordered_segments(result)
 
 
 def apply_hook_opening(
@@ -1761,11 +2002,13 @@ def apply_hook_opening(
     hook_seg = {
         "start": h_start,
         "end": h_end,
-        "text": hook_text
+        "text": hook_text,
+        "role": "hook",
+        "framing": "punch",
     }
 
     # Prepare narrative segments:
-    narrative = [dict(s) for s in refined]
+    narrative = [{**s, "role": "story"} for s in refined]
     if all_words and narrative:
         first_w = all_words[0]
         # If the first speech starts noticeably after narrative start (> 0.8s of silence), trim it
@@ -1782,7 +2025,8 @@ def apply_hook_opening(
         on_log(f"[HOOK] Hook de Abertura criado: {h_start:.2f}s -> {h_end:.2f}s ({h_end - h_start:.1f}s)")
         on_log("   • O vídeo agora começa com o momento mais forte, com transição visual em flash para a história!")
 
-    return sanitize_final_segments(result)
+    # Never re-sort here: a chronological sort would push the teaser back to its original spot
+    return finalize_ordered_segments(result)
 
 
 def apply_viral_editor_structure(
@@ -1794,16 +2038,66 @@ def apply_viral_editor_structure(
     on_log=None
 ) -> list:
     """
-    Super Senior Viral Editor:
-    1. Extracts explosive hook at 0.0s (teaser from climax).
-    2. Trims slow/silent intros from narrative.
-    3. Retains / reorders high-energy narrative moments.
-    4. Connects ending to loop cleanly into the hook for infinite replay.
+    Super Senior Viral Editor (Edição Viral Pro):
+    A fórmula profissional para vídeos com alta retenção no TikTok, Reels e Shorts:
+    1. INÍCIO IMEDIATO (Zero silêncio inicial, retenção nos primeiros 3 segundos):
+       - Se o clipe já começa com fala ou ação nos primeiros segundos:
+         Inicia DIRETO na fala (corta pausas mortas antes de falar), sem duplicar nada!
+         A narrativa permanece 100% cronológica, com sentido e fluidez total.
+       - Se o clipe tem início enrolado/mudo (>2.5s sem fala):
+         Extrai um teaser de 2s a 3s do momento mais marcante e ajusta a narrativa
+         removendo repetições idênticas no corpo para não cansar o público.
+    2. PACING DE RETENÇÃO ANTI-TÉDIO:
+       - Transições dinâmicas sem pausas mortas, mantendo 100% da clareza das frases.
+    3. DESFECHO NO CLÍMAX (Mic Drop):
+       - O vídeo encerra com impacto no ápice da cena, sem sobrar segundos mortos no final.
     """
     if not refined or len(refined) < 1:
         return refined
 
-    # First apply hook opening to ensure explosive start and trim dead intro
+    # 1. Verifica se o início já tem fala ou ação relevante
+    first_speech_time = all_words[0]["start"] if all_words else None
+    first_seg_start = refined[0]["start"]
+
+    has_early_speech = (first_speech_time is not None and first_speech_time <= 2.8) or (first_seg_start <= 2.0)
+
+    if has_early_speech:
+        if on_log:
+            on_log("[VIRAL PRO] Início do vídeo já possui fala de impacto! Iniciando direto na ação (sem repetições).")
+
+        narrative = [{**s, "role": "story"} for s in refined]
+        # Corta qualquer respiro mudo antes da fala inicial
+        if first_speech_time is not None and narrative:
+            lead_silence = max(0.0, first_speech_time - narrative[0]["start"])
+            if lead_silence >= 0.30:
+                trimmed_start = round(max(0.0, first_speech_time - 0.08), 3)
+                if trimmed_start < narrative[0]["end"] - 0.5:
+                    if on_log:
+                        on_log(f"   • Silêncio inicial cortado: começa no milissegundo {trimmed_start:.2f}s direto na voz!")
+                    narrative[0]["start"] = trimmed_start
+
+        narrative[0]["role"] = "hook"
+        narrative[0]["framing"] = "punch"
+
+        # Garante que o final encerra no ápice da última fala (mic drop, sem cauda vazia)
+        if len(narrative) >= 1 and all_words:
+            last_seg = narrative[-1]
+            last_words = [w for w in all_words if last_seg["start"] <= w["start"] <= last_seg["end"]]
+            if last_words:
+                last_w = last_words[-1]
+                trail_silence = last_seg["end"] - last_w["end"]
+                if trail_silence >= 0.45:
+                    last_seg["end"] = round(last_w["end"] + 0.20, 3)
+
+        if on_log:
+            on_log("[VIRAL PRO] Montagem Viral Pro finalizada: Início Explosivo + Pacing Ágil + Desfecho em Pico!")
+
+        return finalize_ordered_segments(narrative)
+
+    # 2. Se o início do vídeo for lento (>2.8s sem ninguém falar)
+    if on_log:
+        on_log("[VIRAL PRO] Início lento detectado (>2.8s sem falas). Extraindo teaser inicial e limpando repetições...")
+
     with_hook = apply_hook_opening(
         refined=refined,
         all_words=all_words,
@@ -1813,21 +2107,29 @@ def apply_viral_editor_structure(
         on_log=on_log
     )
 
-    # If the hook was sliced from the end/climax, make sure the end of the video
-    # connects cleanly into the hook without duplicate overlap
+    # Remove qualquer segmento no corpo que seja duplicata do gancho (evita repetição bizarra)
     if len(with_hook) >= 2:
         hook_seg = with_hook[0]
-        last_seg = with_hook[-1]
-        if abs(last_seg["end"] - hook_seg["end"]) < 0.25 and (last_seg["end"] - hook_seg["start"]) >= 1.5:
-            if hook_seg["start"] > last_seg["start"] + 0.8:
-                last_seg["end"] = hook_seg["start"]
-            elif len(with_hook) > 2:
-                with_hook.pop()
+        cleaned_body = []
+        for s in with_hook[1:]:
+            overlap_s = max(s["start"], hook_seg["start"])
+            overlap_e = min(s["end"], hook_seg["end"])
+            overlap_dur = max(0.0, overlap_e - overlap_s)
+            s_dur = s["end"] - s["start"]
+
+            if s_dur > 0 and (overlap_dur / s_dur) >= 0.65:
+                if on_log:
+                    on_log(f"   • Evitada repetição da cena do gancho ({s['start']:.2f}s - {s['end']:.2f}s) no meio da história.")
+                continue
+            cleaned_body.append(s)
+
+        if cleaned_body:
+            with_hook = [hook_seg] + cleaned_body
 
     if on_log:
-        on_log("[VIRAL PRO] Edição Viral Pro montada com sucesso: Hook + Eliminação de Silêncio + Loop de Replay!")
+        on_log("[VIRAL PRO] Edição Viral Pro montada com sucesso: Gancho sem repetições + Narrativa coerente!")
 
-    return sanitize_final_segments(with_hook)
+    return finalize_ordered_segments(with_hook)
 
 
 def build_refined_segments(
@@ -1842,6 +2144,7 @@ def build_refined_segments(
     editorial_mode="linear",
     anti_copyright=True,
     is_continuous_clip=False,
+    is_dorama=False,
     on_log=None
 ):
     """
@@ -1849,10 +2152,26 @@ def build_refined_segments(
     merging overlaps and applying anti-overcut protection to prevent mutilation.
     Guaranteed NEVER to return an empty list of segments!
     """
+    # Auto-detect Dorama if not explicitly specified
+    if not is_dorama:
+        ctx_lower = str(video_context or "").lower()
+        is_dorama = (
+            refine_mode == "dorama"
+            or editorial_mode == "dorama"
+            or any(k in ctx_lower for k in ("dorama", "kdrama", "k-drama", "coreano", "c-drama", "j-drama", "doramas"))
+        )
+
     min_dur, max_dur = calculate_mastercut_bounds(video_duration, refine_mode, target_duration_mode)
+    # The opening teaser is a repeated excerpt, so its seconds come out of the story budget:
+    # the final video lands inside the promised range instead of overshooting it.
+    teaser_reserve = HOOK_TEASER_RESERVE if editorial_mode in ("hook", "viral_editor") else 0.0
+    body_max = max(min_dur, max_dur - teaser_reserve)
     if on_log:
         mode_label = EDITORIAL_MODES.get(editorial_mode, "Linear Direto")
-        on_log(f"[META] Meta de duração do Mastercut: {min_dur:.1f}s a {max_dur:.1f}s (Ritmo: {refine_mode} | Editorial: {mode_label})")
+        dor_tag = " [Perfil Dorama Ativo: Ritmo Emocional]" if is_dorama else ""
+        on_log(f"[META] Meta de duração do Mastercut: {min_dur:.1f}s a {max_dur:.1f}s (Ritmo: {refine_mode} | Editorial: {mode_label}){dor_tag}")
+        if teaser_reserve:
+            on_log(f"[META] Orçamento da história: até {body_max:.1f}s + gancho de ~{teaser_reserve:.0f}s")
 
     timeline = call_ai_mastercut_timeline(
         all_words,
@@ -1864,15 +2183,16 @@ def build_refined_segments(
         target_duration_mode=target_duration_mode,
         enable_loop=enable_loop,
         editorial_mode=editorial_mode,
+        is_dorama=is_dorama,
         on_log=on_log
     )
 
     raw_parsed = []
     if timeline and isinstance(timeline, list):
         for chunk in timeline:
-            s_t, e_t, txt = _extract_chunk_bounds(chunk)
+            s_t, e_t, txt, framing = _extract_chunk_bounds(chunk)
             if s_t is not None and e_t is not None and e_t > s_t:
-                raw_parsed.append({"start": s_t, "end": e_t, "text": txt})
+                raw_parsed.append({"start": s_t, "end": e_t, "text": txt, "framing": framing})
 
     # Detect if AI hallucinated episode-level timestamps (e.g. all starts >= video_duration)
     if raw_parsed and all(item["start"] >= video_duration for item in raw_parsed):
@@ -1887,14 +2207,15 @@ def build_refined_segments(
                 shifted.append({
                     "start": round(max(0.0, rel_s), 3),
                     "end": round(min(video_duration, rel_e), 3),
-                    "text": item["text"]
+                    "text": item["text"],
+                    "framing": item.get("framing", "wide")
                 })
         if shifted:
             raw_parsed = shifted
 
     refined = []
     for chunk in raw_parsed:
-        s_t, e_t, txt = _extract_chunk_bounds(chunk)
+        s_t, e_t, txt, framing = _extract_chunk_bounds(chunk)
         if s_t is not None and e_t is not None and e_t > s_t:
             s_t_r = round(max(0.0, s_t - 0.080), 3)
             e_t_r = round(min(video_duration, e_t + 0.250), 3)
@@ -1902,7 +2223,8 @@ def build_refined_segments(
                 refined.append({
                     "start": s_t_r,
                     "end": e_t_r,
-                    "text": txt
+                    "text": txt,
+                    "framing": framing
                 })
 
     # Fallback to direct raw chunks if padding failed
@@ -1916,7 +2238,8 @@ def build_refined_segments(
                 refined.append({
                     "start": s_t_r,
                     "end": e_t_r,
-                    "text": chunk.get("text", "[Corte Mastercut]")
+                    "text": chunk.get("text", "[Corte Mastercut]"),
+                    "framing": chunk.get("framing", "wide")
                 })
 
     # CRITICAL: If after parsing AI timeline, refined is STILL empty or has fewer than 2 segments:
@@ -1932,10 +2255,11 @@ def build_refined_segments(
             min_dur=min_dur,
             max_dur=max_dur,
             refine_mode=refine_mode,
+            is_dorama=is_dorama,
             on_log=on_log
         )
         for chunk in fallback_timeline:
-            s_t, e_t, txt = _extract_chunk_bounds(chunk)
+            s_t, e_t, txt, framing = _extract_chunk_bounds(chunk)
             if s_t is not None and e_t is not None and e_t > s_t:
                 s_t_r = round(max(0.0, s_t - 0.080), 3)
                 e_t_r = round(min(video_duration, e_t + 0.250), 3)
@@ -1943,7 +2267,8 @@ def build_refined_segments(
                     refined.append({
                         "start": s_t_r,
                         "end": e_t_r,
-                        "text": txt
+                        "text": txt,
+                        "framing": framing
                     })
 
     # Merge overlapping segments e alinhamento de fala (garante falas completas sem decepar orações)
@@ -1957,23 +2282,23 @@ def build_refined_segments(
         all_words=all_words,
         video_duration=video_duration,
         min_dur=min_dur,
-        max_dur=max_dur,
+        max_dur=body_max,
         on_log=on_log
     )
 
-    # Enforce upper bound (max_dur) com proteção estrita contra mutilação de frases
+    # Enforce upper bound (story budget) com proteção estrita contra mutilação de frases
     total_dur = sum(s["end"] - s["start"] for s in refined)
-    if total_dur > max_dur + 0.5:
+    if total_dur > body_max + 0.5:
         trimmed = []
         t_acc = 0.0
         for s in refined:
             seg_d = s["end"] - s["start"]
-            if t_acc + seg_d <= max_dur:
+            if t_acc + seg_d <= body_max:
                 trimmed.append(s)
                 t_acc += seg_d
             else:
-                remaining = max_dur - t_acc
-                if video_duration <= 40.0 or refine_mode == "soft" or target_duration_mode == "max_retention" or (t_acc + seg_d <= max_dur + 4.0):
+                remaining = body_max - t_acc
+                if video_duration <= 40.0 or refine_mode == "soft" or is_dorama or target_duration_mode == "max_retention" or (t_acc + seg_d <= body_max + 4.0):
                     trimmed.append(s)
                     t_acc += seg_d
                     break
@@ -1987,23 +2312,14 @@ def build_refined_segments(
                             safe_cut_end = round(min(s["end"], last_w["end"] + 0.25), 3)
                     if safe_cut_end is None or safe_cut_end <= s["start"] + 1.0:
                         safe_cut_end = round(s["start"] + remaining, 3)
-                    trimmed.append({"start": s["start"], "end": safe_cut_end, "text": s.get("text", "")})
+                    trimmed.append({**s, "end": safe_cut_end})
                 break
         if trimmed:
             refined = trimmed
 
-    # Apply Anti-Copyright continuous segment splits (em vídeos longos ou se for corte contínuo de episódio)
-    if anti_copyright and (video_duration > 60.0 or is_continuous_clip):
-        refined = apply_anti_copyright_continuous_splits(
-            segments=refined,
-            all_words=all_words,
-            max_continuous_sec=11.0,
-            video_duration=video_duration,
-            is_continuous_clip=is_continuous_clip,
-            on_log=on_log
-        )
-
-    # Apply requested editorial mode
+    # Editorial structure runs on the clean chronological body BEFORE any splitting, so the
+    # hook/loop sees whole phrases. From here on, order is intentional: never re-sort.
+    refined = [{**s, "role": s.get("role", "story")} for s in refined]
     if editorial_mode == "hook":
         refined = apply_hook_opening(
             refined=refined,
@@ -2030,12 +2346,34 @@ def build_refined_segments(
             on_log=on_log
         )
 
-    # Validação Final Rigorosa: NUNCA permitir sobreposição (overlap) temporal nem micro-engasgos
-    refined = sanitize_final_segments(refined)
+    # Anti-Copyright: split long continuous takes on real speech pauses (order-preserving)
+    # Para doramas, limite contínuo ampliado para 8.0s para não cortar reações humanas
+    if anti_copyright:
+        cont_sec = 8.0 if is_dorama else 3.8
+        refined = apply_anti_copyright_continuous_splits(
+            segments=refined,
+            all_words=all_words,
+            max_continuous_sec=cont_sec,
+            video_duration=video_duration,
+            is_continuous_clip=is_continuous_clip,
+            is_dorama=is_dorama,
+            on_log=on_log
+        )
+
+    # Validação Final: sem overlap nem micro-engasgos, preservando a ordem editorial
+    refined = finalize_ordered_segments(refined)
+
+    # Simulação de 2ª Câmera Multi-Cam (Smart Punch-In Anti-Copyright):
+    # Para doramas: limite de 6.0s (transições suaves), para animes: 3.8s
+    if anti_copyright:
+        shot_dur = 6.0 if is_dorama else 3.8
+        refined = split_long_segments_for_multicam(refined, max_shot_dur=shot_dur, is_dorama=is_dorama)
+        if on_log:
+            on_log(f"[MULTI-CAM] Cinematografia dinâmica aplicada ({'Dorama 6.0s' if is_dorama else 'Ágil 3.8s'}): {len(refined)} planos alternados (Wide / Punch / Reaction).")
 
     # Absolute ultimate failsafe: NEVER return empty!
     if not refined:
-        refined = [{"start": 0.0, "end": round(video_duration, 3), "text": "[Mastercut Completo]"}]
+        refined = [{"start": 0.0, "end": round(video_duration, 3), "text": "[Mastercut Completo]", "framing": "wide"}]
 
     return refined
 
@@ -2052,7 +2390,8 @@ def render_mastercut_video(
     enable_loop: bool = False,
     editorial_mode: str = "linear",
     on_progress=None,
-    on_log=None
+    on_log=None,
+    pre_isolated_audio_path: str = None
 ) -> dict:
     """
     Concatenates the Mastercut segments using FFmpeg filter_complex with NVENC acceleration.
@@ -2062,7 +2401,9 @@ def render_mastercut_video(
         raise ValueError("Nenhum segmento fornecido para montagem do Mastercut.")
 
     ffmpeg_bin = _get_ffmpeg_bin("ffmpeg")
-    has_audio = check_video_has_audio(source_path)
+    
+    # If pre-isolated audio is provided (Demucs), the video HAS audio by definition
+    has_audio = check_video_has_audio(source_path) or bool(pre_isolated_audio_path)
     video_duration = get_video_duration(source_path)
 
     # Detect resolution
@@ -2086,31 +2427,64 @@ def render_mastercut_video(
     filter_complex = []
     concat_inputs = []
 
-    has_hook_transition = (editorial_mode in ("hook", "viral_editor")) and (n >= 2)
+    # Flash sits exactly at the hook → story boundary, even when multi-cam split the hook into several takes
+    hook_idxs = [idx for idx, sg in enumerate(segments) if sg.get("role") == "hook"]
+    if hook_idxs:
+        hook_last_idx = hook_idxs[-1]
+    else:
+        hook_last_idx = 0 if editorial_mode in ("hook", "viral_editor") else -1
+    has_hook_transition = 0 <= hook_last_idx < n - 1
 
     for i, seg in enumerate(segments):
         s = seg["start"]
         e = seg["end"]
         dur_i = e - s
+        framing = seg.get("framing", "wide")
+
+        # Smart Multi-Camera Framing por Segmento:
+        # punch: close-up de impacto (+14% zoom em momentos de tensão/fala forte)
+        # reaction: enquadramento de resposta (+8% zoom)
+        # wide: plano aberto cinematográfico (+4% zoom)
+        # Mantém a resolução nativa exata do vídeo sem distorção
+        if anti_copyright:
+            if framing == "punch":
+                sc = 1.14
+            elif framing == "reaction":
+                sc = 1.08
+            else:
+                sc = 1.04
+            cam_filter = (
+                f",scale=w=trunc(iw*{sc:.3f}/2)*2:h=trunc(ih*{sc:.3f}/2)*2"
+                f",crop=w={video_width}:h={video_height}"
+                f",setsar=1"
+            )
+        else:
+            cam_filter = ",setsar=1"
 
         # Transição visual suave em flash branco entre o Hook (índice 0) e a história (índice 1)
         # REGRA ESTRITA: ZERO SFX / ZERO EFEITOS SONOROS (áudio original 100% puro e intocado)
-        if has_hook_transition and i == 0:
+        if has_hook_transition and i == hook_last_idx:
             fade_dur = min(0.12, max(0.04, dur_i / 4.0))
             fade_st = max(0.0, dur_i - fade_dur)
             filter_complex.append(
-                f"[0:v]trim=start={s:.3f}:end={e:.3f},setpts=PTS-STARTPTS,fade=t=out:st={fade_st:.3f}:d={fade_dur:.3f}:color=white[v{i}]"
+                f"[0:v]trim=start={s:.3f}:end={e:.3f},setpts=PTS-STARTPTS{cam_filter},fade=t=out:st={fade_st:.3f}:d={fade_dur:.3f}:color=white[v{i}]"
             )
-        elif has_hook_transition and i == 1:
+        elif has_hook_transition and i == hook_last_idx + 1:
             fade_in_dur = min(0.08, max(0.04, dur_i / 4.0))
             filter_complex.append(
-                f"[0:v]trim=start={s:.3f}:end={e:.3f},setpts=PTS-STARTPTS,fade=t=in:st=0:d={fade_in_dur:.3f}:color=white[v{i}]"
+                f"[0:v]trim=start={s:.3f}:end={e:.3f},setpts=PTS-STARTPTS{cam_filter},fade=t=in:st=0:d={fade_in_dur:.3f}:color=white[v{i}]"
             )
         else:
-            filter_complex.append(f"[0:v]trim=start={s:.3f}:end={e:.3f},setpts=PTS-STARTPTS[v{i}]")
+            filter_complex.append(f"[0:v]trim=start={s:.3f}:end={e:.3f},setpts=PTS-STARTPTS{cam_filter}[v{i}]")
 
         if has_audio:
-            filter_complex.append(f"[0:a]atrim=start={s:.3f}:end={e:.3f},asetpts=PTS-STARTPTS[a{i}]")
+            # Micro-fade de áudio de 25ms para cortes 100% orgânicos, imperceptíveis e sem estalos
+            afade_dur = min(0.025, dur_i / 4.0)
+            afade_out_st = max(0.0, dur_i - afade_dur)
+            audio_source_idx = "1" if pre_isolated_audio_path else "0"
+            filter_complex.append(
+                f"[{audio_source_idx}:a]atrim=start={s:.3f}:end={e:.3f},asetpts=PTS-STARTPTS,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,afade=t=in:st=0:d={afade_dur:.3f},afade=t=out:st={afade_out_st:.3f}:d={afade_dur:.3f}[a{i}]"
+            )
             concat_inputs.append(f"[v{i}][a{i}]")
         else:
             concat_inputs.append(f"[v{i}]")
@@ -2118,41 +2492,72 @@ def render_mastercut_video(
     video_post_filters = ""
     audio_post_filters = ",aformat=channel_layouts=stereo"
 
+    # Resolvendo o modo Anti-Copyright:
+    ac_mode = "off"
     if anti_copyright:
-        # Pacote Completo Viral Anti-Copyright 2026:
-        # 1. Aceleração orgânica de 2.6% (setpts/1.026 e atempo=1.026)
-        # 2. Dynamic Breathing Camera Crop (câmera com respiração viva contínua e crop 3.5% que destrói hash 1:1)
-        # 3. Granulação cinematográfica fina (noise=c0s=4:c0f=u) para invalidar fingerprint de macroblocos
-        # 4. Micro Color Grading Shift (eq sutil de contraste, saturação e gama invisível aos olhos)
-        # 5. DSP Anti-SoundMatch no áudio (equalizadores anti-espectrograma em 300Hz, 2.8kHz e 7.5kHz)
-        speed_factor = 1.026
+        if isinstance(anti_copyright, str):
+            ac_s = anti_copyright.lower()
+            if "off" in ac_s or "desativ" in ac_s:
+                ac_mode = "off"
+            elif "tiktok" in ac_s or "padrao" in ac_s or "padrão" in ac_s or "leve" in ac_s:
+                ac_mode = "tiktok"
+            else:
+                ac_mode = "youtube_max"
+        elif isinstance(anti_copyright, bool) and anti_copyright:
+            ac_mode = "youtube_max"
+
+    if ac_mode == "youtube_max":
+        # Blindagem Máxima Nível YouTube (Anti-Toei Animation):
+        # 1. Flip horizontal (destrói pHash 3D espacial e vetores de movimento da Toei)
+        # 2. Aceleração orgânica calibrada em 4.0% (1.04x) com micro-pitch shift acústico
+        # 3. Crop de 7% para quebrar coordenadas de cantos e arestas
+        # 4. Color grading com contraste, leve saturação e curva gama para alterar espectro cromático
+        # 5. Granulação fina e vinheta cinematográfica
+        speed_factor = 1.040
         video_post_filters = (
+            f",hflip"
             f",setpts=PTS/{speed_factor}"
-            f",scale=w=trunc(iw*1.035/2)*2:h=trunc(ih*1.035/2)*2"
-            f",crop=w={video_width}:h={video_height}:x='(iw-ow)/2+(iw-ow)*0.4*sin(2*PI*t/6)':y='(ih-oh)/2+(ih-oh)*0.4*cos(2*PI*t/8)'"
-            f",noise=c0s=4:c0f=u"
-            f",eq=contrast=1.035:brightness=0.01:saturation=1.045:gamma=1.015"
+            f",crop=trunc(iw*0.93/2)*2:trunc(ih*0.93/2)*2"
+            f",scale={video_width}:{video_height}"
+            f",noise=c0s=4:c0f=u:allf=t+u"
+            f",eq=contrast=1.08:brightness=0.02:saturation=1.12:gamma=0.96"
+            f",vignette=PI/6"
         )
         audio_post_filters += (
             f",atempo={speed_factor}"
-            f",equalizer=f=300:t=q:w=1.5:g=-1.8"
-            f",equalizer=f=2800:t=q:w=1.2:g=1.6"
-            f",equalizer=f=7500:t=q:w=1.5:g=-1.2"
+            f",asetrate=48000*1.015,aresample=48000,atempo=1/1.015"
+            f",equalizer=f=300:t=q:w=1.5:g=-1.5"
+            f",equalizer=f=2800:t=q:w=1.2:g=1.4"
+        )
+    elif ac_mode == "tiktok":
+        # Modo Padrão / TikTok / Reels:
+        speed_factor = 1.020
+        video_post_filters = (
+            f",setpts=PTS/{speed_factor}"
+            f",crop=iw*0.96:ih*0.96"
+            f",scale={video_width}:{video_height}"
+            f",noise=c0s=3:c0f=u:allf=t+u"
+            f",eq=contrast=1.06:brightness=0.015:saturation=1.08:gamma=0.98"
+            f",vignette=PI/7"
+        )
+        audio_post_filters += (
+            f",atempo={speed_factor}"
+            f",equalizer=f=300:t=q:w=1.5:g=-1.5"
+            f",equalizer=f=2800:t=q:w=1.2:g=1.4"
         )
 
     if vocal_isolation:
-        # Clareza Vocal de Estúdio: elimina o abafamento, restaura o brilho da voz e remove ruído de fundo
+        # Clareza Vocal de Estúdio Zero-Latência:
+        # Filtros IIR de fase mínima sem buffer de lookahead (zero atraso labial / zero desync)
         audio_post_filters += (
-            ",highpass=f=80"
-            ",equalizer=f=250:t=q:w=1.2:g=-1.5"
-            ",equalizer=f=3200:t=q:w=1.5:g=3.5"
-            ",equalizer=f=11000:t=q:w=1.2:g=3.0"
-            ",afftdn=nr=8:nf=-35"
-            ",dynaudnorm=f=100:p=0.92:m=6.0:b=1"
+            ",highpass=f=75"
+            ",equalizer=f=250:t=q:w=1.2:g=-1.2"
+            ",equalizer=f=3000:t=q:w=1.2:g=2.5"
+            ",equalizer=f=10000:t=q:w=1.2:g=1.8"
         )
 
-    # Sincronização labial estrita: elimina qualquer delay ou buffer de latência de atempo/afftdn
-    audio_post_filters += ",aresample=async=1000:first_pts=0"
+    # Formatação de áudio limpa e estéreo sem drift
+    audio_post_filters += ",aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo"
 
     curr_v_stream = "raw_v"
     if has_audio:
@@ -2161,19 +2566,22 @@ def render_mastercut_video(
         filter_complex.append(f"[raw_a]anull{audio_post_filters}[outa]")
         filter_str = ";\n".join(filter_complex)
 
-        cmd = [
-            ffmpeg_bin, "-y", "-i", str(source_path),
+        cmd = [ffmpeg_bin, "-y", "-i", str(source_path)]
+        if pre_isolated_audio_path:
+            cmd.extend(["-i", str(pre_isolated_audio_path)])
+
+        cmd.extend([
             "-filter_complex", filter_str,
             "-map", "[outv]", "-map", "[outa]",
             "-sn", "-dn",
             "-map_metadata", "-1",
             "-map_chapters", "-1",
-            "-c:v", "h264_nvenc", "-preset", "p4", "-cq", "18",
+            "-c:v", "h264_nvenc", "-preset", "p5", "-cq", "14",
             "-pix_fmt", "yuv420p",
-            "-c:a", "aac", "-b:a", "192k",
+            "-c:a", "aac", "-b:a", "320k",
             "-movflags", "+faststart",
             str(output_path)
-        ]
+        ])
     else:
         filter_complex.append(f"{''.join(concat_inputs)}concat=n={n}:v=1:a=0[raw_v]")
         filter_complex.append(f"[{curr_v_stream}]null{video_post_filters}[outv]")
@@ -2186,7 +2594,7 @@ def render_mastercut_video(
             "-sn", "-dn",
             "-map_metadata", "-1",
             "-map_chapters", "-1",
-            "-c:v", "h264_nvenc", "-preset", "p4", "-cq", "18",
+            "-c:v", "h264_nvenc", "-preset", "p5", "-cq", "14",
             "-pix_fmt", "yuv420p",
             "-an", "-movflags", "+faststart",
             str(output_path)
@@ -2205,52 +2613,7 @@ def render_mastercut_video(
         err_msg = res.stderr[-400:] if res and res.stderr else "Erro desconhecido"
         raise RuntimeError(f"FFmpeg falhou ao renderizar Mastercut: {err_msg}")
 
-    # Demucs AI full background music / piano removal
-    if demucs_isolation and out_file.exists() and out_file.stat().st_size > 0:
-        if on_log:
-            on_log("[DEMUCS] Isolando voz com IA Demucs (Meta AI)... Deletando piano, trilha e instrumental do corte...")
-        if on_progress:
-            on_progress(0.90, "Isolando voz com IA Demucs...")
-        import tempfile
-        temp_vocals = os.path.join(tempfile.gettempdir(), f"mastercut_demucs_{os.getpid()}_{int(time.time())}.wav")
-        from upscaler import run_demucs_vocal_isolation
-        ok_d = run_demucs_vocal_isolation(str(output_path), temp_vocals, on_log=on_log)
-        if ok_d and os.path.exists(temp_vocals):
-            tmp_fixed = str(output_path) + ".demucs_clean.mp4"
-            cmd_merge = [
-                ffmpeg_bin, "-y",
-                "-i", str(output_path),
-                "-i", temp_vocals,
-                "-map", "0:v:0",
-                "-map", "1:a:0",
-                "-c:v", "copy",
-                "-c:a", "aac", "-b:a", "320k",
-                "-af", "highpass=f=80,equalizer=f=250:t=q:w=1.2:g=-1.5,equalizer=f=3200:t=q:w=1.5:g=3.5,equalizer=f=11000:t=q:w=1.2:g=3.0,dynaudnorm=f=100:p=0.92:m=6.0:b=1",
-                "-movflags", "+faststart",
-                tmp_fixed
-            ]
-            startupinfo = None
-            creationflags = 0
-            if os.name == "nt":
-                creationflags = subprocess.CREATE_NO_WINDOW
-                startupinfo = subprocess.STARTUPINFO()
-                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-                startupinfo.wShowWindow = subprocess.SW_HIDE
-
-            res_m = subprocess.run(
-                cmd_merge,
-                capture_output=True,
-                startupinfo=startupinfo,
-                creationflags=creationflags
-            )
-            if res_m.returncode == 0 and os.path.exists(tmp_fixed):
-                shutil.move(tmp_fixed, str(output_path))
-                if on_log:
-                    on_log("[OK] Instrumental e piano 100% deletados! Apenas a voz cristalina de estúdio foi mantida.")
-            try:
-                os.remove(temp_vocals)
-            except Exception:
-                pass
+    # Demucs Post-Isolation logic removed (now handled as pre-isolation in process)
 
     final_dur = get_video_duration(str(out_file))
     final_size_mb = out_file.stat().st_size / (1024 * 1024)
@@ -2280,6 +2643,116 @@ def render_mastercut_video(
     return stats
 
 
+def apply_standalone_anti_copyright_shield(
+    input_path: str,
+    output_path: str = None,
+    mode: str = "youtube_max",
+    on_progress=None,
+    on_log=None
+) -> str:
+    """
+    Aplica a Blindagem Anti-Copyright Nível YouTube (Toei-Proof)
+    em qualquer vídeo existente em alta velocidade via FFmpeg (NVENC com fallback CPU).
+    Perfeito para vídeos já editados e upscalados antes de entrar no Studio.
+    Retorna o caminho do arquivo blindado gerado.
+    """
+    in_file = Path(input_path)
+    if not in_file.exists():
+        raise FileNotFoundError(f"Arquivo não encontrado: {input_path}")
+
+    if not output_path:
+        output_path = str(in_file.parent / f"{in_file.stem}_youtube_safe.mp4")
+
+    ffmpeg_bin = _get_ffmpeg_bin("ffmpeg")
+    ffprobe_bin = _get_ffmpeg_bin("ffprobe")
+    has_audio = check_video_has_audio(str(in_file))
+
+    # Detect resolution
+    video_width, video_height = 1920, 1080
+    try:
+        probe_res = subprocess.run(
+            [ffprobe_bin, "-v", "error", "-select_streams", "v:0",
+             "-show_entries", "stream=width,height", "-of", "csv=p=0:s=x", str(in_file)],
+            capture_output=True, encoding="utf-8", errors="replace", timeout=10, **_get_silent_subprocess_kwargs()
+        )
+        if probe_res.returncode == 0 and "x" in probe_res.stdout:
+            parts = probe_res.stdout.strip().split("x")
+            if len(parts) == 2:
+                video_width = int(parts[0]) - (int(parts[0]) % 2)
+                video_height = int(parts[1]) - (int(parts[1]) % 2)
+    except Exception:
+        pass
+
+    if on_log:
+        on_log(f"[BLINDAGEM YOUTUBE] Processando: {in_file.name} ({video_width}x{video_height})...")
+        on_log(" - Flip Horizontal (Espelhamento Anti-pHash da Toei)")
+        on_log(" - Aceleracao 1.04x calibrada (Pitch e Lip-sync preservados)")
+        on_log(" - Crop 7% + Curva Cromatica e Vinheta Cinematografica")
+
+    if on_progress:
+        on_progress(0.20, "Aplicando blindagem anti-copyright via FFmpeg NVENC...")
+
+    speed = 1.040 if mode == "youtube_max" else 1.020
+    vf_list = []
+    if mode == "youtube_max":
+        vf_list.append("hflip")
+        vf_list.append(f"setpts=PTS/{speed}")
+        vf_list.append("crop=trunc(iw*0.93/2)*2:trunc(ih*0.93/2)*2")
+        vf_list.append(f"scale={video_width}:{video_height}")
+        vf_list.append("noise=c0s=4:c0f=u:allf=t+u")
+        vf_list.append("eq=contrast=1.08:brightness=0.02:saturation=1.12:gamma=0.96")
+        vf_list.append("vignette=PI/6")
+    else:
+        vf_list.append(f"setpts=PTS/{speed}")
+        vf_list.append("crop=trunc(iw*0.96/2)*2:trunc(ih*0.96/2)*2")
+        vf_list.append(f"scale={video_width}:{video_height}")
+        vf_list.append("noise=c0s=3:c0f=u:allf=t+u")
+        vf_list.append("eq=contrast=1.06:brightness=0.015:saturation=1.08:gamma=0.98")
+        vf_list.append("vignette=PI/7")
+
+    vf_str = ",".join(vf_list)
+
+    cmd = [ffmpeg_bin, "-y", "-i", str(in_file), "-vf", vf_str]
+
+    if has_audio:
+        if mode == "youtube_max":
+            af_str = (
+                f"atempo={speed},"
+                f"asetrate=48000*1.015,aresample=48000,atempo=1/1.015,"
+                f"equalizer=f=300:t=q:w=1.5:g=-1.5,"
+                f"equalizer=f=2800:t=q:w=1.2:g=1.4"
+            )
+        else:
+            af_str = (
+                f"atempo={speed},"
+                f"equalizer=f=300:t=q:w=1.5:g=-1.5,"
+                f"equalizer=f=2800:t=q:w=1.2:g=1.4"
+            )
+        cmd.extend(["-af", af_str, "-c:a", "aac", "-b:a", "320k"])
+    else:
+        cmd.append("-an")
+
+    cmd.extend([
+        "-c:v", "h264_nvenc", "-preset", "p5", "-cq", "14",
+        "-pix_fmt", "yuv420p",
+        "-movflags", "+faststart",
+        str(output_path)
+    ])
+
+    res = _run_ffmpeg_with_nvenc_fallback(cmd, timeout=300, on_log=on_log)
+    out_p = Path(output_path)
+    if res.returncode != 0 or not out_p.exists() or out_p.stat().st_size == 0:
+        err = res.stderr[-400:] if res and res.stderr else "Falha ao gerar vídeo"
+        raise RuntimeError(f"FFmpeg falhou ao blindar vídeo: {err}")
+
+    if on_progress:
+        on_progress(1.0, "Vídeo 100% blindado com sucesso!")
+    if on_log:
+        on_log(f"[SUCESSO] Vídeo gerado: {out_p.name} (Pronto para o YouTube ou Studio)!")
+
+    return str(out_p)
+
+
 # ─── High-Level Pipeline Runner ───────────────────────────────────────────────
 
 class MastercutPipeline:
@@ -2305,6 +2778,8 @@ class MastercutPipeline:
         enable_loop: bool = False,
         editorial_mode: str = "linear",
         is_continuous_clip: bool = False,
+        is_dorama: bool = False,
+        profile_label: str = "",
         on_progress=None,
         on_log=None
     ) -> dict:
@@ -2313,6 +2788,14 @@ class MastercutPipeline:
 
         if editorial_mode in ("loop", "viral_editor"):
             enable_loop = True
+
+        if not is_dorama:
+            ctx_lower = str(video_context or "").lower()
+            is_dorama = (
+                refine_mode == "dorama"
+                or editorial_mode == "dorama"
+                or any(k in ctx_lower for k in ("dorama", "kdrama", "k-drama", "coreano", "c-drama", "j-drama", "doramas"))
+            )
 
         try:
             # Pre-flight check: ensure FFmpeg and FFprobe are available
@@ -2334,9 +2817,30 @@ class MastercutPipeline:
                 raise FileNotFoundError(err_msg)
 
             # Step 1: Detect speech & words
+            audio_source_for_whisper = video_path
+            pre_isolated_audio = None
+            
+            if demucs_isolation:
+                if on_log:
+                    on_log("═══ ETAPA PRÉ-CORTE: Isolamento Vocal (IA Demucs) ═══")
+                import tempfile, time
+                from upscaler import run_demucs_vocal_isolation
+                temp_vocals = os.path.join(tempfile.gettempdir(), f"mastercut_demucs_pre_{os.getpid()}_{int(time.time())}.wav")
+                if on_progress:
+                    on_progress(0.10, "Isolando vocais puros com IA Demucs ANTES do corte...")
+                ok_d = run_demucs_vocal_isolation(video_path, temp_vocals, on_log=on_log)
+                if ok_d and os.path.exists(temp_vocals):
+                    audio_source_for_whisper = temp_vocals
+                    pre_isolated_audio = temp_vocals
+                    if on_log:
+                        on_log("[DEMUCS] Isolamento vocal concluído! O Whisper e o corte serão feitos na voz limpa, destruindo o Copyright da música original.")
+                else:
+                    if on_log:
+                        on_log("⚠️ [DEMUCS] Falha ao isolar voz. Continuando com áudio original do vídeo.")
+
             if on_log:
                 on_log("═══ ETAPA 1/3: Mapeamento de Diálogos (Whisper) ═══")
-            all_words, full_text, duration = detect_speech_segments(video_path, on_progress=on_progress, on_log=on_log)
+            all_words, full_text, duration = detect_speech_segments(audio_source_for_whisper, on_progress=on_progress, on_log=on_log)
 
             if self._cancelled:
                 raise InterruptedError("Operação cancelada pelo usuário.")
@@ -2379,6 +2883,7 @@ class MastercutPipeline:
                 editorial_mode=editorial_mode,
                 anti_copyright=anti_copyright,
                 is_continuous_clip=is_continuous_clip,
+                is_dorama=is_dorama,
                 on_log=on_log
             )
 
@@ -2403,9 +2908,18 @@ class MastercutPipeline:
                 enable_loop=enable_loop,
                 editorial_mode=editorial_mode,
                 on_progress=on_progress,
-                on_log=on_log
+                on_log=on_log,
+                pre_isolated_audio_path=pre_isolated_audio
             )
+            
+            try:
+                if pre_isolated_audio and os.path.exists(pre_isolated_audio):
+                    os.remove(pre_isolated_audio)
+            except:
+                pass
 
+            if profile_label:
+                stats["editorial_mode_label"] = profile_label
             return stats
 
         finally:

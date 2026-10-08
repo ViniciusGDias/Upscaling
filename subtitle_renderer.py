@@ -186,40 +186,25 @@ def calculate_proportional_music_volume(
     music_max_db: float = 0.0
 ) -> tuple[float, float]:
     """
-    Calcula o volume base da música calibrado proporcionalmente tanto ao volume do vídeo
-    quanto ao volume intrínseco da própria música:
-    - Se a música for muito alta/estourada (mastering forte), atenua automaticamente.
-    - Se a música for gravada baixa, ajusta e eleva respeitando headroom anti-clipping (-0.8dBFS).
-    - Se o vídeo original tiver diálogo baixo (-24dB), a música é reduzida para não soterrar a voz.
-    - Mapeia o percentual do slider (ex: 0.15 = 15%) para a relação relativa ideal em dB.
-    - Retorna (linear_gain, threshold_linear) para o compressor sidechain.
+    Calcula o ganho base da música mantendo correspondência direta 1:1 com o slider do usuário
+    (ex: 15% -> 0.15 de ganho linear) com proteção anti-clipping inteligente, e retorna
+    o threshold ideal para o detector de voz do compressor sidechain (ducking).
     """
     p = user_vol_pct if user_vol_pct <= 1.0 else user_vol_pct / 100.0
-    p = max(0.02, min(0.60, p))
+    p = max(0.01, min(1.0, p))
 
-    # Curva logarítmica perceptiva:
-    # 0.12 (Suave) -> ~ -15 dB abaixo do diálogo do vídeo
-    # 0.15 (Ideal) -> ~ -13 dB abaixo do diálogo do vídeo
-    # 0.22 (Alto)  -> ~ -9.5 dB abaixo do diálogo do vídeo
-    target_diff_db = 20.0 * math.log10(p * 1.5)
+    # O ganho linear base é diretamente proporcional à escolha do usuário
+    # Se a música tiver pico perto de 0dBFS, garante headroom seguro para não clipar na mixagem
+    max_safe_peak = 10.0 ** (-0.5 / 20.0) # ~0.94 (-0.5dBFS)
+    current_peak = 10.0 ** (music_max_db / 20.0) if music_max_db < 0 else 1.0
+    if p * current_peak > max_safe_peak:
+        linear_gain = max_safe_peak / current_peak
+    else:
+        linear_gain = p
 
-    # Nível alvo absoluto para a música em repouso (silêncios)
-    target_bgm_db = video_mean_db + target_diff_db
-
-    # Ganho relativo a ser aplicado na faixa da música
-    gain_db = target_bgm_db - music_mean_db
-
-    # Teto de segurança anti-clipping: garante que picos nunca passem de -0.8 dBFS
-    headroom = -0.8 - music_max_db
-    max_safe_gain = max(0.0, headroom)
-    gain_db = min(max_safe_gain, gain_db)
-
-    linear_gain = 10.0 ** (gain_db / 20.0)
-
-    # Threshold calibrado para o detector de voz do sidechain:
-    # O detector é ativado gradualmente conforme o áudio da voz ultrapassa o piso de fala
-    th_db = min(-6.0, video_mean_db + 5.0)
-    th_linear = 10.0 ** (th_db / 20.0)
+    # Threshold calibrado para o detector de voz vocal_detect (highpass 200 + lowpass 3500)
+    # Threshold 0.05 garante disparo suave e consistente nas falas sem soterrar a música
+    th_linear = 0.05
 
     return round(linear_gain, 4), round(th_linear, 4)
 
@@ -666,6 +651,11 @@ TAG_IMPERIAL_GOLD  = r"\c&H0015D5FF&"   # #FFD515 (Ouro nobre imperial)
 TAG_CHAMPAGNE_GOLD = r"\c&H0060E5FF&"   # #FFE560 (Dourado champagne elegante)
 TAG_CRYSTAL_CYAN   = r"\c&H00FFF040&"   # #40F0FF (Ciano cristalino elétrico)
 TAG_DIAMOND_ICE    = r"\c&H00FFF5E0&"   # #E0F5FF (Azul diamante gelo puro)
+TAG_PASTEL_PINK    = r"\c&H00D699FF&"   # #FF99D6 (Rosa pastel chiclete / kawaii)
+TAG_PASTEL_LAVENDER= r"\c&H00FFB0E0&"   # #E0B0FF (Lavanda pastel suave)
+TAG_PASTEL_YELLOW  = r"\c&H0080FFFF&"   # #FFFF80 (Amarelo pastel iluminado)
+TAG_SEINEN_DARK    = r"\c&H00E0D0C0&"   # #C0D0E0 (Azul acinzentado misterioso / seinen)
+TAG_HORROR_BLOOD   = r"\c&H001818B8&"   # #B81818 (Vermelho sangue profundo / horror)
 
 # Animações ASS Profissionais (Anime Clássico & Viral Moderno)
 TAG_FADE_IN_OUT    = r"\fad(120,120)"
@@ -1326,6 +1316,317 @@ def build_diamond_ice_dialogues(item: Dict[str, Any], pop_animation: bool = True
     return sanitize_timeline([{"start": start, "end": end, "text": text}])
 
 
+# ==============================================================================
+# PRESETS KINETIC EMOTION (ALTA FIDELIDADE CINEMATOGRÁFICA / CAPCUT PRO)
+# ==============================================================================
+
+def build_kinetic_dramatic_dialogues(item: Dict[str, Any], pop_animation: bool = True, idx: int = 0) -> List[Dict[str, Any]]:
+    """
+    Kinetic Dramático (Fade & Clímax):
+    - Transição suave de entrada e saída.
+    - Clímax / Impacto explode em escala e cor Dourado Fogo com halo cintilante.
+    """
+    raw_text = sanitize_text(item.get("text") or item.get("word") or "").upper()
+    words = raw_text.split()
+    if not words:
+        return []
+
+    start = float(item.get("start", 0.0))
+    end = float(item.get("end", 0.0))
+    has_impact = "!" in raw_text or any(w in ACTION_IMPACT_WORDS or w in SCREAM_WORDS for w in words)
+
+    if has_impact:
+        anim = r"\fad(120,80)\t(0,60,\fscx126\fscy126)\t(60,130,\fscx106\fscy106)"
+        dram_tags = r"\c&H0015D5FF&\3c&H001080FF&\blur3\bord6\shad3"
+    else:
+        anim = r"\fad(160,160)"
+        dram_tags = r"\c&H00FFFFFF&\3c&H00000000&\bord5\shad2"
+
+    wrapped = wrap_words_to_lines(words)
+    text = f"{ass_block(TAG_CENTER_POS, dram_tags, anim)}{wrapped}"
+    return sanitize_timeline([{"start": start, "end": end, "text": text}])
+
+
+def build_kinetic_emotional_dialogues(item: Dict[str, Any], pop_animation: bool = True, idx: int = 0) -> List[Dict[str, Any]]:
+    """
+    Kinetic Emocional (Slow Breathe):
+    - Fade longo, tom frio azul gelo diamante, escala delicada que respira lentamente.
+    """
+    raw_text = sanitize_text(item.get("text") or item.get("word") or "").upper()
+    words = raw_text.split()
+    if not words:
+        return []
+
+    start = float(item.get("start", 0.0))
+    end = float(item.get("end", 0.0))
+    anim = r"\fad(200,200)\t(0,100,\fscx98\fscy98)\t(100,220,\fscx94\fscy94)"
+    emo_tags = r"\c&H00FFF5E0&\3c&H00503020&\blur2\bord4\shad2"
+    wrapped = wrap_words_to_lines(words)
+    text = f"{ass_block(TAG_CENTER_POS, emo_tags, anim)}{wrapped}"
+    return sanitize_timeline([{"start": start, "end": end, "text": text}])
+
+
+def build_kinetic_horror_dialogues(item: Dict[str, Any], pop_animation: bool = True, idx: int = 0) -> List[Dict[str, Any]]:
+    """
+    Kinetic Horror & Tensão (Glitch Sangue):
+    - Vermelho sangue profundo, tremor assustador de ângulo (frz) e blur perturbador.
+    """
+    raw_text = sanitize_text(item.get("text") or item.get("word") or "").upper()
+    words = raw_text.split()
+    if not words:
+        return []
+
+    start = float(item.get("start", 0.0))
+    end = float(item.get("end", 0.0))
+    has_impact = "!" in raw_text or any(w in ACTION_IMPACT_WORDS for w in words)
+
+    if has_impact:
+        anim = r"\fad(40,40)\t(0,30,\frz3\fscx120\fscy120\blur4)\t(30,65,\frz-3\fscx108\fscy108\blur2)\t(65,100,\frz0\fscx112\fscy112\blur1)"
+        tags = r"\c&H001818B8&\3c&H00000030&\bord7\shad4\4c&H00000080&"
+    else:
+        anim = r"\fad(60,60)\t(0,35,\frz2\blur3)\t(35,70,\frz-2\blur1)\t(70,110,\frz0\blur0)"
+        tags = r"\c&H001818B8&\3c&H00000000&\bord6\shad3"
+
+    wrapped = wrap_words_to_lines(words)
+    text = f"{ass_block(TAG_CENTER_POS, tags, anim)}{wrapped}"
+    return sanitize_timeline([{"start": start, "end": end, "text": text}])
+
+
+def build_kinetic_hype_dialogues(item: Dict[str, Any], pop_animation: bool = True, idx: int = 0) -> List[Dict[str, Any]]:
+    """
+    Kinetic Hype Impact (Super Pop):
+    - Ritmo acelerado, clusters curtos, super escala agressiva e cores em brasa (Laranja / Amarelo / Vermelho).
+    """
+    raw_text = sanitize_text(item.get("text") or item.get("word") or "").upper()
+    words = raw_text.split()
+    if not words:
+        return []
+
+    start = float(item.get("start", 0.0))
+    end = float(item.get("end", 0.0))
+    w_list = item.get("words")
+    if not w_list or len(w_list) != len(words):
+        w_list = _interpolate_words(raw_text, start, end)
+
+    clusters = []
+    i = 0
+    while i < len(w_list):
+        curr = w_list[i]
+        c_txt = curr.get("word", "").upper().strip()
+        c_s = float(curr.get("start", start))
+        c_e = float(curr.get("end", end))
+        if i + 1 < len(w_list) and (c_txt in SHORT_PARTICLES or len(c_txt) <= 3):
+            nxt = w_list[i + 1]
+            n_txt = nxt.get("word", "").upper().strip()
+            n_e = float(nxt.get("end", end))
+            clusters.append({"text": f"{c_txt} {n_txt}", "start": c_s, "end": n_e})
+            i += 2
+        else:
+            clusters.append({"text": c_txt, "start": c_s, "end": c_e})
+            i += 1
+
+    hype_palette = [TAG_EMBER_ORANGE, TAG_YELLOW, TAG_CRIMSON_FIRE]
+    events = []
+    for c_i, cl in enumerate(clusters):
+        c_color = hype_palette[(idx + c_i) % len(hype_palette)]
+        anim = r"\t(0,35,\fscx132\fscy132)\t(35,95,\fscx108\fscy108)"
+        tags = f"{c_color}\\bord8\\shad3\\4c&H00000000&"
+        text = f"{ass_block(TAG_CENTER_POS, tags, anim)}{cl['text']}"
+        events.append({"start": cl["start"], "end": cl["end"], "text": text})
+
+    return sanitize_timeline(events)
+
+
+def build_kinetic_glitch_dialogues(item: Dict[str, Any], pop_animation: bool = True, idx: int = 0) -> List[Dict[str, Any]]:
+    """
+    Kinetic Cyber Glitch (Distorção):
+    - Aberração cromática cibernética com stretch horizontal e distorção angular.
+    """
+    raw_text = sanitize_text(item.get("text") or item.get("word") or "").upper()
+    words = raw_text.split()
+    if not words:
+        return []
+
+    start = float(item.get("start", 0.0))
+    end = float(item.get("end", 0.0))
+    anim = r"\fad(30,30)\t(0,25,\fscx120\fscy90\frz2\blur4)\t(25,60,\fscx92\fscy112\frz-2\blur1)\t(60,100,\fscx100\fscy100\frz0\blur0)"
+    col = TAG_CYAN if idx % 2 == 0 else TAG_NEON_MAGENTA
+    glitch_tags = f"{col}\\3c&H00FF00EA&\\blur4\\bord6\\shad3\\4c&H00200020&"
+    wrapped = wrap_words_to_lines(words)
+    text = f"{ass_block(TAG_CENTER_POS, glitch_tags, anim)}{wrapped}"
+    return sanitize_timeline([{"start": start, "end": end, "text": text}])
+
+
+def build_kinetic_lyric_dialogues(item: Dict[str, Any], pop_animation: bool = True, idx: int = 0) -> List[Dict[str, Any]]:
+    """
+    Kinetic Lyric Beat (Bounce Rítmico):
+    - Estilo clipe de música: palavra atual salta no beat e brilha em dourado/branco, palavras secundárias atenuadas.
+    """
+    raw_text = sanitize_text(item.get("text") or item.get("word") or "").upper()
+    words = raw_text.split()
+    if not words:
+        return []
+
+    start = float(item.get("start", 0.0))
+    end = float(item.get("end", 0.0))
+    w_list = item.get("words")
+    if not w_list or len(w_list) != len(words):
+        w_list = _interpolate_words(raw_text, start, end)
+
+    events = []
+    mid = (len(words) + 1) // 2 if len(words) > 3 else len(words)
+
+    for i, w_obj in enumerate(w_list):
+        w_s = float(w_obj.get("start", start))
+        w_e = float(w_obj.get("end", end))
+
+        formatted_words = []
+        blur_tag = r"\blur2"
+        dim_tag = r"\alpha&H45&"
+        undim_tag = r"\alpha&H00&"
+        bord_tag = r"\bord6"
+        for j, w in enumerate(words):
+            if j == i:
+                anim = r"\t(0,40,\fscy126\fscx94)\t(40,95,\fscy102\fscx100)"
+                col = TAG_CHAMPAGNE_GOLD
+                blk_active = ass_block(col, anim, blur_tag)
+                blk_white = ass_block(TAG_WHITE)
+                formatted_words.append(f"{blk_active}{w}{blk_white}")
+            else:
+                blk_dim = ass_block(dim_tag)
+                blk_undim = ass_block(undim_tag)
+                formatted_words.append(f"{blk_dim}{w}{blk_undim}")
+
+        if len(words) > 3:
+            line1 = " ".join(formatted_words[:mid])
+            line2 = " ".join(formatted_words[mid:])
+            content = f"{line1}\\N{line2}"
+        else:
+            content = " ".join(formatted_words)
+
+        blk_base = ass_block(TAG_CENTER_POS, TAG_WHITE, bord_tag)
+        full_text = f"{blk_base}{content}"
+        events.append({"start": w_s, "end": w_e, "text": full_text})
+
+    return sanitize_timeline(events)
+
+
+def build_kinetic_minimal_dialogues(item: Dict[str, Any], pop_animation: bool = True, idx: int = 0) -> List[Dict[str, Any]]:
+    """
+    Kinetic Minimal Bold (Viral Clean / Alex Hormozi):
+    - Branco cinematográfico puro, impacto em escala sem cores distrativas.
+    """
+    return build_word_by_word_dialogues(item, pop_animation=pop_animation, mode="clean", global_idx=idx)
+
+
+def build_kinetic_elegant_dialogues(item: Dict[str, Any], pop_animation: bool = True, idx: int = 0) -> List[Dict[str, Any]]:
+    """
+    Kinetic Ouro Nobre (Elegante & Fade):
+    - Slide suave ascendente, ouro imperial + branco nobre com halo sutil.
+    """
+    raw_text = sanitize_text(item.get("text") or item.get("word") or "").upper()
+    words = raw_text.split()
+    if not words:
+        return []
+
+    start = float(item.get("start", 0.0))
+    end = float(item.get("end", 0.0))
+    anim = r"\fad(120,120)\t(0,70,\fscy108)\t(70,140,\fscy100)"
+    eleg_tags = r"\c&H0015D5FF&\3c&H001050A0&\blur3\bord5\shad2"
+    wrapped = wrap_words_to_lines(words)
+    text = f"{ass_block(TAG_CENTER_POS, eleg_tags, anim)}{wrapped}"
+    return sanitize_timeline([{"start": start, "end": end, "text": text}])
+
+
+def build_kinetic_smooth_dialogues(item: Dict[str, Any], pop_animation: bool = True, idx: int = 0) -> List[Dict[str, Any]]:
+    """
+    Kinetic Fluido (Ondulação Suave):
+    - Ondulação suave estilo onda oceânica, transição relaxada.
+    """
+    raw_text = sanitize_text(item.get("text") or item.get("word") or "").upper()
+    words = raw_text.split()
+    if not words:
+        return []
+
+    start = float(item.get("start", 0.0))
+    end = float(item.get("end", 0.0))
+    anim = TAG_KINETIC_WAVE
+    smooth_tags = r"\c&H00FFF5E0&\3c&H00A04000&\blur2\bord5\shad2"
+    wrapped = wrap_words_to_lines(words)
+    text = f"{ass_block(TAG_CENTER_POS, smooth_tags, anim)}{wrapped}"
+    return sanitize_timeline([{"start": start, "end": end, "text": text}])
+
+
+def build_kinetic_shonen_dialogues(item: Dict[str, Any], pop_animation: bool = True, idx: int = 0) -> List[Dict[str, Any]]:
+    """
+    Kinetic Shonen Power (Golpe & 💥):
+    - Estilo anime de ação máxima: zoom épico, tremor sísmico e inclusão de emojis de impacto em ataques.
+    """
+    raw_text = sanitize_text(item.get("text") or item.get("word") or "").upper()
+    words = raw_text.split()
+    if not words:
+        return []
+
+    start = float(item.get("start", 0.0))
+    end = float(item.get("end", 0.0))
+    is_attack = "!" in raw_text or any(w in ACTION_IMPACT_WORDS or w in SCREAM_WORDS for w in words)
+
+    if is_attack:
+        anim = r"\t(0,25,\frz2\fscx140\fscy140)\t(25,55,\frz-2\fscx120\fscy120)\t(55,90,\frz0\fscx115\fscy115)"
+        shonen_tags = r"\c&H0000E5FF&\3c&H000020B0&\blur4\bord8\shad4\4c&H00000000&"
+        wrapped = wrap_words_to_lines(words) + " 💥"
+    else:
+        anim = resolve_animation_tag(pop_animation, is_impact=False)
+        shonen_tags = r"\c&H00FFFFFF&\3c&H00000000&\bord6\shad3"
+        wrapped = wrap_words_to_lines(words)
+
+    text = f"{ass_block(TAG_CENTER_POS, shonen_tags, anim)}{wrapped}"
+    return sanitize_timeline([{"start": start, "end": end, "text": text}])
+
+
+def build_kinetic_seinen_dialogues(item: Dict[str, Any], pop_animation: bool = True, idx: int = 0) -> List[Dict[str, Any]]:
+    """
+    Kinetic Seinen Dark (Sombrio & Misterioso):
+    - Estilo psicológico maduro (Death Note / Berserk). Tons ardósia escuro, fade lento e clima de suspense.
+    """
+    raw_text = sanitize_text(item.get("text") or item.get("word") or "").upper()
+    words = raw_text.split()
+    if not words:
+        return []
+
+    start = float(item.get("start", 0.0))
+    end = float(item.get("end", 0.0))
+    anim = r"\fad(160,160)"
+    seinen_tags = r"\c&H00E0D0C0&\3c&H00451835&\bord5\shad3\4c&H00100508&"
+    wrapped = wrap_words_to_lines(words)
+    text = f"{ass_block(TAG_CENTER_POS, seinen_tags, anim)}{wrapped}"
+    return sanitize_timeline([{"start": start, "end": end, "text": text}])
+
+
+def build_kinetic_kawaii_dialogues(item: Dict[str, Any], pop_animation: bool = True, idx: int = 0) -> List[Dict[str, Any]]:
+    """
+    Kinetic Kawaii Pop (Pastel & Sparkles ✨):
+    - Cores pastel doces (rosa, lavanda, amarelo), salto elástico tipo gelatina e emojis fofos.
+    """
+    raw_text = sanitize_text(item.get("text") or item.get("word") or "").upper()
+    words = raw_text.split()
+    if not words:
+        return []
+
+    start = float(item.get("start", 0.0))
+    end = float(item.get("end", 0.0))
+    anim = r"\t(0,55,\fscx120\fscy85)\t(55,105,\fscx92\fscy115)\t(105,150,\fscx100\fscy100)"
+    col = TAG_PASTEL_PINK if idx % 2 == 0 else TAG_PASTEL_LAVENDER
+    kawaii_tags = f"{col}\\3c&H00300050&\\blur3\\bord6\\shad3\\4c&H00FFFFFF&"
+    wrapped = wrap_words_to_lines(words)
+    if idx % 2 == 0:
+        wrapped += " ✨"
+    else:
+        wrapped += " 🌸"
+    text = f"{ass_block(TAG_CENTER_POS, kawaii_tags, anim)}{wrapped}"
+    return sanitize_timeline([{"start": start, "end": end, "text": text}])
+
+
 def generate_dialogue_events(
     item: Dict[str, Any],
     style_preset: str = "smart_situational",
@@ -1333,7 +1634,33 @@ def generate_dialogue_events(
     pop_animation: bool = True
 ) -> List[Dict[str, Any]]:
     """Roteia cada item para o gerador especializado correspondente."""
-    if style_preset == "smart_situational":
+    # Presets Kinetic Emotion
+    if style_preset in ("kinetic_dramatic", "dramatic"):
+        return build_kinetic_dramatic_dialogues(item, pop_animation=pop_animation, idx=dialogue_index)
+    elif style_preset in ("kinetic_emotional", "emotional"):
+        return build_kinetic_emotional_dialogues(item, pop_animation=pop_animation, idx=dialogue_index)
+    elif style_preset in ("kinetic_horror", "horror"):
+        return build_kinetic_horror_dialogues(item, pop_animation=pop_animation, idx=dialogue_index)
+    elif style_preset in ("kinetic_hype", "hype"):
+        return build_kinetic_hype_dialogues(item, pop_animation=pop_animation, idx=dialogue_index)
+    elif style_preset in ("kinetic_glitch", "cyber_glitch"):
+        return build_kinetic_glitch_dialogues(item, pop_animation=pop_animation, idx=dialogue_index)
+    elif style_preset in ("kinetic_lyric", "lyric"):
+        return build_kinetic_lyric_dialogues(item, pop_animation=pop_animation, idx=dialogue_index)
+    elif style_preset in ("kinetic_minimal", "minimal_bold"):
+        return build_kinetic_minimal_dialogues(item, pop_animation=pop_animation, idx=dialogue_index)
+    elif style_preset in ("kinetic_elegant", "elegant_gold"):
+        return build_kinetic_elegant_dialogues(item, pop_animation=pop_animation, idx=dialogue_index)
+    elif style_preset in ("kinetic_smooth", "smooth_wave"):
+        return build_kinetic_smooth_dialogues(item, pop_animation=pop_animation, idx=dialogue_index)
+    elif style_preset in ("kinetic_shonen", "shonen_power"):
+        return build_kinetic_shonen_dialogues(item, pop_animation=pop_animation, idx=dialogue_index)
+    elif style_preset in ("kinetic_seinen", "seinen_dark"):
+        return build_kinetic_seinen_dialogues(item, pop_animation=pop_animation, idx=dialogue_index)
+    elif style_preset in ("kinetic_kawaii", "kawaii_pop"):
+        return build_kinetic_kawaii_dialogues(item, pop_animation=pop_animation, idx=dialogue_index)
+    # Presets Tradicionais
+    elif style_preset == "smart_situational":
         return build_smart_situational_dialogues(item, pop_animation=pop_animation, idx=dialogue_index)
     elif style_preset in ("cyberpunk_neon", "neon"):
         return build_cyberpunk_neon_dialogues(item, pop_animation=pop_animation, idx=dialogue_index)
@@ -1429,8 +1756,12 @@ def generate_ass_subtitles(
             pass
 
     font_name = "Lovely Scream Queens"
-    if "word_by_word" in style_preset or style_preset == "rapid":
+    if "word_by_word" in style_preset or style_preset in ("rapid", "kinetic_hype", "kinetic_shonen"):
         font_size = 84
+    elif style_preset in ("kinetic_emotional", "kinetic_seinen"):
+        font_size = 72
+    elif style_preset in ("kinetic_kawaii", "kinetic_elegant"):
+        font_size = 78
 
     lines = [
         "[Script Info]",
@@ -1515,7 +1846,7 @@ def get_anti_copyright_dsp(mode: str = "advanced") -> str:
             "equalizer=f=3200:t=q:w=1.5:g=-3.5,"
             "highpass=f=40,"
             "stereowiden=delay=22:feedback=0.28:crossfeed=0.25,"
-            "acompressor=threshold=-18dB:ratio=3.0:attack=10:release=180"
+            "acompressor=threshold=-18dB:ratio=3.0:attack=10:release=180:makeup=2.1"
         )
     else:
         # Default: advanced
@@ -1525,7 +1856,7 @@ def get_anti_copyright_dsp(mode: str = "advanced") -> str:
             "equalizer=f=2800:t=q:w=1.5:g=2.2,"
             "highpass=f=35,"
             "stereowiden=delay=16:feedback=0.22:crossfeed=0.2,"
-            "acompressor=threshold=-16dB:ratio=2.2:attack=15:release=200"
+            "acompressor=threshold=-16dB:ratio=2.2:attack=15:release=200:makeup=2.8"
         )
 
 
@@ -1714,10 +2045,10 @@ def render_video_with_style(
         if has_music:
             music_ss = parse_time_to_seconds(music_start)
             if music_ss > 0:
-                inputs += ["-ss", f"{music_ss:.2f}", "-i", music_path]
+                inputs += ["-stream_loop", "-1", "-ss", f"{music_ss:.2f}", "-i", music_path]
                 log(f"Musica iniciada no minuto/segundo selecionado: {music_ss:.1f}s (pulo de introducao).")
             else:
-                inputs += ["-i", music_path]
+                inputs += ["-stream_loop", "-1", "-i", music_path]
 
             music_input_idx = 2
 
@@ -1751,9 +2082,9 @@ def render_video_with_style(
                 # - balanced: Transição estável (-8dB a -9dB), release equilibrado (1000ms)
                 # - aggressive: Foco total na voz (-11dB a -12dB), release firme (850ms)
                 ducking_presets = {
-                    "cinema": {"ratio": 1.9, "attack": 120, "release": 1200, "knee": 4.5, "name": "Cinema & Anime (Fluido -6dB)"},
-                    "balanced": {"ratio": 2.3, "attack": 100, "release": 1000, "knee": 4.0, "name": "Equilibrado (Suave -9dB)"},
-                    "aggressive": {"ratio": 2.8, "attack": 80, "release": 850, "knee": 3.5, "name": "Foco na Voz (-12dB)"},
+                    "cinema": {"ratio": 1.35, "threshold": 0.05, "attack": 80, "release": 900, "knee": 3.0, "name": "Cinema & Anime (Fluido -3dB a -4dB)"},
+                    "balanced": {"ratio": 1.55, "threshold": 0.045, "attack": 60, "release": 750, "knee": 2.5, "name": "Equilibrado (Suave -5dB a -6dB)"},
+                    "aggressive": {"ratio": 1.85, "threshold": 0.04, "attack": 40, "release": 600, "knee": 2.0, "name": "Foco na Voz (-8dB)"},
                 }
                 params = ducking_presets.get(ducking_mode, ducking_presets["cinema"])
                 rat = params["ratio"]
@@ -1768,7 +2099,7 @@ def render_video_with_style(
                     f"[vocal_sc]highpass=f=200,lowpass=f=3500[vocal_voice];"
                     f"{bgm_prep}[bgm_raw];"
                     f"[bgm_raw][vocal_voice]sidechaincompress=threshold={th_linear}:ratio={rat}:attack={att}:release={rel}:knee={kne}[bgm];"
-                    f"[vocal_mix][bgm]amix=inputs=2:duration=first:dropout_transition=2[aout]"
+                    f"[vocal_mix][bgm]amix=inputs=2:duration=first:dropout_transition=2:normalize=0,alimiter=limit=0.98[aout]"
                 )
                 log(f"Auto Ducking Fluido ativado [{p_name}]: Música calibrada proporcional ao vídeo, transição suave ({rel}ms) sem bombeamento.")
             else:
@@ -1778,7 +2109,7 @@ def render_video_with_style(
                 af = (
                     f"{vocal_filter};"
                     f"{bgm_filter};"
-                    f"[vocal][bgm]amix=inputs=2:duration=first:dropout_transition=2[aout]"
+                    f"[vocal][bgm]amix=inputs=2:duration=first:dropout_transition=2:normalize=0,alimiter=limit=0.98[aout]"
                 )
                 log(f"Volume de Música Constante (Calibrado ao Vídeo): Estável na medida certa, sem oscilações.")
         else:

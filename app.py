@@ -649,6 +649,21 @@ class VideoUpscalerApp(ctk.CTk):
         self.audio_enhance_var = ctk.StringVar(value=list(AUDIO_ENHANCE_OPTIONS.keys())[0])
         ctk.CTkOptionMenu(ae_col, values=list(AUDIO_ENHANCE_OPTIONS.keys()), variable=self.audio_enhance_var, font=ctk.CTkFont(size=12), height=36, corner_radius=8).pack(fill="x")
 
+        # Botão de Blindagem Direta 1-Clique para vídeos prontos
+        shield_row = ctk.CTkFrame(card, fg_color="transparent")
+        shield_row.pack(fill="x", padx=16, pady=(0, 10))
+        self.shield_direct_btn = ctk.CTkButton(
+            shield_row,
+            text="🛡️ Blindar Vídeo Pronto para YouTube (1-Clique)",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            fg_color="#064e3b", hover_color="#047857",
+            border_width=1, border_color="#10b981",
+            text_color="#34d399",
+            height=34, corner_radius=8,
+            command=self._start_standalone_shield_direct,
+        )
+        self.shield_direct_btn.pack(side="left")
+
         # ── Preview: computed target dimensions ──
         self.dims_preview_label = ctk.CTkLabel(
             card, text="",
@@ -1548,6 +1563,62 @@ class VideoUpscalerApp(ctk.CTk):
                 messagebox.showerror("Erro", "Não foi possível abrir o player de comparação (ffplay).")
         else:
             messagebox.showerror("Erro", "Arquivos não encontrados para comparação.")
+
+    def _start_standalone_shield_direct(self):
+        """Blindar vídeo para YouTube em 1 clique diretamente da aba de Upscaling."""
+        initial_file = self.input_path if hasattr(self, "input_path") and self.input_path and os.path.exists(self.input_path) else ""
+        initial_dir = os.path.dirname(initial_file) if initial_file else ""
+
+        src_path = filedialog.askopenfilename(
+            title="Selecione o Vídeo para Blindar (Widescreen)",
+            initialdir=initial_dir,
+            filetypes=[("Vídeos MP4/MKV", "*.mp4 *.mkv *.mov *.avi"), ("Todos os arquivos", "*.*")]
+        )
+        if not src_path or not os.path.exists(src_path):
+            return
+
+        from pathlib import Path
+        src_p = Path(src_path)
+        default_out = str(src_p.parent / f"{src_p.stem}_youtube_safe.mp4")
+
+        out_path = filedialog.asksaveasfilename(
+            title="Salvar Vídeo Blindado Como...",
+            initialdir=str(src_p.parent),
+            initialfile=Path(default_out).name,
+            filetypes=[("Vídeo MP4", "*.mp4")]
+        )
+        if not out_path:
+            return
+
+        if not out_path.endswith(".mp4"):
+            out_path += ".mp4"
+
+        self._set_status("Blindando vídeo para YouTube via NVENC...", COLORS["warning"])
+        self._log(f"\n[BLINDAGEM 1-CLIQUE] Blindando para YouTube: {src_p.name}")
+
+        def _worker():
+            try:
+                from refiner_mastercut import apply_standalone_anti_copyright_shield
+                res_out = apply_standalone_anti_copyright_shield(
+                    input_path=src_path,
+                    output_path=out_path,
+                    mode="youtube_max",
+                    on_progress=lambda p, msg: self.after(0, self._set_status, f"{msg} ({int(p*100)}%)", COLORS["warning"]),
+                    on_log=lambda msg: self.after(0, self._log, msg)
+                )
+                def _on_success():
+                    self._set_status("[OK] Vídeo blindado com sucesso!", COLORS["success"])
+                    self._log(f"[CONCLUÍDO] Vídeo blindado salvo em: {res_out}")
+                    if messagebox.askyesno("Blindagem Concluída", f"Vídeo 100% blindado gerado com sucesso!\n\nSalvo em:\n{res_out}\n\nDeseja carregar este vídeo no Upscaling agora?"):
+                        self._load_video(res_out)
+                self.after(0, _on_success)
+            except Exception as e:
+                err_msg = str(e)
+                self.after(0, lambda: self._set_status(f"Erro na blindagem: {err_msg}", COLORS["error"]))
+                self.after(0, lambda: messagebox.showerror("Erro na Blindagem", f"Falha ao blindar vídeo:\n{err_msg}"))
+
+        import threading
+        threading.Thread(target=_worker, daemon=True).start()
 
 
 # ── Drag & Drop Support ──────────────────────────────────────────────────────

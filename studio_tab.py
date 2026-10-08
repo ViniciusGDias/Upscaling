@@ -129,6 +129,10 @@ class StudioPipelineTab(ctk.CTkFrame):
         self.input_path = ctk.StringVar(value="")
         self.output_dir = ctk.StringVar(value="")
 
+        self._anim_timer = None
+        self._anim_frames = []
+        self._anim_frame_idx = 0
+
         # Traces para atualização em tempo real do resumo de cortes
         self.trim_enabled.trace_add("write", lambda *a: self._update_trim_summary())
         self.trim_start.trace_add("write", lambda *a: self._update_trim_summary())
@@ -494,7 +498,15 @@ class StudioPipelineTab(ctk.CTkFrame):
             text_color=COLORS["text_secondary"],
             anchor="w"
         )
-        self.lbl_preview_desc.grid(row=0, column=2, padx=(8, 14), pady=8, sticky="ew")
+        self.lbl_preview_desc.grid(row=0, column=2, padx=(8, 10), pady=8, sticky="ew")
+
+        self.lbl_anim_live = ctk.CTkLabel(
+            self.preview_card,
+            text="● AO VIVO",
+            font=ctk.CTkFont(size=9, weight="bold"),
+            text_color=COLORS["success"]
+        )
+        self.lbl_anim_live.grid(row=0, column=3, padx=(0, 14), pady=8, sticky="e")
 
         # Inicializa o preview da legenda
         self._on_style_changed()
@@ -549,6 +561,8 @@ class StudioPipelineTab(ctk.CTkFrame):
                     self.music_ducking_menu.configure(state="disabled")
                 if hasattr(self, 'ducking_hint_label'):
                     self.ducking_hint_label.configure(text="Modo Fixo (Constante): Volume equilibrado ao vídeo (Voice Carve EQ) — sem oscilar na fala.")
+
+        self._update_vol_label = _update_vol_label
 
         self.music_volume_label = ctk.CTkLabel(row1_frame, text="Vol Fixo: 15%", font=ctk.CTkFont(size=11, weight="bold"),
                                                 text_color=COLORS["text_secondary"])
@@ -757,16 +771,45 @@ class StudioPipelineTab(ctk.CTkFrame):
                      text_color=COLORS["text_secondary"], justify="left").pack(padx=12, pady=(0, 12), anchor="w")
 
     def _on_style_changed(self, choice=None):
-        """Atualiza a pré-visualização visual do estilo de legenda selecionado em tempo real."""
+        """Atualiza a pré-visualização visual e animada do estilo de legenda em tempo real."""
         try:
+            if getattr(self, "_anim_timer", None):
+                try:
+                    self.after_cancel(self._anim_timer)
+                except Exception:
+                    pass
+                self._anim_timer = None
+
             style_label = self.subtitle_style_label.get()
             style_key = STYLE_KEY_MAP.get(style_label, "smart_situational")
             meta = subtitle_preview_helper.get_style_info(style_key)
             self.lbl_preview_badge.configure(text=meta.get("badge", "ESTILO"))
             self.lbl_preview_desc.configure(text=meta.get("tagline", ""))
-            p_img = subtitle_preview_helper.render_subtitle_preview_image(style_key, width=320, height=44)
-            self.lbl_preview_img.configure(image=p_img)
-            self.lbl_preview_img.image = p_img
+
+            self._anim_frames = subtitle_preview_helper.get_preview_animation_frames(style_key, width=320, height=44, num_frames=14)
+            self._anim_frame_idx = 0
+            if self._anim_frames:
+                self.lbl_preview_img.configure(image=self._anim_frames[0])
+                self.lbl_preview_img.image = self._anim_frames[0]
+                self._tick_preview_animation()
+            else:
+                p_img = subtitle_preview_helper.render_subtitle_preview_image(style_key, width=320, height=44)
+                self.lbl_preview_img.configure(image=p_img)
+                self.lbl_preview_img.image = p_img
+        except Exception:
+            pass
+
+    def _tick_preview_animation(self):
+        try:
+            if not self.winfo_exists():
+                return
+            if not getattr(self, "_anim_frames", None):
+                return
+            self._anim_frame_idx = (self._anim_frame_idx + 1) % len(self._anim_frames)
+            frame = self._anim_frames[self._anim_frame_idx]
+            self.lbl_preview_img.configure(image=frame)
+            self.lbl_preview_img.image = frame
+            self._anim_timer = self.after(90, self._tick_preview_animation)
         except Exception:
             pass
 
@@ -1247,15 +1290,56 @@ class StudioPipelineTab(ctk.CTkFrame):
                 curr_style_key = STYLE_KEY_MAP.get(self.subtitle_style_label.get(), "dynamic_animax")
                 curr_pop = self.subtitle_pop.get()
 
-                # Abre a janela modal na thread principal passando o vídeo de trabalho e sua duração real
+                m_path = self.music_path.get().strip() if self.include_music.get() else None
+                m_vol = self.music_volume_slider.get() / 100.0
+                m_start = self.music_start.get().strip()
+
+                def _on_sub_approved(items, s_key, pop, final_m_vol=None):
+                    if final_m_vol is not None:
+                        val_pct = int(final_m_vol * 100)
+                        self.music_volume_slider.set(val_pct)
+                        if hasattr(self, '_update_vol_label'):
+                            self._update_vol_label(val_pct)
+                    self._on_subtitles_approved(work_video, items, s_key, pop, final_m_vol)
+
+                def _on_vol_changed_in_modal(new_vol):
+                    val_pct = int(new_vol * 100)
+                    self.music_volume_slider.set(val_pct)
+                    if hasattr(self, '_update_vol_label'):
+                        self._update_vol_label(val_pct)
+
+                anti_cp = self.anti_copyright.get()
+                anti_mode_map = {
+                    "Avançado (Pitch + EQ + Estéreo)": "advanced",
+                    "Agressivo (Anti-Bloqueio Máximo)": "aggressive",
+                    "Sutil (Apenas Harmônicos)": "subtle",
+                }
+                anti_mode_key = anti_mode_map.get(self.anti_copyright_mode.get(), "advanced")
+                ducking_map = {
+                    "Cinema & Anime (Ultra Fluido -6dB)": "cinema",
+                    "Equilibrado (Recomendado -9dB)": "balanced",
+                    "Forte (Voz em Destaque -14dB)": "aggressive",
+                }
+                ducking_key = ducking_map.get(self.music_ducking_mode.get(), "cinema")
+                ducking_active = self.music_auto_ducking.get()
+
+                # Abre a janela modal na thread principal passando o vídeo de trabalho e a música de fundo com ducking e anti-copyright
                 self.after(0, lambda: SubtitleEditorDialog(
                     parent=self.winfo_toplevel(),
                     items=corrected_chunks,
-                    on_confirm=lambda items, s_key, pop: self._on_subtitles_approved(work_video, items, s_key, pop),
+                    on_confirm=_on_sub_approved,
                     current_style=curr_style_key,
                     current_pop=curr_pop,
                     video_duration=video_dur if video_dur > 0 else None,
-                    video_path=work_video
+                    video_path=work_video,
+                    music_path=m_path,
+                    music_volume=m_vol,
+                    music_start=m_start,
+                    music_auto_ducking=ducking_active,
+                    ducking_mode=ducking_key,
+                    anti_copyright=anti_cp,
+                    anti_copyright_mode=anti_mode_key,
+                    on_music_volume_change=_on_vol_changed_in_modal
                 ))
             except Exception as e:
                 self._log(f"Erro na revisao: {e}")
@@ -1358,7 +1442,7 @@ class StudioPipelineTab(ctk.CTkFrame):
 
         threading.Thread(target=self._pipeline_direct_thread, args=(input_path,), daemon=True).start()
 
-    def _on_subtitles_approved(self, input_path: str, edited_items: List[Dict[str, Any]], style_key: str, pop_enabled: Any):
+    def _on_subtitles_approved(self, input_path: str, edited_items: List[Dict[str, Any]], style_key: str, pop_enabled: Any, final_music_vol: Optional[float] = None):
         """Callback chamado quando o usuario clica em 'GERAR VÍDEO FINAL' no editor modal."""
         self._log(f"Legendas confirmadas pelo usuario ({len(edited_items)} falas). Estilo: {style_key}")
 
@@ -1370,7 +1454,7 @@ class StudioPipelineTab(ctk.CTkFrame):
 
         threading.Thread(
             target=self._render_thread,
-            args=(input_path, edited_items, style_key, pop_enabled),
+            args=(input_path, edited_items, style_key, pop_enabled, final_music_vol),
             daemon=True
         ).start()
 
@@ -1408,7 +1492,7 @@ class StudioPipelineTab(ctk.CTkFrame):
             self.after(0, lambda: self.review_btn.configure(state="normal"))
             self.after(0, lambda: self.cancel_btn.configure(state="disabled"))
 
-    def _render_thread(self, input_path: str, items: List[Dict[str, Any]], subtitle_style: str, subtitle_pop: Any):
+    def _render_thread(self, input_path: str, items: List[Dict[str, Any]], subtitle_style: str, subtitle_pop: Any, final_music_vol: Optional[float] = None):
         """Executa a renderizacao FFmpeg final com os itens de legenda aprovados."""
         try:
             from subtitle_renderer import render_video_with_style
@@ -1421,7 +1505,10 @@ class StudioPipelineTab(ctk.CTkFrame):
             output_path = str(orig_p.parent / f"{orig_p.stem}_studio_final.mp4")
 
             music_path = self.music_path.get().strip() if self.include_music.get() else None
-            music_vol = self.music_volume_slider.get() / 100.0
+            if final_music_vol is not None:
+                music_vol = max(0.0, min(1.0, float(final_music_vol)))
+            else:
+                music_vol = self.music_volume_slider.get() / 100.0
             music_start = self.music_start.get().strip()
             anti_cp = self.anti_copyright.get()
 
@@ -1518,3 +1605,12 @@ class StudioPipelineTab(ctk.CTkFrame):
         if not self.title_text.get():
             self.title_text.set(stem[:50].upper())
         self._log(f"Video carregado do pipeline: {Path(path).name}")
+
+    def destroy(self):
+        if getattr(self, "_anim_timer", None):
+            try:
+                self.after_cancel(self._anim_timer)
+            except Exception:
+                pass
+            self._anim_timer = None
+        super().destroy()

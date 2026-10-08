@@ -240,32 +240,10 @@ class YTShortsAnalyzerTab(ctk.CTkFrame):
         self.txt_context.pack(fill="x")
         self.txt_context.insert("1.0", "Ex: anime edit do Gojo, foco em luta épica, público jovem/otaku.")
 
-        # Pílulas de Contexto Rápido
-        chips_frame = ctk.CTkFrame(ctx_box, fg_color="transparent")
-        chips_frame.pack(fill="x", pady=(4, 0))
-
-        quick_chips = [
-            ("🔥 Luta/Clímax", "foco em luta épica, ação frenética e clímax"),
-            ("😂 Comédia", "foco em humor, meme, cena engraçada e descontraída"),
-            ("🤫 Mistério", "foco em mistério, revelação chocante e suspense"),
-            ("💔 Emocional", "foco em cena triste, despedida e arcos dramáticos"),
-            ("⚡ Plot Twist", "foco em reviravolta insana e quebra de expectativa")
-        ]
-        for label, val in quick_chips:
-            btn_chip = ctk.CTkButton(
-                chips_frame,
-                text=label,
-                height=22,
-                font=ctk.CTkFont(size=10),
-                fg_color="#18181b",
-                hover_color="#27272a",
-                border_width=1,
-                border_color="#3f3f46",
-                text_color="#e4e4e7",
-                corner_radius=11,
-                command=lambda v=val: self._append_context_chip(v)
-            )
-            btn_chip.pack(side="left", padx=(0, 3), pady=2)
+        # Pílulas de Contexto Rápido Dinâmicas (adaptam-se à categoria Anime / Dorama)
+        self.chips_frame = ctk.CTkFrame(ctx_box, fg_color="transparent")
+        self.chips_frame.pack(fill="x", pady=(4, 0))
+        self._render_quick_chips("Anime")
 
         # Idioma e Opções
         opt_row = ctk.CTkFrame(left_frame, fg_color="transparent")
@@ -408,7 +386,7 @@ class YTShortsAnalyzerTab(ctk.CTkFrame):
         anime = self.ent_anime.get().strip()
         character = self.ent_character.get().strip()
         context = self.txt_context.get("1.0", "end").strip() if hasattr(self, "txt_context") else ""
-        if "Ex: anime edit" in context:
+        if "Ex: anime edit" in context or "Ex: Cena emocionante" in context:
             context = ""
         lang_str = self.seg_lang.get() if hasattr(self, "seg_lang") else "PT"
         lang = "en" if "EN" in lang_str else ("es" if "ES" in lang_str else "pt")
@@ -443,19 +421,89 @@ class YTShortsAnalyzerTab(ctk.CTkFrame):
 
         threading.Thread(target=worker, daemon=True).start()
 
+    def _render_quick_chips(self, category="Anime"):
+        if not hasattr(self, "chips_frame"):
+            return
+        for widget in self.chips_frame.winfo_children():
+            widget.destroy()
+
+        if category == "Dorama":
+            quick_chips = [
+                ("💖 Romance / Química", "foco no romance arrebatador, química intensa entre os protagonistas e tensão de proximidade"),
+                ("😭 Choro / Separação", "foco no momento mais emocionante, lágrimas, despedida dolorosa e desabafo"),
+                ("👑 Vingança / Poder", "foco na virada de jogo, humilhação do vilão, protagonista poderoso e volta por cima"),
+                ("😱 Revelação / Choque", "foco na revelação da verdadeira identidade, segredo de família desmascarado"),
+                ("🥺 Declaração / Fofo", "foco na confissão de sentimentos, primeiro beijo ou momento 'vou te proteger'"),
+                ("💔 Traição / Término", "foco no término dramático, quebra de confiança e discussão de casal")
+            ]
+        elif category == "Anime":
+            quick_chips = [
+                ("🔥 Luta/Clímax", "foco em luta épica, ação frenética e clímax"),
+                ("😂 Comédia", "foco em humor, meme, cena engraçada e descontraída"),
+                ("🤫 Mistério", "foco em mistério, revelação chocante e suspense"),
+                ("💔 Emocional", "foco em cena triste, despedida e arcos dramáticos"),
+                ("⚡ Plot Twist", "foco em reviravolta insana e quebra de expectativa")
+            ]
+        else:
+            quick_chips = [
+                ("🔥 Alta Energia", "foco em dinamismo, ritmo acelerado e alto impacto"),
+                ("😂 Humor / Meme", "foco em descontração, comédia e meme"),
+                ("💡 Curiosidade", "foco em fato curioso, mistério e explicação rápida"),
+                ("🎬 Storytelling", "foco em narrativa envolvente do início ao fim"),
+                ("⚡ Retenção Máxima", "foco em gancho magnético e loop perfeito")
+            ]
+
+        for label, val in quick_chips:
+            btn_chip = ctk.CTkButton(
+                self.chips_frame,
+                text=label,
+                height=22,
+                font=ctk.CTkFont(size=10),
+                fg_color="#18181b",
+                hover_color="#27272a",
+                border_width=1,
+                border_color="#3f3f46",
+                text_color="#e4e4e7",
+                corner_radius=11,
+                command=lambda v=val: self._append_context_chip(v)
+            )
+            btn_chip.pack(side="left", padx=(0, 3), pady=2)
+
     def _on_category_change(self, choice):
         if choice == "Dorama":
             self.lbl_work.configure(text="Nome do Dorama:")
-            self.ent_anime.configure(placeholder_text="Ex: Pousando no Amor, Vincenzo, Goblin...")
-            self.lbl_char.configure(text="Personagem(ns):")
+            self.ent_anime.configure(placeholder_text="Ex: Pousando no Amor, Vincenzo, Rainha das Lágrimas, Goblin...")
+            self.lbl_char.configure(text="Personagem(ns) / Atores:")
+            self.ent_character.configure(placeholder_text="Ex: Ri Jeong-hyeok, Hong Hae-in, Hyun Bin, Song Joong-ki...")
+            if hasattr(self, "opt_template"):
+                self.opt_template.set("Dorama / Emocional")
+            if hasattr(self, "txt_context"):
+                cur_ctx = self.txt_context.get("1.0", "end").strip()
+                if not cur_ctx or "anime edit do Gojo" in cur_ctx or "Ex:" in cur_ctx:
+                    self.txt_context.delete("1.0", "end")
+                    self.txt_context.insert("1.0", "Ex: Cena emocionante do casal, conflito com a família, química intensa, revelação.")
+            self._render_quick_chips("Dorama")
         elif choice == "Anime":
             self.lbl_work.configure(text="Nome do Anime:")
-            self.ent_anime.configure(placeholder_text="Ex: Jujutsu Kaisen, One Piece, Naruto...")
+            self.ent_anime.configure(placeholder_text="Ex: Jujutsu Kaisen, One Piece, Naruto, Bleach...")
             self.lbl_char.configure(text="Personagem:")
+            self.ent_character.configure(placeholder_text="Ex: Gojo Satoru, Luffy, Zoro, Ichigo...")
+            if hasattr(self, "opt_template"):
+                self.opt_template.set("Anime / Geek Épico")
+            if hasattr(self, "txt_context"):
+                cur_ctx = self.txt_context.get("1.0", "end").strip()
+                if not cur_ctx or "Cena emocionante do casal" in cur_ctx or "Ex:" in cur_ctx:
+                    self.txt_context.delete("1.0", "end")
+                    self.txt_context.insert("1.0", "Ex: anime edit do Gojo, foco em luta épica, público jovem/otaku.")
+            self._render_quick_chips("Anime")
         else:
             self.lbl_work.configure(text="Tema / Obra:")
             self.ent_anime.configure(placeholder_text="Ex: Nome do canal, tema ou vídeo...")
             self.lbl_char.configure(text="Destaque:")
+            self.ent_character.configure(placeholder_text="Ex: Tema principal, pessoa ou assunto...")
+            if hasattr(self, "opt_template"):
+                self.opt_template.set("Padrão")
+            self._render_quick_chips("Geral")
 
     def _finish_analysis(self):
         self.is_analyzing = False

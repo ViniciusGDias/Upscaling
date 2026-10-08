@@ -17,6 +17,8 @@ from refiner_mastercut import (
     get_video_duration,
     check_video_has_audio,
     calculate_mastercut_bounds,
+    EDIT_PROFILES,
+    resolve_edit_profile,
 )
 from upscaler import (
     get_video_info,
@@ -33,6 +35,8 @@ COLORS = {
     "accent_secondary": "#059669",
     "accent_refiner": "#10b981",
     "accent_refiner_hover": "#059669",
+    "accent_studio": "#7c3aed",
+    "accent_studio_hover": "#6d28d9",
     "success": "#10b981",
     "warning": "#f59e0b",
     "error": "#ef4444",
@@ -296,7 +300,7 @@ class RefinerMastercutTab(ctk.CTkFrame):
 
         self.context_entry = ctk.CTkEntry(
             ctx_row,
-            placeholder_text="Ex: Jujutsu Kaisen 2 Episódio 17, Bleach TYBW Ep 7...",
+            placeholder_text="Ex: Pousando no Amor Ep 10, Vincenzo Ep 4, Jujutsu Kaisen 2 Ep 17...",
             font=ctk.CTkFont(family="Segoe UI", size=12),
             fg_color=COLORS["bg_dark"], border_color=COLORS["border"],
             text_color=COLORS["text_primary"],
@@ -304,99 +308,90 @@ class RefinerMastercutTab(ctk.CTkFrame):
         )
         self.context_entry.pack(fill="x")
 
-        # Refinement Aggressiveness Mode
-        mode_row = ctk.CTkFrame(inner, fg_color="transparent")
-        mode_row.pack(fill="x", pady=(0, 12))
+        # ─── DOMINANT UNIFIED EDIT PROFILE ───
+        profile_row = ctk.CTkFrame(inner, fg_color="transparent")
+        profile_row.pack(fill="x", pady=(0, 6))
 
         ctk.CTkLabel(
-            mode_row, text="Intensidade de Refinamento:",
-            font=ctk.CTkFont(family="Segoe UI", size=12),
-            text_color=COLORS["text_secondary"], anchor="w",
+            profile_row, text="Estilo Editorial Dominante:",
+            font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
+            text_color=COLORS["text_primary"], anchor="w",
         ).pack(fill="x", pady=(0, 4))
 
+        self.profile_values_map = {
+            "viral": "⚡ Edição Viral Pro (TikTok / Reels / Shorts: Alta Retenção)",
+            "dorama": "🎭 Dorama Dramático (K-Drama: Diálogos Íntegros + Tensão Emocional)",
+            "narrative": "🎬 Mastercut Narrativo (100% Cronológico, Sem Repetições)",
+            "dynamic": "🚀 Ritmo Acelerado (Shorts / Reels: Cortes Ágeis nas Pausas)",
+            "mini_movie": "🎬 Mini-Filme (Arco Completo em 4 Atos, até 2:30 min)",
+            "dialogue": "🧼 Preservar Diálogos (Corte Suave: Mantém 100% das Conversas)",
+            "hook": "🎯 Com Gancho de Abertura (Teaser de 3s no Início)",
+            "loop": "🔁 Loop Infinito (Replay Contínuo TikTok / Shorts)",
+            "auto": "🤖 Automático (IA Escolhe o Melhor Corte)",
+        }
+        self.profile_keys_by_label = {v: k for k, v in self.profile_values_map.items()}
+
+        self.edit_profile_var = ctk.StringVar(value=self.profile_values_map["viral"])
+        self.edit_profile_menu = ctk.CTkOptionMenu(
+            profile_row,
+            variable=self.edit_profile_var,
+            values=list(self.profile_values_map.values()),
+            font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
+            fg_color=COLORS["bg_dark"], button_color=COLORS["bg_dark"],
+            button_hover_color=COLORS["bg_card_hover"],
+            dropdown_fg_color=COLORS["bg_card"], dropdown_hover_color=COLORS["bg_card_hover"],
+            dropdown_text_color=COLORS["text_primary"],
+            text_color=COLORS["text_primary"],
+            height=38, corner_radius=8,
+            command=self._on_setting_changed,
+        )
+        self.edit_profile_menu.pack(fill="x")
+
+        # Backward compatibility aliases for other tabs/scripts
         self.refine_mode_var = ctk.StringVar(value="Equilibrado (Dinâmico - Padrão)")
-        self.refine_mode_menu = ctk.CTkOptionMenu(
-            mode_row,
-            variable=self.refine_mode_var,
-            values=[
-                "Preservar Conteúdo (Corta apenas silêncios mortos, mantém 100% dos diálogos)",
-                "Equilibrado (Dinâmico - Padrão: Ritmo acelerado sem perder essência)",
-                "Agressivo (Ultra-condensado: Picos emocionais e clímax máximo)",
-            ],
-            font=ctk.CTkFont(family="Segoe UI", size=12),
-            fg_color=COLORS["bg_dark"], button_color=COLORS["bg_dark"],
-            button_hover_color=COLORS["bg_card_hover"],
-            dropdown_fg_color=COLORS["bg_card"], dropdown_hover_color=COLORS["bg_card_hover"],
-            dropdown_text_color=COLORS["text_primary"],
-            text_color=COLORS["text_primary"],
-            height=34, corner_radius=8,
-            command=self._on_setting_changed,
-        )
-        self.refine_mode_menu.pack(fill="x")
-
-        # Target Duration Target
-        dur_row = ctk.CTkFrame(inner, fg_color="transparent")
-        dur_row.pack(fill="x", pady=(0, 12))
-
-        ctk.CTkLabel(
-            dur_row, text="Duração Alvo do Mastercut:",
-            font=ctk.CTkFont(family="Segoe UI", size=12),
-            text_color=COLORS["text_secondary"], anchor="w",
-        ).pack(fill="x", pady=(0, 4))
-
-        self.target_duration_var = ctk.StringVar(value="Automático Inteligente (Recomendado)")
-        self.target_duration_menu = ctk.CTkOptionMenu(
-            dur_row,
-            variable=self.target_duration_var,
-            values=[
-                "Automático Inteligente (Recomendado)",
-                "Tratar Mini-Filme / Resumo 50% (Até 2:30 min)",
-                "Manter Máximo de Conteúdo (~70-90s se vídeo for longo)",
-                "Padrão Shorts / Reels (~40s a 60s)",
-                "Curto & Rápido (~25s a 40s)",
-            ],
-            font=ctk.CTkFont(family="Segoe UI", size=12),
-            fg_color=COLORS["bg_dark"], button_color=COLORS["bg_dark"],
-            button_hover_color=COLORS["bg_card_hover"],
-            dropdown_fg_color=COLORS["bg_card"], dropdown_hover_color=COLORS["bg_card_hover"],
-            dropdown_text_color=COLORS["text_primary"],
-            text_color=COLORS["text_primary"],
-            height=34, corner_radius=8,
-            command=self._on_setting_changed,
-        )
-        self.target_duration_menu.pack(fill="x")
-
-        # Editorial Mode & Viral Retention Menu
-        editorial_row = ctk.CTkFrame(inner, fg_color="transparent")
-        editorial_row.pack(fill="x", pady=(0, 12))
-
-        ctk.CTkLabel(
-            editorial_row, text="Estilo Editorial & Retenção Viral:",
-            font=ctk.CTkFont(family="Segoe UI", size=12),
-            text_color=COLORS["text_secondary"], anchor="w",
-        ).pack(fill="x", pady=(0, 4))
-
+        self.target_duration_var = ctk.StringVar(value="Padrão Shorts / Reels (~40s a 60s)")
         self.editorial_mode_var = ctk.StringVar(value="Linear Direto (Sem Loop)")
-        self.editorial_mode_menu = ctk.CTkOptionMenu(
-            editorial_row,
-            variable=self.editorial_mode_var,
-            values=[
-                "Linear Direto (Sem Loop)",
-                "Hook de Abertura (Anti-Início Lento: Teaser 0-3s)",
-                "Loop Contextual (Replay Infinito: Conecta Fim ao Início)",
-                "Edição Viral Pro (Super Senior Editor: Hook + Reordenação + Loop)",
-            ],
-            font=ctk.CTkFont(family="Segoe UI", size=12),
-            fg_color=COLORS["bg_dark"], button_color=COLORS["bg_dark"],
-            button_hover_color=COLORS["bg_card_hover"],
-            dropdown_fg_color=COLORS["bg_card"], dropdown_hover_color=COLORS["bg_card_hover"],
-            dropdown_text_color=COLORS["text_primary"],
-            text_color=COLORS["text_primary"],
-            height=34, corner_radius=8,
-            command=self._on_setting_changed,
-        )
-        self.editorial_mode_menu.pack(fill="x")
         self.loop_mode_var = self.editorial_mode_var
+
+        # Dynamic Explanatory Card for Selected Edit Style
+        self.style_card = ctk.CTkFrame(
+            inner, fg_color=COLORS["bg_dark"],
+            corner_radius=8, border_width=1, border_color=COLORS["border"],
+        )
+        self.style_card.pack(fill="x", pady=(4, 10))
+
+        style_inner = ctk.CTkFrame(self.style_card, fg_color="transparent")
+        style_inner.pack(fill="x", padx=14, pady=10)
+
+        # Flow badge row
+        self.flow_badge_label = ctk.CTkLabel(
+            style_inner,
+            text="✨ Gancho → História → Loop",
+            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+            text_color=COLORS["accent_primary"], anchor="w",
+        )
+        self.flow_badge_label.pack(fill="x", pady=(0, 2))
+
+        # Description text
+        self.style_desc_label = ctk.CTkLabel(
+            style_inner,
+            text="",
+            font=ctk.CTkFont(family="Segoe UI", size=11),
+            text_color=COLORS["text_secondary"], justify="left", anchor="w",
+            wraplength=700,
+        )
+        self.style_desc_label.pack(fill="x", pady=(0, 4))
+
+        # Duration & Anti-cut Live Guarantee Hint Label
+        self.hint_label = ctk.CTkLabel(
+            style_inner,
+            text="Proteção Anti-Corte: Carregue um vídeo para ver a estimativa exata de retenção e duração final.",
+            font=ctk.CTkFont(family="Segoe UI", size=11, slant="italic"),
+            text_color="#10b981",
+            justify="left", anchor="w",
+            wraplength=700,
+        )
+        self.hint_label.pack(fill="x")
 
         # Toggles row: Vocal Isolation + Anti-Copyright
         toggles_row = ctk.CTkFrame(inner, fg_color="transparent")
@@ -425,26 +420,58 @@ class RefinerMastercutTab(ctk.CTkFrame):
         self.demucs_cb.pack(side="left", padx=(0, 12))
 
         self.anti_copyright_var = ctk.BooleanVar(value=True)
+        self.anti_copyright_mode_var = ctk.StringVar(value="🛡️ Blindagem Máxima YouTube (Anti-Toei)")
+
+        ac_frame = ctk.CTkFrame(toggles_row, fg_color="transparent")
+        ac_frame.pack(side="left")
+
         self.anti_copy_cb = ctk.CTkCheckBox(
-            toggles_row,
-            text="Modo Anti-Copyright (Fatiamento <=7.5s + Zoom 2.5% + DSP)",
+            ac_frame,
+            text="Anti-Copyright:",
             variable=self.anti_copyright_var,
             font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
             fg_color=COLORS["accent_primary"], hover_color=COLORS["accent_secondary"],
             border_color=COLORS["border"], corner_radius=4,
+            command=self._on_anti_copyright_toggle
         )
-        self.anti_copy_cb.pack(side="left")
+        self.anti_copy_cb.pack(side="left", padx=(0, 6))
 
-        # Duration & Anti-cut Guarantee Hint Label
-        self.hint_label = ctk.CTkLabel(
-            inner,
-            text="Proteção Anti-Corte: Carregue um vídeo para ver a estimativa exata de retenção e duração final.",
-            font=ctk.CTkFont(family="Segoe UI", size=11, slant="italic"),
-            text_color="#10b981",
-            justify="left", anchor="w",
-            wraplength=700,
+        self.anti_copy_menu = ctk.CTkOptionMenu(
+            ac_frame,
+            values=[
+                "🛡️ Blindagem Máxima YouTube (Anti-Toei)",
+                "📱 Padrão (TikTok / Reels / Leve)"
+            ],
+            variable=self.anti_copyright_mode_var,
+            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+            height=28, width=245, corner_radius=6,
+            fg_color=COLORS["bg_card"], button_color=COLORS["accent_primary"],
+            button_hover_color=COLORS["accent_secondary"]
         )
-        self.hint_label.pack(fill="x", pady=(10, 0))
+        self.anti_copy_menu.pack(side="left")
+
+        # Linha Rápida: Blindar Vídeo Pronto (1-Clique)
+        shield_quick_row = ctk.CTkFrame(inner, fg_color="transparent")
+        shield_quick_row.pack(fill="x", pady=(10, 0))
+
+        ctk.CTkLabel(
+            shield_quick_row,
+            text="⚡ Já tem o vídeo pronto (editado ou upscalado)?",
+            font=ctk.CTkFont(family="Segoe UI", size=11),
+            text_color=COLORS["text_secondary"]
+        ).pack(side="left", padx=(0, 8))
+
+        self.shield_standalone_quick_btn = ctk.CTkButton(
+            shield_quick_row,
+            text="🛡️ Blindar Vídeo Pronto para YouTube (1-Clique)",
+            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+            fg_color="#064e3b", hover_color="#047857",
+            border_width=1, border_color="#10b981",
+            text_color="#34d399",
+            height=30, corner_radius=6,
+            command=self._start_standalone_shield
+        )
+        self.shield_standalone_quick_btn.pack(side="left")
 
     # ── Output Section ────────────────────────────────────────────────────
 
@@ -507,6 +534,19 @@ class RefinerMastercutTab(ctk.CTkFrame):
             command=self._start_mastercut,
         )
         self.generate_btn.pack(side="left", fill="x", expand=True, padx=(0, 8))
+
+        self.shield_standalone_btn = ctk.CTkButton(
+            row, text="Blindar Vídeo Pronto",
+            image=icon_manager.get_icon("shield", size=(16, 16), color="#10b981"),
+            compound="left",
+            font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
+            fg_color=COLORS["bg_card"], hover_color=COLORS["bg_card_hover"],
+            border_width=1, border_color=COLORS["border"],
+            text_color="#10b981",
+            height=46, corner_radius=10, width=175,
+            command=self._start_standalone_shield,
+        )
+        self.shield_standalone_btn.pack(side="left", padx=(0, 8))
 
         self.clear_cache_btn = ctk.CTkButton(
             row, text="Limpar Cache IA",
@@ -612,12 +652,12 @@ class RefinerMastercutTab(ctk.CTkFrame):
         )
         self.stats_label.pack(fill="x", pady=(4, 12))
 
-        # Action buttons row: Preview + Send to Upscaler
+        # Action buttons row: Preview + Send to Studio + Send to Upscaler + Folder
         btn_row = ctk.CTkFrame(r_inner, fg_color="transparent")
         btn_row.pack(fill="x")
 
         self.preview_btn = ctk.CTkButton(
-            btn_row, text="Pré-visualizar Vídeo",
+            btn_row, text="Pré-visualizar",
             image=icon_manager.get_icon("play", size=(16, 16), color="#fafafa"),
             compound="left",
             font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
@@ -628,6 +668,18 @@ class RefinerMastercutTab(ctk.CTkFrame):
             command=self._preview_video,
         )
         self.preview_btn.pack(side="left", fill="x", expand=True, padx=(0, 6))
+
+        self.send_to_studio_btn = ctk.CTkButton(
+            btn_row, text="Enviar ao Studio",
+            image=icon_manager.get_icon("studio", size=(16, 16), color="#fafafa"),
+            compound="left",
+            font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
+            fg_color=COLORS["accent_studio"], hover_color=COLORS["accent_studio_hover"],
+            text_color="#fafafa",
+            height=42, corner_radius=10,
+            command=self._send_to_studio,
+        )
+        self.send_to_studio_btn.pack(side="left", fill="x", expand=True, padx=(0, 6))
 
         self.send_to_upscaler_btn = ctk.CTkButton(
             btn_row, text="Usar no Upscaler",
@@ -649,7 +701,7 @@ class RefinerMastercutTab(ctk.CTkFrame):
             fg_color=COLORS["bg_dark"], hover_color=COLORS["bg_card_hover"],
             border_width=1, border_color=COLORS["border"],
             text_color=COLORS["text_secondary"],
-            height=42, corner_radius=10, width=100,
+            height=42, corner_radius=10, width=90,
             command=self._open_output_folder,
         )
         self.open_folder_btn.pack(side="right")
@@ -691,15 +743,13 @@ class RefinerMastercutTab(ctk.CTkFrame):
             if not self.info_card.winfo_ismapped():
                 self.info_card.pack(fill="x", pady=(0, 10))
 
-            # Auto-tune for short clips (e.g. <= 75s) to protect key moments
-            if info.duration <= 75.0:
-                cur_mode = self._get_refine_mode_key()
-                if cur_mode == "aggressive":
-                    self.refine_mode_var.set("Equilibrado (Dinâmico - Padrão)")
-            elif info.duration >= 110.0:
-                # Long clip (>= 2m up to 5m, e.g. mini-movie/arc): suggest Tratar Mini-Filme if on default
-                if self.target_duration_var.get() == "Automático Inteligente (Recomendado)":
-                    self.target_duration_var.set("Tratar Mini-Filme / Resumo 50% (Até 2:30 min)")
+            # Auto-tune edit profile according to clip duration ONLY if on auto
+            cur_key = self._get_current_profile_key()
+            if cur_key == "auto":
+                if info.duration >= 110.0:
+                    self.set_profile_by_key("mini_movie")
+                elif info.duration <= 40.0:
+                    self.set_profile_by_key("dynamic")
 
             self._update_duration_hint()
 
@@ -776,37 +826,59 @@ class RefinerMastercutTab(ctk.CTkFrame):
         except Exception as e:
             messagebox.showwarning("Aviso", f"Não foi possível remover do cache: {e}")
 
+    def set_profile_by_key(self, key: str):
+        """Programmatically switch edit profile (e.g. from Director Tab or auto-detection)."""
+        if hasattr(self, "profile_values_map") and key in self.profile_values_map:
+            val = self.profile_values_map[key]
+            if hasattr(self, "edit_profile_var"):
+                self.edit_profile_var.set(val)
+            self._sync_profile_to_legacy_vars()
+            self._update_duration_hint()
+
+    def _get_current_profile_key(self) -> str:
+        val = self.edit_profile_var.get() if hasattr(self, "edit_profile_var") else ""
+        if hasattr(self, "profile_keys_by_label") and val in self.profile_keys_by_label:
+            return self.profile_keys_by_label[val]
+        for k, v in getattr(self, "profile_values_map", {}).items():
+            if k in val.lower() or val in v:
+                return k
+        return "viral"
+
+    def _get_resolved_profile(self) -> tuple:
+        dur = self.current_video_info.duration if self.current_video_info else 0.0
+        is_continuous = bool(self._current_cut_origin and self._current_cut_origin.get("is_continuous"))
+        raw_key = self._get_current_profile_key()
+        return resolve_edit_profile(raw_key, dur, is_arc=is_continuous)
+
+    def _sync_profile_to_legacy_vars(self):
+        resolved_key, profile = self._get_resolved_profile()
+        if hasattr(self, "refine_mode_var"):
+            self.refine_mode_var.set(profile.get("refine_mode", "balanced"))
+        if hasattr(self, "target_duration_var"):
+            self.target_duration_var.set(profile.get("target_duration_mode", "standard"))
+        if hasattr(self, "editorial_mode_var"):
+            self.editorial_mode_var.set(profile.get("editorial_mode", "viral_editor"))
+
     def _get_refine_mode_key(self) -> str:
-        val = self.refine_mode_var.get() if hasattr(self, "refine_mode_var") else ""
-        if "Preservar" in val:
-            return "soft"
-        if "Agressivo" in val:
-            return "aggressive"
-        return "balanced"
+        resolved_key, profile = self._get_resolved_profile()
+        return profile.get("refine_mode", "balanced")
 
     def _get_target_duration_key(self) -> str:
-        val = self.target_duration_var.get() if hasattr(self, "target_duration_var") else ""
-        if "Mini-Filme" in val or "Resumo 50%" in val:
-            return "mini_movie"
-        if "Manter Máximo" in val:
-            return "max_retention"
-        if "Padrão Shorts" in val:
-            return "standard"
-        if "Curto & Rápido" in val:
-            return "short"
-        return "auto"
+        resolved_key, profile = self._get_resolved_profile()
+        return profile.get("target_duration_mode", "standard")
 
     def _get_editorial_mode_key(self) -> str:
-        val = self.editorial_mode_var.get() if hasattr(self, "editorial_mode_var") else ""
-        if "Hook de Abertura" in val:
-            return "hook"
-        if "Loop Contextual" in val:
-            return "loop"
-        if "Edição Viral" in val or "Super Senior" in val:
-            return "viral_editor"
-        return "linear"
+        resolved_key, profile = self._get_resolved_profile()
+        return profile.get("editorial_mode", "viral_editor")
 
     def _on_setting_changed(self, *args):
+        # Support external scripts or tabs setting target_duration_var directly
+        if hasattr(self, "target_duration_var"):
+            td_val = self.target_duration_var.get()
+            if "Mini-Filme" in td_val and self._get_current_profile_key() != "mini_movie":
+                if hasattr(self, "profile_values_map"):
+                    self.edit_profile_var.set(self.profile_values_map["mini_movie"])
+        self._sync_profile_to_legacy_vars()
         self._update_duration_hint()
 
     def _update_duration_hint(self):
@@ -814,9 +886,26 @@ class RefinerMastercutTab(ctk.CTkFrame):
             return
 
         dur = self.current_video_info.duration if self.current_video_info else 0.0
-        mode_key = self._get_refine_mode_key()
-        dur_key = self._get_target_duration_key()
-        ed_key = self._get_editorial_mode_key()
+        is_continuous = bool(self._current_cut_origin and self._current_cut_origin.get("is_continuous"))
+        raw_key = self._get_current_profile_key()
+        resolved_key, profile = resolve_edit_profile(raw_key, dur, is_arc=is_continuous)
+
+        flow_str = profile.get("flow", "Gancho → História → Loop")
+        label_str = profile.get("label", "Viral Pro")
+        tagline = profile.get("tagline", "")
+        explain = profile.get("explain", "")
+
+        if raw_key == "auto":
+            badge_text = f"🤖 [Modo Automático Ativo] ➔ Escolheu: '{label_str}' ({flow_str})"
+        else:
+            badge_text = f"✨ Fluxo Narrativo: {flow_str}"
+
+        if hasattr(self, "flow_badge_label"):
+            self.flow_badge_label.configure(text=badge_text)
+
+        desc_text = f"{tagline}\n{explain}" if tagline else explain
+        if hasattr(self, "style_desc_label"):
+            self.style_desc_label.configure(text=desc_text)
 
         if dur <= 0.0:
             self.hint_label.configure(
@@ -824,44 +913,23 @@ class RefinerMastercutTab(ctk.CTkFrame):
             )
             return
 
-        min_d, max_d = calculate_mastercut_bounds(dur, refine_mode=mode_key, target_duration_mode=dur_key)
-        mode_name = "Preservar Conteúdo" if mode_key == "soft" else ("Agressivo" if mode_key == "aggressive" else "Equilibrado")
+        ref_m = profile.get("refine_mode", "balanced")
+        dur_m = profile.get("target_duration_mode", "auto")
+        min_d, max_d = calculate_mastercut_bounds(dur, refine_mode=ref_m, target_duration_mode=dur_m)
+        reduction_min = round((1.0 - (max_d / dur)) * 100.0) if dur > 0 else 0
+        reduction_max = round((1.0 - (min_d / dur)) * 100.0) if dur > 0 else 0
 
-        if dur_key == "mini_movie":
-            msg = (
-                f"Previsão Tratar Mini-Filme ({format_time(dur)}): Condensará este arco para cerca de 50% ({min_d:.1f}s a {max_d:.1f}s, máx 2:30 min) "
-                "em 4 atos narrativos essenciais (Abertura, Tensão, Clímax e Desfecho), cortando tempos mortos e puxando o suco do vídeo!"
+        if resolved_key == "dorama":
+            hint_msg = (
+                f"⏱️ Previsão Dorama: {min_d:.1f}s a {max_d:.1f}s (~{100 - reduction_max}% a {100 - reduction_min}% preservado). "
+                f"Vídeo original: {format_time(dur)}. 🎭 Proteção de Pausas Ativa: respiração, diálogos completos e olhares de reação preservados."
             )
-        elif dur <= 75.0:
-            if mode_key == "soft":
-                msg = (
-                    f"Previsão para este clipe ({format_time(dur)}): Modo {mode_name} manterá {min_d:.1f}s a {max_d:.1f}s (~85% do vídeo). "
-                    "Corta estritamente silêncios mortos (>0.35s), mantendo 100% dos diálogos, réplicas e momentos importantes!"
-                )
-            elif mode_key == "aggressive":
-                msg = (
-                    f"Previsão para este clipe ({format_time(dur)}): Modo {mode_name} condensará para {min_d:.1f}s a {max_d:.1f}s "
-                    "focando no clímax de maior impacto."
-                )
-            else:
-                msg = (
-                    f"Previsão Anti-Corte para este clipe ({format_time(dur)}): Modo {mode_name} manterá {min_d:.1f}s a {max_d:.1f}s "
-                    "com ritmo acelerado, eliminando pausas mortas sem picotar o vídeo nem perder momentos essenciais (nunca gerará 19s!)."
-                )
         else:
-            msg = (
-                f"Previsão para este vídeo ({format_time(dur)}): Duração final estimada entre {min_d:.1f}s e {max_d:.1f}s "
-                f"(Modo: {mode_name}). Proteção de narrativa ativa para garantir início, desenvolvimento e clímax."
+            hint_msg = (
+                f"⏱️ Previsão de Duração: {min_d:.1f}s a {max_d:.1f}s (Economia estimada: {reduction_min}% a {reduction_max}%). "
+                f"Vídeo original: {format_time(dur)}. Proteção Anti-Corte ativa: sem engasgos, com cortes limpos em pausas naturais."
             )
-
-        if ed_key == "hook":
-            msg += "\n🎯 Hook de Abertura Ativo: Um teaser de 2-3s do momento mais intenso será posicionado em 0.0s com transição visual em flash, cortando inícios lentos/mudos e fisgando a atenção imediatamente."
-        elif ed_key == "loop":
-            msg += "\n🔁 Loop Contextual Ativo: O clímax e frase final serão posicionados como abertura (0.0s), conectando perfeitamente o fim ao início para replay infinito (>100% retenção no Shorts/Reels/TikTok)."
-        elif ed_key == "viral_editor":
-            msg += "\n⚡ Edição Viral Pro Ativa: Modo Super Senior Editor! Hook de alto impacto no início + transição flash suave + corte de silêncio inicial + narrativa eletrizante + fechamento em loop infinito."
-
-        self.hint_label.configure(text=msg)
+        self.hint_label.configure(text=hint_msg)
 
     def _browse_output(self):
         filetypes = [("Vídeo MP4", "*.mp4"), ("Todos os arquivos", "*.*")]
@@ -942,31 +1010,56 @@ class RefinerMastercutTab(ctk.CTkFrame):
         if self.result_card.winfo_ismapped():
             self.result_card.pack_forget()
 
-        refine_mode = self._get_refine_mode_key()
-        target_dur = self._get_target_duration_key()
-        editorial_mode = self._get_editorial_mode_key()
+        resolved_key, profile = self._get_resolved_profile()
+        refine_mode = profile.get("refine_mode", "balanced")
+        target_dur = profile.get("target_duration_mode", "standard")
+        editorial_mode = profile.get("editorial_mode", "viral_editor")
         enable_loop = editorial_mode in ("loop", "viral_editor")
+        profile_label = profile.get("label", "Viral Pro")
+        flow_label = profile.get("flow", "")
 
         self._clear_log()
         self._log(f"════════ Refinador: Mastercut Concentrado ════════")
         self._log(f"Entrada:    {self.input_path}")
         self._log(f"Saída:      {self.output_path}")
-        self._log(f"Ritmo:      {refine_mode} | Duração Alvo: {target_dur}")
-        self._log(f"Editorial:  {self.editorial_mode_var.get()}")
+        self._log(f"Estilo:     {profile_label} [{flow_label}]")
+        self._log(f"Diretriz:   Ritmo: {refine_mode} | Alvo: {target_dur} | Editorial: {editorial_mode}")
 
         vocal_iso = self.vocal_isolation_var.get()
         demucs_iso = self.demucs_isolation_var.get()
-        anti_copy = self.anti_copyright_var.get()
+        if not self.anti_copyright_var.get():
+            anti_copy = "off"
+        else:
+            mode_text = self.anti_copyright_mode_var.get().lower()
+            if "tiktok" in mode_text or "padrão" in mode_text or "padrao" in mode_text:
+                anti_copy = "tiktok"
+            else:
+                anti_copy = "youtube_max"
         is_continuous_clip = bool(self._current_cut_origin and self._current_cut_origin.get("is_continuous"))
         video_ctx = self.context_entry.get().strip() if hasattr(self, 'context_entry') else ""
+
+        is_dorama = (
+            resolved_key == "dorama"
+            or refine_mode == "dorama"
+            or editorial_mode == "dorama"
+            or any(k in video_ctx.lower() for k in ("dorama", "kdrama", "k-drama", "coreano", "c-drama", "j-drama", "doramas"))
+        )
+
+        if is_dorama:
+            self._log("🎭 [MODO DORAMA] Calibragem de Atuação Ativa: Preservação de Pausas Dramáticas (até 0.8s) + Diálogos Íntegros + Multi-Cam Suave (6.0s).")
 
         if is_continuous_clip:
             orig_dur = self._current_cut_origin.get("continuous_duration", 0.0)
             orig_ep = self._current_cut_origin.get("source_episode", "")
             self._log(f"[ORIGEM CACHE] Trecho Contínuo detectado do Diretor IA (~{orig_dur:.1f}s de '{orig_ep}')!")
-            self._log("[ANTI-COPYRIGHT 2026] Blindagem Ativa: Fatiamento em pausas de respiração + Dynamic Breathing Camera Zoom + Granulação Fina + Micro-EQ DSP.")
-        elif anti_copy:
-            self._log("[SEGURANÇA] Proteção Anti-Copyright 2026: ATIVADA (Dynamic Breathing Camera Zoom + Granulação Fina + Micro-EQ DSP)")
+            self._log("[ANTI-COPYRIGHT 2026] Blindagem Ativa: Multi-Câmera Inteligente (Planos <=3.8s Wide/Punch) + Film Luma Grade + Micro-Pitch DSP.")
+        elif anti_copy == "youtube_max":
+            self._log(f"[SEGURANÇA YOUTUBE] Blindagem Anti-Copyright Máxima (Anti-Toei): ATIVADA (Flip Horizontal + Multi-Cam + Color Shift + 1.04x DSP)")
+        elif anti_copy == "tiktok":
+            cam_info = "<=6.0s" if is_dorama else "<=3.8s"
+            self._log(f"[SEGURANÇA TIKTOK] Proteção Anti-Copyright Padrão: ATIVADA (Multi-Câmera {cam_info} + Film Luma + 1.02x DSP)")
+        else:
+            self._log("[AVISO] Proteção Anti-Copyright: DESATIVADA")
 
         if video_ctx:
             self._log(f"Contexto: {video_ctx}")
@@ -987,6 +1080,8 @@ class RefinerMastercutTab(ctk.CTkFrame):
                     enable_loop=enable_loop,
                     editorial_mode=editorial_mode,
                     is_continuous_clip=is_continuous_clip,
+                    is_dorama=is_dorama,
+                    profile_label=f"{profile_label} ({flow_label})" if flow_label else profile_label,
                     on_progress=lambda p, msg: self.after(0, self._on_progress_update, p, msg),
                     on_log=lambda msg: self.after(0, self._log, msg),
                 )
@@ -1054,6 +1149,22 @@ class RefinerMastercutTab(ctk.CTkFrame):
         else:
             messagebox.showwarning("Aviso", "Arquivo de vídeo não encontrado.")
 
+    def _send_to_studio(self):
+        """Transfers the generated mastercut video directly into the Studio Pipeline tab."""
+        if not self.output_path or not os.path.exists(self.output_path):
+            messagebox.showwarning("Aviso", "Vídeo não encontrado para enviar.")
+            return
+
+        if self.main_app and hasattr(self.main_app, "studio_tab"):
+            # Set input path in studio tab (auto-loads duration, preview player, AI cache)
+            self.main_app.studio_tab.input_path.set(self.output_path)
+            # Switch tab to Studio Pipeline
+            self.main_app.tabview.set("Studio Pipeline")
+            if hasattr(self.main_app, "_set_status"):
+                self.main_app._set_status("[OK] Vídeo carregado no Studio Pipeline! Pronto para aplicar enquadramento, zoom 187% e legendas.", COLORS["accent_studio"])
+        else:
+            messagebox.showinfo("Sucesso", f"Vídeo salvo em:\n{self.output_path}")
+
     def _send_to_upscaler(self):
         """Transfers the generated mastercut video into the main Upscaling tab."""
         if not self.output_path or not os.path.exists(self.output_path):
@@ -1076,3 +1187,90 @@ class RefinerMastercutTab(ctk.CTkFrame):
         elif self.input_path and os.path.exists(self.input_path):
             folder = os.path.dirname(os.path.abspath(self.input_path))
             subprocess.run(["explorer", folder])
+
+    def _on_anti_copyright_toggle(self):
+        """Habilita ou desabilita o seletor de modo anti-copyright."""
+        if hasattr(self, "anti_copy_menu"):
+            if self.anti_copyright_var.get():
+                self.anti_copy_menu.configure(state="normal")
+            else:
+                self.anti_copy_menu.configure(state="disabled")
+
+    def _start_standalone_shield(self):
+        """
+        Permite blindar qualquer vídeo existente em 1 clique
+        (ex: vídeo que já passou pelo upscaler antes de entrar no Studio)
+        sem refazer todo o corte do Mastercut.
+        """
+        initial_file = self.input_path if self.input_path and os.path.exists(self.input_path) else ""
+        initial_dir = os.path.dirname(initial_file) if initial_file else ""
+
+        src_path = filedialog.askopenfilename(
+            title="Selecione o Vídeo para Blindar (Widescreen)",
+            initialdir=initial_dir,
+            filetypes=[("Vídeos MP4/MKV", "*.mp4 *.mkv *.mov *.avi"), ("Todos os arquivos", "*.*")]
+        )
+        if not src_path or not os.path.exists(src_path):
+            return
+
+        src_p = Path(src_path)
+        default_out = str(src_p.parent / f"{src_p.stem}_youtube_safe.mp4")
+
+        out_path = filedialog.asksaveasfilename(
+            title="Salvar Vídeo Blindado Como...",
+            initialdir=str(src_p.parent),
+            initialfile=Path(default_out).name,
+            filetypes=[("Vídeo MP4", "*.mp4")]
+        )
+        if not out_path:
+            return
+
+        if not out_path.endswith(".mp4"):
+            out_path += ".mp4"
+
+        mode_str = self.anti_copyright_mode_var.get().lower()
+        ac_mode = "tiktok" if ("tiktok" in mode_str or "padrão" in mode_str or "padrao" in mode_str) else "youtube_max"
+
+        self.generate_btn.configure(state="disabled")
+        self.shield_standalone_btn.configure(state="disabled")
+        self.cancel_btn.configure(state="disabled")
+        self.progress_bar.set(0.0)
+        self.status_label.configure(text="Iniciando blindagem ultra-rápida via FFmpeg NVENC...")
+
+        self._log("\n" + "═"*55)
+        self._log(f"🛡️ [BLINDAGEM 1-CLIQUE] Iniciando blindagem para YouTube em: {src_p.name}")
+        self._log(f"   • Modo Selecionado: {'Blindagem Máxima YouTube (Anti-Toei)' if ac_mode == 'youtube_max' else 'Padrão TikTok/Reels'}")
+        self._log("═"*55)
+
+        def _worker():
+            try:
+                from refiner_mastercut import apply_standalone_anti_copyright_shield
+                res_out = apply_standalone_anti_copyright_shield(
+                    input_path=src_path,
+                    output_path=out_path,
+                    mode=ac_mode,
+                    on_progress=lambda p, msg: self.after(0, self._on_progress_update, p, msg),
+                    on_log=lambda msg: self.after(0, self._log, msg)
+                )
+                def _on_success():
+                    self.output_path = res_out
+                    self.output_entry.delete(0, "end")
+                    self.output_entry.insert(0, res_out)
+                    self._log(f"\n🎉 [PRONTO] Vídeo 100% blindado gerado com sucesso!")
+                    self._log(f"📁 Arquivo: {res_out}")
+                    self._log(f"💡 Dica: Agora você já pode importar este vídeo no Studio para aplicar o formato 9:16 e legendas!")
+                    messagebox.showinfo("Blindagem Concluída", f"Vídeo blindado com sucesso!\n\nArquivo salvo em:\n{res_out}\n\nPronto para envio ao YouTube ou para importar no Studio.")
+                self.after(0, _on_success)
+            except Exception as e:
+                err_msg = str(e)
+                self.after(0, lambda: self._log(f"[ERRO] Falha ao blindar vídeo: {err_msg}"))
+                self.after(0, lambda: messagebox.showerror("Erro na Blindagem", f"Falha ao blindar vídeo:\n{err_msg}"))
+            finally:
+                def _reset_ui():
+                    self.generate_btn.configure(state="normal")
+                    self.shield_standalone_btn.configure(state="normal")
+                    self.progress_bar.set(0.0)
+                    self.status_label.configure(text="Pronto.")
+                self.after(0, _reset_ui)
+
+        threading.Thread(target=_worker, daemon=True).start()

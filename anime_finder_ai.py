@@ -44,7 +44,8 @@ def _clean_json_response(raw_text: str) -> dict:
 
 
 def build_anime_finder_prompt(query: str, genre: str = "", platform: str = "all",
-                              count: int = 5, popularity: str = "any", era: str = "any") -> str:
+                              count: int = 5, popularity: str = "any", era: str = "any",
+                              exclude_animes: list = None) -> str:
     """Constrói o prompt para o Anime Finder."""
     genre_instruction = f"\nFiltro de gênero preferido: {genre}" if genre else ""
     platform_map = {
@@ -69,13 +70,23 @@ def build_anime_finder_prompt(query: str, genre: str = "", platform: str = "all"
     }
     era_instruction = era_map.get(era, "")
 
+    exclude_clause = ""
+    if exclude_animes:
+        clean_ex = [str(x).strip() for x in exclude_animes if str(x).strip()]
+        if clean_ex:
+            exclude_clause = (
+                f"\n🚫 ANIMES JÁ VISTOS / USADOS PELO USUÁRIO (ESTRITAMENTE PROIBIDO REPETIR):\n"
+                f"{', '.join(clean_ex)}\n"
+                f"⚠️ ATENÇÃO: O usuário já viu os animes acima. Sugira animes TOTALMENTE DIFERENTES e novos!"
+            )
+
     return f"""{SYSTEM_CONTEXT}
 Você é um especialista absoluto em ANIME. Conhece os animes mais populares, seus episódios exatos, arcos principais,
 e as cenas mais icônicas que a comunidade anime reconhece como memoráveis.
 
 TAREFA: O usuário quer encontrar os melhores animes e os EPISÓDIOS EXATOS para baixar e postar conteúdo viral em {platform_name}.
 Pedido do usuário: "{query}"
-{genre_instruction}{popularity_instruction}{era_instruction}
+{genre_instruction}{popularity_instruction}{era_instruction}{exclude_clause}
 
 Analise o pedido e sugira EXATAMENTE {count} animes que atendam perfeitamente ao que o usuário quer.
 Para cada anime, indique as CENAS MAIS ICÔNICAS E CONHECIDAS e o NÚMERO EXATO DO EPISÓDIO onde a cena acontece.
@@ -169,12 +180,20 @@ Retorne EXATAMENTE este formato JSON e nada mais:
 
 
 def build_episode_finder_prompt(category: str, name: str, theme: str, count: int = 5,
-                                exclude_episodes: list = None, season: int = None) -> str:
-    """Prompt para sugestão de episódios de uma obra específica (Anime ou Dorama)."""
+                                exclude_episodes: list = None, season: int = None,
+                                details: str = "") -> str:
+    """Prompt com verificação factual rígida e anti-alucinação para episódios de uma obra específica."""
     category_label = "ANIME" if category == "anime" else "DORAMA"
     exclude_str = ""
     if exclude_episodes:
-        exclude_str = f"\n⚠️ ATENÇÃO: Você DEVE EXCLUIR os seguintes episódios: {', '.join(exclude_episodes)}."
+        clean_excludes = [str(x).strip() for x in exclude_episodes if str(x).strip()]
+        if clean_excludes:
+            exclude_str = (
+                f"\n🚫 EPISÓDIOS JÁ VISTOS / USADOS PELO USUÁRIO (ESTRITAMENTE PROIBIDO REPETIR):\n"
+                f"{', '.join(clean_excludes)}\n"
+                f"⚠️ REGRA CRÍTICA DE EXCLUSÃO: O usuário já utilizou ou não quer os episódios acima. "
+                f"Você NÃO PODE sugerir NENHUM desses episódios listados! Traga episódios TOTALMENTE NOVOS e diferentes!\n"
+            )
 
     theme_examples = {
         "geral": "os momentos mais impactantes, emocionantes e memoráveis da obra",
@@ -189,29 +208,51 @@ def build_episode_finder_prompt(category: str, name: str, theme: str, count: int
     season_context = f" (Temporada {season})" if season else ""
     full_name = f"{name}{season_context}"
 
-    return f"""{SYSTEM_CONTEXT}
-Você é um especialista absoluto em {category_label}. Você conhece a obra "{full_name}" profundamente, incluindo todos os episódios reais, números exatos, arcos principais e detalhes exatos das cenas.
+    details_section = ""
+    if details and details.strip():
+        details_section = (
+            f"\n🎯 PEDIDO ESPECÍFICO / PREFERÊNCIAS DO USUÁRIO:\n"
+            f"\"{details.strip()}\"\n"
+            f"⚠️ PRIORIDADE MÁXIMA: O usuário descreveu especificamente o tipo de episódio que deseja. "
+            f"Se ele pediu episódios pouco populares/subestimados, raros, engraçados, ou focados em determinado personagem/situação, "
+            f"você DEVE filtrar e selecionar episódios que atendam a esses critérios exatos!\n"
+        )
 
-TAREFA: O usuário quer sugestões de excelentes episódios do {category_label} "{full_name}" com momentos que se encaixem perfeitamente no tema/foco: "{theme}" ({theme_desc}) para criar cortes virais no TikTok/Reels/Shorts.{(' IMPORTANTE: o usuário quer especificamente episódios da Temporada ' + str(season) + '.') if season else ''}
+    return f"""{SYSTEM_CONTEXT}
+Você é um especialista enciclopédico absoluto em {category_label}. Você conhece a obra "{full_name}" profundamente, incluindo a numeração canônica oficial de cada episódio, títulos originais em Japonês/Português/Inglês, arcos e o minuto exato das cenas.
+
+TAREFA: O usuário quer sugestões de excelentes episódios do {category_label} "{full_name}" com momentos que se encaixem no tema/foco: "{theme}" ({theme_desc}) para criar cortes virais no TikTok/Reels/Shorts.{details_section}{(' IMPORTANTE: o usuário quer especificamente episódios da Temporada ' + str(season) + '.') if season else ''}
 Forneça até {count} episódios ideais.
 {exclude_str}
 
-⚠️ REGRAS OBRIGATÓRIAS:
-1. SOMENTE recomende episódios reais e verídicos da obra "{name}". NÃO invente episódios.
-2. Cada episódio sugerido deve conter o número exato (ex: "Episódio 10", "Episódio 131").
-3. Para cada episódio, explique detalhadamente a cena/momento correspondente ao tema "{theme}" e por que ela é perfeita para postagem viral.
-4. Forneça o termo de busca exato para o usuário pesquisar no YouTube ou Google (ex: "{name} episodio 10 cena").
+⚠️ REGRAS RIGOROSAS DE PRECISÃO FÁCTICA (ANTI-ERRO DE EPISÓDIO):
+1. PRECISÃO EXATA DO NÚMERO CANÔNICO:
+   - Você DEVE validar o número canônico exato da transmissão oficial da obra "{name}".
+   - Pense no TÍTULO OFICIAL DO EPISÓDIO antes de definir o número (ex: no Dragon Ball Z, a autoescola de Goku e Piccolo é EXATAMENTE o Episódio 125 "Uma Lição Difícil"; em Naruto Shippuden, Kakashi vs Obito é EXATAMENTE o Episódio 375; em Death Note, a morte de L é EXATAMENTE o Episódio 25).
+   - NUNCA chute ou invente números aproximados. O número do episódio DEVE corresponder 100% à cena descrita.
+2. TÍTULO OFICIAL DO EPISÓDIO OBRIGATÓRIO ("episode_title"):
+   - Forneça o título oficial do episódio (em Português ou Inglês oficial). O título oficial serve como confirmação factual para o usuário e evita qualquer confusão entre versões de TV ou mangá.
+3. MINUTO APROXIMADO DA CENA ("approx_time"):
+   - Indique o intervalo ou minuto aproximado dentro do episódio em que a cena acontece (ex: "12:30 - 15:40").
+4. TERMO DE BUSCA NO YOUTUBE À PROVA DE FALHAS ("search_term"):
+   - O termo de busca DEVE conter: [Nome da Obra] ep [Número] [Nome da cena / Título oficial / Personagens principais]
+   - Exemplo: "{name} ep 125 autoescola goku piccolo"
+   - Exemplo: "{name} ep 375 kakashi vs obito luta kamui"
+   - Isso garante que ao clicar no botão "Buscar no YouTube", o usuário caia no vídeo exato da cena mesmo se houver cortes na TV!
 
 Responda EXATAMENTE neste formato JSON:
 {{
-    "summary": "Resumo da busca de episódios de {name} focando no tema {theme}",
+    "summary": "Resumo da busca de episódios de {name} atendendo ao tema '{theme}' e às preferências solicitadas",
     "episodes": [
         {{
-            "episode": "Número exato do episódio (ex: Episódio 10)",
+            "episode_number": 125,
+            "episode": "Episódio 125",
+            "episode_title": "Título Oficial do Episódio (ex: Uma Lição Difícil)",
             "arc_name": "Nome do Arco/Saga onde ocorre",
+            "approx_time": "12:30 - 16:00",
             "scene_description": "Descrição detalhada do momento/cena correspondente ao tema, personagens e ação.",
-            "why_viral": "Explicação do apelo viral dessa cena e por que funciona para o tema pedido.",
-            "search_term": "Termo de busca com o número do episódio e descrição para o YouTube/Google",
+            "why_viral": "Explicação do apelo viral dessa cena e por que atende ao pedido do usuário.",
+            "search_term": "Termo de busca com anime + ep número + palavras da cena para o YouTube/Google",
             "editing_tips": "Dicas de edição para maximizar o impacto visual e sonoro.",
             "suggested_title": "Título viral pronto para usar",
             "viral_potential": 90
@@ -224,12 +265,14 @@ Responda APENAS com o JSON, sem texto adicional.
 
 def search_animes(query: str, genre: str = "", platform: str = "all",
                   count: int = 5, popularity: str = "any", era: str = "any",
+                  exclude_animes: list = None,
                   log_cb=None, on_log=None, **kwargs) -> Dict[str, Any]:
-    """Executa a busca de animes por tema/estilo usando a IA."""
+    """Executa a busca de animes por tema/estilo usando a IA com suporte a exclusão."""
     _log = on_log or log_cb
     if _log:
-        _log("⛩️ Consultando IA sobre os melhores animes e episódios...")
-    prompt = build_anime_finder_prompt(query, genre, platform, count, popularity, era)
+        ex_str = f" (excluindo {len(exclude_animes)} anteriores)" if exclude_animes else ""
+        _log(f"⛩️ Consultando IA sobre os melhores animes e episódios{ex_str}...")
+    prompt = build_anime_finder_prompt(query, genre, platform, count, popularity, era, exclude_animes=exclude_animes)
     raw = call_ai_text(prompt, max_tokens=16384, log_cb=_log, on_log=_log)
     return _clean_json_response(raw)
 
@@ -247,11 +290,13 @@ def ask_anime_followup(query: str, previous_recommendations: dict, chat_history:
 
 def search_episodes(category: str, name: str, theme: str, count: int = 5,
                     exclude_episodes: list = None, season: int = None,
+                    details: str = "",
                     log_cb=None, on_log=None, **kwargs) -> Dict[str, Any]:
-    """Busca episódios exatos de uma obra específica."""
+    """Busca episódios exatos de uma obra específica com suporte a descrição extra / preferências."""
     _log = on_log or log_cb
+    det_msg = f" | Detalhes: '{details}'" if details and details.strip() else ""
     if _log:
-        _log(f"🔍 Mapeando episódios de {name} no tema '{theme}'...")
-    prompt = build_episode_finder_prompt(category, name, theme, count, exclude_episodes, season)
+        _log(f"🔍 Mapeando episódios de {name} no tema '{theme}'{det_msg}...")
+    prompt = build_episode_finder_prompt(category, name, theme, count, exclude_episodes, season, details=details)
     raw = call_ai_text(prompt, max_tokens=16384, log_cb=_log, on_log=_log)
     return _clean_json_response(raw)

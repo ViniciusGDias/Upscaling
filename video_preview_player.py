@@ -15,6 +15,7 @@ import threading
 from pathlib import Path
 from typing import Optional, Callable
 import cv2
+import numpy as np
 from PIL import Image
 import customtkinter as ctk
 import icon_manager
@@ -68,7 +69,8 @@ def _format_time(sec: float) -> str:
 class VideoPreviewPlayer(ctk.CTkFrame):
     """
     Mini-Player embutido de alta fidelidade para inspecionar vídeos e cortes
-    diretamente na interface do aplicativo com suporte completo a áudio estéreo.
+    diretamente na interface do aplicativo com suporte completo a áudio estéreo
+    e mixagem simultânea de Trilha Sonora / BGM em tempo real.
     """
 
     def __init__(
@@ -77,6 +79,13 @@ class VideoPreviewPlayer(ctk.CTkFrame):
         video_path: Optional[str] = None,
         max_width: int = 320,
         max_height: int = 240,
+        bgm_path: Optional[str] = None,
+        bgm_volume: float = 0.15,
+        bgm_start_sec: float = 0.0,
+        music_auto_ducking: bool = False,
+        ducking_mode: str = "cinema",
+        anti_copyright: bool = False,
+        anti_copyright_mode: str = "advanced",
         **kwargs
     ):
         super().__init__(parent, fg_color="#111113", corner_radius=10, border_width=1, border_color="#27272a", **kwargs)
@@ -97,7 +106,7 @@ class VideoPreviewPlayer(ctk.CTkFrame):
         self._lock = threading.RLock()
         self._last_ctk_img = None
 
-        # Estado de Áudio (Pygame Mixer)
+        # Estado de Áudio Principal do Vídeo (Pygame Mixer)
         self._audio_path: Optional[str] = None
         self._has_audio: bool = False
         self._audio_ready: bool = False
@@ -105,11 +114,36 @@ class VideoPreviewPlayer(ctk.CTkFrame):
         self._is_muted: bool = False
         self._volume: float = 1.0
 
+        # Estado de Trilha Sonora / BGM (Música de Fundo com Ducking e Anti-Copyright)
+        self._bgm_path: Optional[str] = None
+        self._bgm_volume: float = max(0.0, min(1.0, float(bgm_volume)))
+        self._bgm_start_sec: float = max(0.0, float(bgm_start_sec))
+        self._music_auto_ducking: bool = bool(music_auto_ducking)
+        self._ducking_mode: str = str(ducking_mode or "cinema")
+        self._anti_copyright: bool = bool(anti_copyright)
+        self._anti_copyright_mode: str = str(anti_copyright_mode or "advanced")
+        self._bgm_muted: bool = False
+        self._bgm_has_audio: bool = False
+        self._bgm_ready: bool = False
+        self._bgm_array: Optional[np.ndarray] = None
+        self._bgm_channel: Optional[pygame.mixer.Channel] = None
+
         _ensure_mixer_init()
         self._build_ui()
 
         if video_path and os.path.exists(video_path):
             self.load_video(video_path)
+
+        if bgm_path and os.path.exists(bgm_path):
+            self.load_bgm(
+                bgm_path,
+                volume=self._bgm_volume,
+                start_sec=self._bgm_start_sec,
+                music_auto_ducking=self._music_auto_ducking,
+                ducking_mode=self._ducking_mode,
+                anti_copyright=self._anti_copyright,
+                anti_copyright_mode=self._anti_copyright_mode
+            )
 
     def _build_ui(self):
         # 1. Canvas / Frame de Visualização
@@ -342,6 +376,232 @@ class VideoPreviewPlayer(ctk.CTkFrame):
         except Exception:
             pass
 
+    def load_bgm(
+        self,
+        bgm_path: Optional[str],
+        volume: float = 0.15,
+        start_sec: float = 0.0,
+        music_auto_ducking: Optional[bool] = None,
+        ducking_mode: Optional[str] = None,
+        anti_copyright: Optional[bool] = None,
+        anti_copyright_mode: Optional[str] = None,
+    ):
+        """Carrega a música de fundo para reprodução simultânea com o vídeo com suporte a ducking e anti-copyright."""
+        self._bgm_path = bgm_path
+        self._bgm_volume = max(0.0, min(1.0, float(volume)))
+        self._bgm_start_sec = max(0.0, float(start_sec))
+        if music_auto_ducking is not None:
+            self._music_auto_ducking = bool(music_auto_ducking)
+        if ducking_mode is not None:
+            self._ducking_mode = str(ducking_mode)
+        if anti_copyright is not None:
+            self._anti_copyright = bool(anti_copyright)
+        if anti_copyright_mode is not None:
+            self._anti_copyright_mode = str(anti_copyright_mode)
+
+        self._bgm_has_audio = False
+        self._bgm_ready = False
+        self._bgm_array = None
+
+        if not (bgm_path and os.path.exists(bgm_path) and _AUDIO_AVAILABLE):
+            return
+
+        def bgm_loader():
+            try:
+                temp_dir = Path(os.environ.get("TEMP", ".")) / "urahara_audio_cache"
+                temp_dir.mkdir(parents=True, exist_ok=True)
+
+                mtime = os.path.getmtime(bgm_path)
+                has_video_ref = bool(self.video_path and os.path.exists(self.video_path))
+                v_tag = ""
+                if has_video_ref:
+                    v_mtime = os.path.getmtime(self.video_path)
+                    v_tag = f"_{self.video_path}_{v_mtime}"
+
+                cache_key = (
+                    f"bgm_{bgm_path}_{mtime}{v_tag}_"
+                    f"ss{self._bgm_start_sec:.2f}_"
+                    f"duck{self._music_auto_ducking}_{self._ducking_mode}_"
+                    f"ac{self._anti_copyright}_{self._anti_copyright_mode}"
+                )
+                h = hashlib.md5(cache_key.encode("utf-8")).hexdigest()
+                wav_path = str(temp_dir / f"bgm_{h}.wav")
+
+                # Converte para WAV 44100Hz 16-bit estéreo com FFmpeg aplicando ducking e anti-copyright
+                if not (os.path.exists(wav_path) and os.path.getsize(wav_path) > 1000):
+                    ffmpeg_exe = _find_ffmpeg()
+                    flags = 0x08000000 if sys.platform == "win32" else 0
+                    from subtitle_renderer import get_anti_copyright_dsp
+
+                    dsp_str = get_anti_copyright_dsp(mode=self._anti_copyright_mode) if self._anti_copyright else ""
+
+                    if self._music_auto_ducking and has_video_ref:
+                        ducking_presets = {
+                            "cinema": {"ratio": 1.35, "threshold": 0.05, "attack": 80, "release": 900, "knee": 3.0},
+                            "balanced": {"ratio": 1.55, "threshold": 0.045, "attack": 60, "release": 750, "knee": 2.5},
+                            "aggressive": {"ratio": 1.85, "threshold": 0.04, "attack": 40, "release": 600, "knee": 2.0},
+                        }
+                        params = ducking_presets.get(self._ducking_mode, ducking_presets["cinema"])
+                        rat = params["ratio"]
+                        th = params["threshold"]
+                        att = params["attack"]
+                        rel = params["release"]
+                        kne = params["knee"]
+
+                        if dsp_str:
+                            dsp_chain = f"[1:a]{dsp_str}[bgm_prep];[bgm_prep]"
+                        else:
+                            dsp_chain = "[1:a]"
+
+                        fc = (
+                            f"[0:a]highpass=f=200,lowpass=f=3500[vocal_voice];"
+                            f"{dsp_chain}[vocal_voice]sidechaincompress=threshold={th}:ratio={rat}:attack={att}:release={rel}:knee={kne}[aout]"
+                        )
+                        cmd = [
+                            ffmpeg_exe, "-y",
+                            "-i", self.video_path,
+                        ]
+                        if self._bgm_start_sec > 0:
+                            cmd += ["-ss", f"{self._bgm_start_sec:.2f}"]
+                        cmd += [
+                            "-stream_loop", "-1",
+                            "-i", bgm_path,
+                            "-filter_complex", fc,
+                            "-map", "[aout]",
+                            "-vn", "-c:a", "pcm_s16le", "-ar", "44100", "-ac", "2",
+                        ]
+                        if self._duration > 0:
+                            cmd += ["-t", f"{self._duration:.2f}"]
+                        cmd.append(wav_path)
+                    else:
+                        cmd = [ffmpeg_exe, "-y"]
+                        if self._bgm_start_sec > 0:
+                            cmd += ["-ss", f"{self._bgm_start_sec:.2f}"]
+                        cmd += ["-i", bgm_path]
+                        if dsp_str:
+                            cmd += ["-af", dsp_str]
+                        cmd += [
+                            "-vn", "-c:a", "pcm_s16le", "-ar", "44100", "-ac", "2",
+                            wav_path
+                        ]
+
+                    res = subprocess.run(
+                        cmd,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        creationflags=flags
+                    )
+                    if res.returncode != 0 or not os.path.exists(wav_path) or os.path.getsize(wav_path) < 1000:
+                        # Fallback simples caso sidechain com vídeo falhe (ex: vídeo mudo)
+                        fallback_cmd = [ffmpeg_exe, "-y"]
+                        if self._bgm_start_sec > 0:
+                            fallback_cmd += ["-ss", f"{self._bgm_start_sec:.2f}"]
+                        fallback_cmd += ["-i", bgm_path]
+                        if dsp_str:
+                            fallback_cmd += ["-af", dsp_str]
+                        fallback_cmd += [
+                            "-vn", "-c:a", "pcm_s16le", "-ar", "44100", "-ac", "2",
+                            wav_path
+                        ]
+                        subprocess.run(
+                            fallback_cmd,
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE,
+                            creationflags=flags
+                        )
+
+                    if not (os.path.exists(wav_path) and os.path.getsize(wav_path) > 1000):
+                        return
+
+                if self._bgm_path == bgm_path:
+                    import soundfile as sf
+                    arr, sr = sf.read(wav_path, dtype='int16')
+                    if arr.ndim == 1:
+                        arr = np.column_stack((arr, arr))
+                    elif arr.ndim > 2 or arr.shape[1] > 2:
+                        arr = arr[:, :2]
+
+                    # Se a duração for conhecida, repete se necessário para cobrir o vídeo
+                    target_dur = max(self._duration, 60.0)
+                    needed_samples = int(target_dur * 44100)
+                    if len(arr) < needed_samples and len(arr) > 0:
+                        repeats = int(np.ceil(needed_samples / len(arr)))
+                        arr = np.tile(arr, (repeats, 1))
+
+                    self._bgm_array = arr
+                    self._bgm_has_audio = True
+                    self._bgm_ready = True
+
+                    # Se o vídeo já estiver em reprodução, dispara a BGM no segundo atual
+                    if self._is_playing:
+                        curr_sec = self._current_frame_idx / self._fps if self._fps else 0.0
+                        self._start_bgm_playback(curr_sec)
+            except Exception:
+                pass
+
+        threading.Thread(target=bgm_loader, daemon=True).start()
+
+    def _start_bgm_playback(self, start_sec: float):
+        """Inicia a reprodução síncrona da música de fundo a partir do segundo do vídeo."""
+        if not (self._bgm_has_audio and self._bgm_ready and self._bgm_array is not None and _AUDIO_AVAILABLE):
+            return
+        try:
+            _ensure_mixer_init()
+            if self._bgm_channel is None:
+                self._bgm_channel = pygame.mixer.Channel(1)
+
+            # Como -ss foi aplicado na geração do cache, o segundo start_sec do vídeo alinha com o sample do array
+            start_sample = int(max(0.0, start_sec) * 44100)
+
+            if len(self._bgm_array) == 0:
+                return
+
+            if start_sample < len(self._bgm_array):
+                bgm_slice = self._bgm_array[start_sample:]
+            else:
+                looped = start_sample % len(self._bgm_array)
+                bgm_slice = self._bgm_array[looped:]
+
+            snd = pygame.sndarray.make_sound(bgm_slice)
+            effective_vol = 0.0 if self._bgm_muted else self._bgm_volume
+            self._bgm_channel.set_volume(effective_vol)
+            self._bgm_channel.play(snd)
+        except Exception:
+            pass
+
+    def set_bgm_volume(self, volume: float):
+        """Ajusta o volume da música de fundo dinamicamente em tempo real."""
+        self._bgm_volume = max(0.0, min(1.0, float(volume)))
+        if _AUDIO_AVAILABLE and self._bgm_channel:
+            try:
+                effective_vol = 0.0 if self._bgm_muted else self._bgm_volume
+                self._bgm_channel.set_volume(effective_vol)
+            except Exception:
+                pass
+
+    def toggle_bgm_mute(self) -> bool:
+        """Alterna o mudo exclusivamente para a música de fundo (mantém a voz do vídeo limpa)."""
+        self._bgm_muted = not self._bgm_muted
+        if _AUDIO_AVAILABLE and self._bgm_channel:
+            try:
+                effective_vol = 0.0 if self._bgm_muted else self._bgm_volume
+                self._bgm_channel.set_volume(effective_vol)
+            except Exception:
+                pass
+        return self._bgm_muted
+
+    @property
+    def is_bgm_muted(self) -> bool:
+        return self._bgm_muted
+
+    @property
+    def bgm_volume(self) -> float:
+        return self._bgm_volume
+
+    @property
+    def has_bgm(self) -> bool:
+        return bool(self._bgm_has_audio and self._bgm_ready)
+
     def _on_slider_press(self, event=None):
         self._is_scrubbing = True
         self._was_playing_before_scrub = self._is_playing
@@ -420,14 +680,21 @@ class VideoPreviewPlayer(ctk.CTkFrame):
 
         start_sec = self._current_frame_idx / self._fps if self._fps else 0.0
         self._start_audio_playback(start_sec)
+        self._start_bgm_playback(start_sec)
         self._play_loop()
 
     def _pause_audio(self):
-        if _AUDIO_AVAILABLE and self._has_audio:
-            try:
-                pygame.mixer.music.pause()
-            except Exception:
-                pass
+        if _AUDIO_AVAILABLE:
+            if self._has_audio:
+                try:
+                    pygame.mixer.music.pause()
+                except Exception:
+                    pass
+            if self._bgm_channel and self._bgm_channel.get_busy():
+                try:
+                    self._bgm_channel.pause()
+                except Exception:
+                    pass
 
     def pause(self):
         self._is_playing = False
@@ -438,11 +705,7 @@ class VideoPreviewPlayer(ctk.CTkFrame):
                 pass
             self._after_id = None
 
-        if _AUDIO_AVAILABLE and self._has_audio:
-            try:
-                pygame.mixer.music.pause()
-            except Exception:
-                pass
+        self._pause_audio()
 
         self.btn_play.configure(
             text=" Play",
@@ -453,11 +716,17 @@ class VideoPreviewPlayer(ctk.CTkFrame):
 
     def stop(self):
         self.pause()
-        if _AUDIO_AVAILABLE and self._has_audio:
-            try:
-                pygame.mixer.music.stop()
-            except Exception:
-                pass
+        if _AUDIO_AVAILABLE:
+            if self._has_audio:
+                try:
+                    pygame.mixer.music.stop()
+                except Exception:
+                    pass
+            if self._bgm_channel:
+                try:
+                    self._bgm_channel.stop()
+                except Exception:
+                    pass
         self._current_frame_idx = 0
 
     def rewind(self):
@@ -478,10 +747,16 @@ class VideoPreviewPlayer(ctk.CTkFrame):
 
         if self._is_playing:
             self._start_audio_playback(sec)
+            self._start_bgm_playback(sec)
 
     def _on_playback_ended(self):
         """Finaliza a reprodução com segurança ao término do vídeo/áudio sem travar a interface."""
         self.pause()
+        if self._bgm_channel:
+            try:
+                self._bgm_channel.stop()
+            except Exception:
+                pass
         self._show_frame_at(0)
 
     def _play_loop(self):
@@ -567,6 +842,11 @@ class VideoPreviewPlayer(ctk.CTkFrame):
                 pygame.mixer.music.stop()
             except Exception:
                 pass
+            if self._bgm_channel:
+                try:
+                    self._bgm_channel.stop()
+                except Exception:
+                    pass
         with self._lock:
             if self._cap is not None:
                 try:

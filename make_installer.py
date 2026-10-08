@@ -58,6 +58,13 @@ def main():
     print(f" [Urahara Studio v{ver}] - Gerador de Executavel & Instalador")
     print("=" * 60)
 
+    # 0. Fecha instâncias abertas do app para evitar PermissionError no Windows
+    if sys.platform == "win32":
+        try:
+            subprocess.run(["taskkill", "/F", "/IM", "Urahara.exe"], capture_output=True)
+        except Exception:
+            pass
+
     # 1. Build EXE with PyInstaller (--onedir for instantaneous startup)
     print("\n[1/3] Compilando Urahara (Modo Janela / Inicialização Instantânea)...")
     res = subprocess.run([sys.executable, "build_exe.py"], cwd=str(APP_DIR))

@@ -375,8 +375,8 @@ class DirectorTab(ctk.CTkFrame):
             {
                 "key": "context",
                 "title": "Contexto",
-                "badge": "45–90s",
-                "desc": "Estrutura In Media Res: gancho imediato nos primeiros 3s, contexto dramático e desfecho.",
+                "badge": "1 a 2.5 MIN",
+                "desc": "Cena completa: pega todo o contexto da conversa, escalada da luta e desfecho sem cortar falas.",
                 "row": 0,
                 "col": 1,
             },

@@ -362,16 +362,19 @@ def call_ai_text(
         indices_to_try = available_indices if available_indices else ordered_indices
 
         user_model = os.getenv("GEMINI_MODEL", "").strip()
+        # Normalizar nomes legados ou hipotéticos para modelos oficiais do Google AI Studio
+        if "gemini-3." in user_model:
+            user_model = "gemini-2.5-flash"
+
         base_models = [
-            "gemini-3.6-flash",
-            "gemini-3.8-flash",
-            "gemini-3.7-flash",
-            "gemini-flash-lite-latest",
+            "gemini-2.5-flash",
+            "gemini-2.0-flash",
             "gemini-flash-latest",
-            "gemini-2.5-flash"
+            "gemini-flash-lite-latest",
+            "gemini-1.5-flash",
         ]
         gemini_models = []
-        if user_model:
+        if user_model and user_model not in gemini_models:
             gemini_models.append(user_model)
         for m in base_models:
             if m not in gemini_models:
@@ -486,15 +489,16 @@ def call_ai_text(
 def fetch_episode_lore(context: str, on_log: Optional[Callable[[str], None]] = None) -> str:
     """
     Fetch cultural lore, fan reactions, and memorable peaks for the episode.
-    First queries official Anime/Dorama APIs (Kitsu, Jikan, TVMaze) so even brand new 
-    animes have verified synopsis, studio, rating, and plot grounding.
+    Uses the Episode Intelligence Hub to get episode-specific data (fights, techniques,
+    characters, synopsis) from Jikan v4, Fandom Wiki, and AniList, then enriches
+    with AI-generated hype analysis.
     """
     if not context or len(context.strip()) < 3:
         return ""
 
     try:
         from ai_cache_hub import ai_cache
-        cached_lore = ai_cache.get(context.strip().lower(), "anime_lore")
+        cached_lore = ai_cache.get(context.strip().lower(), "anime_lore_v2")
         if cached_lore and isinstance(cached_lore, str):
             if on_log:
                 on_log("[CACHE 24H] Lore e metadados recuperados do cache (0 tokens gastos)!")
@@ -505,52 +509,127 @@ def fetch_episode_lore(context: str, on_log: Optional[Callable[[str], None]] = N
     if on_log:
         on_log(f"[LORE] Pesquisando lore e metadados sobre: {context}...")
 
+    # ── Episode Intelligence Hub (NEW: multi-source episode-specific data) ──
     enriched_api = ""
     try:
-        from metadata_enricher import get_enriched_context_for_prompt
-        enriched_api = get_enriched_context_for_prompt(context)
+        from metadata_enricher import build_episode_intelligence
+        enriched_api = build_episode_intelligence(context, on_log=on_log)
         if enriched_api and on_log:
-            on_log("[OK] Metadados oficiais obtidos via API (Kitsu / TVMaze / MAL)")
-    except Exception:
-        pass
+            on_log("[OK] Inteligência do episódio montada (Jikan + Fandom Wiki + AniList)")
+    except Exception as e:
+        if on_log:
+            on_log(f"[AVISO] Episode Intelligence Hub: {e} — tentando fallback...")
+        try:
+            from metadata_enricher import get_enriched_context_for_prompt
+            enriched_api = get_enriched_context_for_prompt(context)
+            if enriched_api and on_log:
+                on_log("[OK] Metadados gerais obtidos via API (Kitsu / TVMaze / MAL)")
+        except Exception:
+            pass
 
     api_block = f"\n{enriched_api}\n" if enriched_api else ""
 
-    prompt = f"""Você é um especialista em animes, doramas e cultura pop.
-O usuário quer mapear os melhores momentos e reações do público sobre o seguinte episódio: "{context}"
+    # ── Identificação Canônica da Franquia para Precisão Factual ──
+    canon_context = context.strip()
+    low_ctx = canon_context.lower()
+    if any(k in low_ctx for k in ["cavaleiros do zodiaco", "saint seiya", "cdz"]) and not any(k in low_ctx for k in ["lost canvas", "omega", "soul of gold", "netflix"]):
+        canon_context = f"Cavaleiros do Zodíaco / Saint Seiya (Série Clássica de 1986) - {context}"
+    elif any(k in low_ctx for k in ["samurai x", "kenshin"]) and "2023" not in low_ctx:
+        canon_context = f"Samurai X / Rurouni Kenshin (Clássico) - {context}"
+    elif "dbz" in low_ctx or "dragon ball z" in low_ctx:
+        canon_context = f"Dragon Ball Z - {context}"
+
+    prompt = f"""Você é a enciclopédia definitiva de animes, séries, doramas e cultura pop (equivalente ao Google IA / Gemini Search).
+O usuário quer mapear com máxima precisão factual e detalhamento narrativo os MELHORES MOMENTOS e contexto do seguinte episódio: "{canon_context}"
 {api_block}
-Sua tarefa:
-Destaque em até 3 parágrafos curtos:
-1. Quais foram as cenas exatas mais comentadas desse episódio (confrontos, revelações, mortes, beijos, reações de choque)?
-2. Qual cena causou mais impacto emocional ou hype nas redes sociais (Reddit, Twitter, TikTok)?
-3. Seja factual. Se souber os eventos, descreva-os. Se não souber eventos específicos, utilize os metadados acima para contextualizar.
+Sua missão é gerar uma FICHA COMPLETA E ESTRUTURADA DO EPISÓDIO (no mesmo padrão da IA do Google):
+
+1. VISÃO GERAL DO EPISÓDIO:
+   • Título oficial do episódio (em Português e original)
+   • Onde se passa (localização exata) e situação inicial dos personagens
+   • Motivo do conflito / ameaça enviada
+
+2. CRONOLOGIA DOS MELHORES MOMENTOS DO EPISÓDIO (Em ordem sequencial dos acontecimentos):
+   Para CADA momento memorável do episódio (incluindo diálogos/debates filosóficos, discussões tensas, intervenções, ataques e lutas):
+   • Nome da cena (ex: 'A Entrada de Máscara da Morte', 'A Lição de Filosofia do Mestre Ancião', 'Shiryu Intervém e o Chute no Elmo', 'O Cólera do Dragão Humilhado', 'A Chegada Imponente de Mu de Áries')
+   • PRELÚDIO / CONVERSA: Como o diálogo ou confronto começa, quem provoca quem e o que gerou a tensão inicial.
+   • AÇÃO / CLÍMAX: O que acontece no ápice da cena (o golpe, a demonstração de poder/cosmo, a revelação chocante).
+   • DESFECHO & REAÇÃO: Como a cena termina imediatamente e qual a reação dos personagens envolvidos.
+   • FALAS MARCANTES: Frases e citações icônicas ditas nessa cena.
+
+3. IMPACTO DRAMÁTICO NO ENREDO:
+   • Por que este episódio é crucial para a obra e como ele prepara os próximos arcos.
 
 Responda em formato JSON:
 {{
-  "lore": "Texto com o resumo dos momentos mais comentados deste episódio"
+  "lore": "Texto estruturado completo contendo a Visão Geral, a Cronologia dos Melhores Momentos detalhada com Prelúdio/Ação/Desfecho de cada momento, e o Impacto no Enredo."
 }}
 """
     final_lore = ""
     try:
-        raw = call_ai_text(prompt, on_log=None)
-        data = json.loads(raw)
-        lore = data.get("lore", "").strip()
+        raw = call_ai_text(prompt, on_log=None, max_tokens=4096)
+        lore = ""
+        try:
+            clean_raw = raw.strip()
+            if "```json" in clean_raw:
+                clean_raw = clean_raw.split("```json")[1].split("```")[0].strip()
+            elif "```" in clean_raw:
+                clean_raw = clean_raw.split("```")[1].split("```")[0].strip()
+            data = json.loads(clean_raw)
+            if isinstance(data, dict):
+                lore = data.get("lore", "")
+                if not lore:
+                    # Se retornou campos estruturados no json
+                    parts = []
+                    if "titulo_pt_br" in data or "titulo" in data:
+                        t = data.get("titulo_pt_br") or data.get("titulo")
+                        parts.append(f"• Título: {t}")
+                    if "sinopse" in data or "visao_geral" in data:
+                        vg = data.get("visao_geral") or data.get("sinopse")
+                        if isinstance(vg, dict):
+                            parts.append(f"• Visão Geral: {vg.get('situacao_inicial', '')} (Local: {vg.get('localizacao', '')})")
+                        else:
+                            parts.append(f"• Visão Geral: {vg}")
+                    if "melhores_momentos" in data and isinstance(data["melhores_momentos"], list):
+                        parts.append("\n🏆 MELHORES MOMENTOS DO EPISÓDIO:")
+                        for idx, m in enumerate(data["melhores_momentos"], 1):
+                            t_m = m.get("titulo") or m.get("titulo_cena") or f"Momento {idx}"
+                            dyn = m.get("dinamica") or {}
+                            pre = dyn.get("inicio") or m.get("preludio_conversa", "")
+                            act = dyn.get("escalada") or m.get("acao_climax", "")
+                            end = dyn.get("desfecho") or m.get("desfecho_reacao", "")
+                            falas = m.get("falas_marcantes", "")
+                            parts.append(f"\n#{idx} {t_m}:")
+                            if pre: parts.append(f"  - Contexto/Diálogo: {pre}")
+                            if act: parts.append(f"  - Clímax/Ação: {act}")
+                            if end: parts.append(f"  - Desfecho: {end}")
+                            if falas: parts.append(f"  - Falas: {falas}")
+                    if "impacto_no_enredo" in data:
+                        parts.append(f"\n💡 IMPACTO NO ENREDO:\n{data['impacto_no_enredo']}")
+                    lore = "\n".join(parts)
+        except Exception:
+            # Fallback direto se a IA respondeu em markdown
+            lore = raw.strip()
+
         if enriched_api:
             if not lore or "Lore não encontrada" in lore:
                 final_lore = enriched_api
             else:
-                final_lore = f"{enriched_api}\n\n[MOMENTOS DE HYPE & COMUNIDADE]\n{lore}"
+                final_lore = f"{enriched_api}\n\n[CRONOLOGIA DOS MELHORES MOMENTOS & ENREDO]\n{lore}"
         elif "Lore não encontrada" in lore:
             final_lore = ""
         else:
             final_lore = lore
-    except Exception:
+    except Exception as e:
+        if on_log:
+            on_log(f"[AVISO] Fallback lore: {e}")
         final_lore = enriched_api or ""
 
     if ai_cache and final_lore:
-        ai_cache.set(context.strip().lower(), "anime_lore", final_lore)
+        ai_cache.set(context.strip().lower(), "anime_lore_v3", final_lore)
 
     return final_lore
+
 
 
 # ─── Viral Knowledge Base (from reference ViralAI) ───────────────────────────
@@ -803,18 +882,23 @@ FORMATO OBRIGATÓRIO DO TÍTULO:
 
     else:  # context (default)
         cut_mode_rules = """
-[MODO DE CORTE: CONTEXTO — MINI-HISTÓRIA COM NARRATIVA IN MEDIA RES]
+[MODO DE CORTE: CONTEXTO COMPLETO — CENA NARRATIVA COM INÍCIO, MEIO E FIM (60s A 150s)]
 
-OBJETIVO: Identificar trechos de 45 a 90 segundos que contem uma MINI-HISTÓRIA COMPLETA usando a estrutura "In Media Res" para máxima retenção.
+OBJETIVO: Identificar trechos de 60 a 150 segundos (1m a 2m 30s) que capturem TODO O CONTEXTO DA CENA (conversa, debate filosófico, escalada de tensão ou luta completa).
+⛔ PROIBIDO CORTAR PELA METADE: O espectador precisa entender quem está falando, por que a discussão começou e como a cena terminou!
 
-ESTRUTURA IN MEDIA RES (A REGRA DE OURO DA RETENÇÃO):
-  1. GANCHO (0–3s): Começa EXATAMENTE na fala de maior impacto, revelação bombástica ou provocação — criando a dúvida: 'Como chegou aqui?'.
-  2. CONTEXTO RÁPIDO (3s–30s): Mostra o motivo do conflito e a escalada da tensão entre os envolvidos.
-  3. PAYOFF / DESFECHO (30s–75s): A resolução daquela mini-história com gancho final ou fechamento de ciclo.
-  • Duração ideal: 45 a 75 segundos. Máximo: 90 segundos.
+🚨 REGRA SUPREMA DE INTEGRIDADE DA CENA (ANTI-DECAPITAÇÃO DE CONTEXTO):
+  1. SETUP & CONTEXTO DA CONVERSA (Início):
+     - NUNCA comece no frame exato de um golpe ou no meio de um grito sem contexto anterior.
+     - Comece na fala que introduz o conflito (a chegada do personagem, a provocação do vilão, o debate moral/filosófico ou o motivo da disputa).
+  2. ESCALADA & CLÍMAX (Desenvolvimento):
+     - Cubra as réplicas verbais afiadas, o aumento de cosmo/tensão ou a troca de golpes que leva ao pico de ação.
+  3. DESFECHO & REAÇÃO (Finalização):
+     - Mostre o desfecho do momento (o golpe bloqueado, a revelação feita, a chegada de um aliado ou o recuo) e a reação dos personagens.
+  • Duração ideal: 60 a 120 segundos para diálogos e confrontos diretos; até 150 segundos (2m 30s) para lutas e debates complexos com fala prévia.
 
 FORMATO OBRIGATÓRIO DO TÍTULO:
-  • "title": "[Título Gancho] — [Descrição detalhada da mini-história, personagens e desfecho]"
+  • "title": "[Título Chamativo] — [Descrição detalhada da conversa/luta, personagens e desfecho]"
 """
 
     if cut_mode == "narrative_arc":
@@ -920,41 +1004,48 @@ CRITÉRIOS DOS TOP 3:
             else:
                 crit_smart = "  • Evite incluir mais de 2 cenas da mesma categoria (diversifique o conteúdo)."
 
-            task_rules = f"""TAREFA: Você é um Editor Sênior de Conteúdo Viral com 10+ anos de experiência em TikTok, YouTube Shorts e Instagram Reels para animes, doramas e séries de ação.
+            task_rules = f"""TAREFA: Você é um Editor Sênior de Conteúdo e Diretor de Vídeo com 10+ anos de experiência na curadoria dos MELHORES MOMENTOS de animes, doramas e séries.
 
-Sua missão: analisar a transcrição timestamp a timestamp e identificar com precisão cirúrgica todos os trechos com potencial de viralizar no foco selecionado. Qualidade sobre quantidade. Honestidade sobre otimismo.
+Sua missão: analisar a transcrição timestamp a timestamp e identificar com precisão cirúrgica os MELHORES MOMENTOS DO EPISÓDIO, preservando TODO O CONTEXTO de cada cena (a conversa preparatória, a escalada dramática/luta e o desfecho).
 
 {cut_mode_rules}
 {genre_rules}
 
-=== PROCESSO DE ANÁLISE (siga esta ordem mental) ===
+=== PROCESSO DE ANÁLISE SMART (siga rigorosamente esta ordem mental) ===
 
-PASSO 1 — VARREDURA COMPLETA (OBRIGATÓRIO):
-Leia TODA a transcrição do início ao fim antes de decidir qualquer corte. Mapeie internamente TODOS os momentos correspondentes ao foco antes de começar a selecionar.
+PASSO 1 — ALINHAMENTO COM O LORE E OS MELHORES MOMENTOS DO EPISÓDIO:
+Consulte a seção [LORE DO EPISÓDIO E REAÇÕES DOS FÃS] acima. Ela contém a cronologia exata dos melhores momentos do episódio mapeada pela inteligência de pesquisa (ex: discussões filosóficas, confrontos de poderes, técnicas marcantes e aparições surpresa).
+Localize na transcrição EXATAMENTE onde cada um desses momentos icônicos acontece.
 
-⛔ REGRA ANTI-PREGUIÇA: Retornar poucos candidatos é reprovação se o episódio tiver mais momentos. Se você não encontrou pelo menos 5, RELEIA a transcrição completa antes de responder.
+PASSO 2 — PRESERVAÇÃO INTEGRAL DO CONTEXTO (REGRA ANTI-DECAPITAÇÃO):
+⛔ NUNCA CORTE UMA CENA PELA METADE:
+  • Se for uma CONVERSA / DEBATE (ex: Mestre Ancião repreendendo Máscara da Morte):
+    - O corte DEVE começar na fala que inicia o diálogo ou provocação.
+    - DEVE incluir a troca de argumentos e a lição moral ou réplica até o fim da conversa.
+  • Se for uma LUTA / CONFRONTO (ex: Shiryu atacando Máscara da Morte e o Cólera do Dragão sendo bloqueado com 1 dedo):
+    - O corte DEVE começar na fala ou momento em que a decisão de lutar é tomada (ex: a defesa do mestre e o chute no elmo).
+    - DEVE cobrir toda a elevação de poder e disparo da técnica.
+    - DEVE terminar na reação de espanto pós-golpe e consequência imediata.
+  • Se o diálogo inicial e a luta formarem uma sequência inseparável, mantenha o bloco contínuo (60s a 150s) para que o corte seja plenamente compreensível e épico!
 
-PASSO 2 — CLASSIFIQUE CADA MOMENTO CANDIDATO EM UMA CATEGORIA:
-Escolha UMA categoria principal para cada corte (compatível com o foco selecionado).
-
-PASSO 3 — ANALISE CADA CANDIDATO EM 3 DIMENSÕES:
-  • HOOK (primeiros 3 segundos): O que o espectador vê/ouve ao entrar no corte? É forte o suficiente para segurar o scroll?
-  • RETENÇÃO: O trecho mantém o interesse até o fim, ou murcha no meio?
-  • CLÍMAX: Tem um momento de pico claro que justifica o corte existir?
+PASSO 3 — ANÁLISE DAS 3 DIMENSÕES DE CADA CANDIDATO:
+  • CONTEXTO & HOOK INICIAL: A fala ou provocação de abertura estabelece claramente o que está em jogo?
+  • DESENVOLVIMENTO: A tensão cresce e mantém a atenção sem pular falas essenciais?
+  • CLÍMAX & PAYOFF: O momento ápice é entregue com impacto e seguido pela reação imediata?
 
 PASSO 4 — REGRA DO TÍTULO DESCRITIVO (MANDATÓRIO):
-Todo corte DEVE ter o campo 'title' no formato: "[Título Chamativo] — [Descrição detalhada da ação, personagens e clímax da cena]".
-Exemplo: "A Fúria de Ichigo — Bankai destrói a lâmina de Byakuya e choca todos".
+Todo corte DEVE ter o campo 'title' no formato: "[Título Chamativo] — [Descrição detalhada da conversa/luta, personagens e clímax da cena]".
+Exemplo: "A Lição do Mestre Ancião — Dohko confronta Máscara da Morte e ensina o verdadeiro significado da justiça".
+Exemplo: "A Humilhação de Câncer — Shiryu dispara o Cólera do Dragão mas Máscara da Morte para com apenas um dedo".
 ⛔ NUNCA use títulos curtos ou vagos como 'A Batalha' ou 'Corte 1'.
 
 PASSO 5 — SELEÇÃO FINAL:
-  • Inclua apenas momentos com nota ≥ 6.
+  • Inclua os melhores momentos que correspondam aos ápices do episódio.
 {crit_smart}
-  • Não inclua cenas com hooks fracos.
   • Mínimo: 3 a 5 candidatos dependendo do episódio. Máximo: 8 candidatos.
-  • Ordene do maior potencial para o menor.
+  • Ordene do maior potencial/impacto para o menor.
 
-CRITÉRIO DE DESEMPATE: Prefira cenas com FALA ICÔNICA ou REAÇÃO EXPRESSIVA — elas geram comentários e compartilhamentos."""
+CRITÉRIO DE DESEMPATE: Prefira cenas com DIÁLOGO ICÔNICO e LUTA COMPLETA — são as cenas que geram o maior número de compartilhamentos e retenção."""
 
     genre_alert = ""
     if genre != "general":
@@ -1167,8 +1258,9 @@ def enforce_cut_mode_durations(
                 cand["estimated_range"] = f"{_seconds_to_time_str(start_sec)} -> {et_str}"
 
         elif cut_mode == "context":
-            if dur_sec > 90.0:
-                new_end = start_sec + 90.0
+            # Permite cenas completas com contexto de conversa e luta de 60s até 150s (2m 30s)
+            if dur_sec > 150.0:
+                new_end = start_sec + 150.0
                 if max_dur > 0 and new_end > max_dur:
                     new_end = max_dur
                 new_dur = new_end - start_sec
@@ -1177,6 +1269,19 @@ def enforce_cut_mode_durations(
                 cand["end_time"] = et_str
                 cand["duration"] = dur_str
                 cand["estimated_range"] = f"{_seconds_to_time_str(start_sec)} -> {et_str}"
+            elif dur_sec < 45.0 and start_sec >= 10.0:
+                # Pre-padding inteligente: se o corte veio muito curto (<45s), expande até 10s para trás
+                # para garantir que a fala introdutória ou provocação que gerou o clímax não seja comida
+                pad = min(12.0, start_sec)
+                new_start = start_sec - pad
+                new_dur = (start_sec + dur_sec) - new_start
+                st_str = _seconds_to_time_str(new_start)
+                et_str = _seconds_to_time_str(start_sec + dur_sec)
+                dur_str = f"{int(new_dur // 60)}m {int(new_dur % 60):02d}s" if new_dur >= 60 else f"{int(new_dur)}s"
+                cand["start_time"] = st_str
+                cand["end_time"] = et_str
+                cand["duration"] = dur_str
+                cand["estimated_range"] = f"{st_str} -> {et_str}"
 
         # Always ensure duration and estimated_range are clean and present
         if not cand.get("duration"):
@@ -1218,7 +1323,7 @@ def analyze_episode(
 
     mode_label = "Top 3 do Episódio" if mode == "top3" else "Smart Cortes (Curadoria Sincera)"
     cut_mode_label = {
-        "context": "Contexto (Mini-História)",
+        "context": "Contexto Completo (Conversa & Luta 1 a 2.5 min)",
         "continuous": "Contínuo (Sem cortes internos)",
         "narrative_arc": "Mini-Filme / Arco Narrativo (2 a 5 min)",
         "multi_part": "Série em Partes (Multi-Partes 1, 2, 3)",
@@ -1396,7 +1501,7 @@ def analyze_episode_reroll(
     }
     content_type_label = type_label_map.get(content_type, content_type)
     cut_mode_label = {
-        "context": "Contexto (Mini-História)",
+        "context": "Contexto Completo (Conversa & Luta 1 a 2.5 min)",
         "continuous": "Contínuo (Sem cortes internos)",
         "narrative_arc": "Mini-Filme / Arco Narrativo (2 a 5 min)",
         "multi_part": "Série em Partes (Multi-Partes 1, 2, 3)",

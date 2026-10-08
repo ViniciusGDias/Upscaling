@@ -9,6 +9,7 @@ Permite ao usuario:
 """
 
 import os
+from pathlib import Path
 import customtkinter as ctk
 import icon_manager
 import subtitle_preview_helper
@@ -34,6 +35,20 @@ COLORS = {
 }
 
 STYLE_OPTIONS = [
+    # Presets Kinetic Emotion (CapCut Pro / Cinema)
+    "🎬 Kinetic Dramático (Fade & Clímax)",
+    "💔 Kinetic Emocional (Slow Breathe)",
+    "😱 Kinetic Horror & Tensão (Glitch Sangue)",
+    "🔥 Kinetic Hype Impact (Super Pop)",
+    "⚡ Kinetic Cyber Glitch (Distorção)",
+    "🎤 Kinetic Lyric Beat (Bounce Rítmico)",
+    "🤍 Kinetic Minimal Bold (Viral Clean)",
+    "✨ Kinetic Ouro Nobre (Elegante & Fade)",
+    "🌊 Kinetic Fluido (Ondulação Suave)",
+    "🗯️ Kinetic Shonen Power (Golpe & 💥)",
+    "🌙 Kinetic Seinen Dark (Sombrio & Misterioso)",
+    "🌸 Kinetic Kawaii Pop (Pastel & Sparkles ✨)",
+    # Presets Tradicionais
     "Inteligente Situacional (CapCut IA)",
     "Palavra por Palavra - Contextual Pro (IA & Emoção)",
     "Palavra por Palavra - Branco Minimalista (Viral Clean)",
@@ -55,6 +70,33 @@ STYLE_OPTIONS = [
 ]
 
 STYLE_KEY_MAP = {
+    # Presets Kinetic Emotion
+    "🎬 Kinetic Dramático (Fade & Clímax)": "kinetic_dramatic",
+    "💔 Kinetic Emocional (Slow Breathe)": "kinetic_emotional",
+    "😱 Kinetic Horror & Tensão (Glitch Sangue)": "kinetic_horror",
+    "🔥 Kinetic Hype Impact (Super Pop)": "kinetic_hype",
+    "⚡ Kinetic Cyber Glitch (Distorção)": "kinetic_glitch",
+    "🎤 Kinetic Lyric Beat (Bounce Rítmico)": "kinetic_lyric",
+    "🤍 Kinetic Minimal Bold (Viral Clean)": "kinetic_minimal",
+    "✨ Kinetic Ouro Nobre (Elegante & Fade)": "kinetic_elegant",
+    "🌊 Kinetic Fluido (Ondulação Suave)": "kinetic_smooth",
+    "🗯️ Kinetic Shonen Power (Golpe & 💥)": "kinetic_shonen",
+    "🌙 Kinetic Seinen Dark (Sombrio & Misterioso)": "kinetic_seinen",
+    "🌸 Kinetic Kawaii Pop (Pastel & Sparkles ✨)": "kinetic_kawaii",
+    # Chaves diretas / aliases
+    "kinetic_dramatic": "kinetic_dramatic",
+    "kinetic_emotional": "kinetic_emotional",
+    "kinetic_horror": "kinetic_horror",
+    "kinetic_hype": "kinetic_hype",
+    "kinetic_glitch": "kinetic_glitch",
+    "kinetic_lyric": "kinetic_lyric",
+    "kinetic_minimal": "kinetic_minimal",
+    "kinetic_elegant": "kinetic_elegant",
+    "kinetic_smooth": "kinetic_smooth",
+    "kinetic_shonen": "kinetic_shonen",
+    "kinetic_seinen": "kinetic_seinen",
+    "kinetic_kawaii": "kinetic_kawaii",
+    # Presets Tradicionais
     "Inteligente Situacional (CapCut IA)": "smart_situational",
     "Palavra por Palavra - Contextual Pro (IA & Emoção)": "word_by_word_contextual",
     "Palavra por Palavra - Branco Minimalista (Viral Clean)": "word_by_word_clean",
@@ -124,25 +166,45 @@ class SubtitleEditorDialog(ctk.CTkToplevel):
         self,
         parent,
         items: List[Dict[str, Any]],
-        on_confirm: Callable[[List[Dict[str, Any]], str, Any], None],
+        on_confirm: Callable[..., None],
         current_style: str = "dynamic_animax",
         current_pop: Any = "Esmaecer Suave (Anime Clássico)",
         video_duration: Optional[float] = None,
         video_path: Optional[str] = None,
+        music_path: Optional[str] = None,
+        music_volume: float = 0.15,
+        music_start: str = "00:00",
+        music_auto_ducking: bool = False,
+        ducking_mode: str = "cinema",
+        anti_copyright: bool = False,
+        anti_copyright_mode: str = "advanced",
+        on_music_volume_change: Optional[Callable[[float], None]] = None,
         **kwargs
     ):
         super().__init__(parent, **kwargs)
         self.title("Revisão de Legendas & Nomes de Anime")
-        self.geometry("900x780")
-        self.minsize(780, 600)
+        self.geometry("900x820")
+        self.minsize(780, 620)
         self.configure(fg_color=COLORS["bg_dark"])
 
         self.on_confirm = on_confirm
         self.items = [dict(it) for it in items]
         self.video_duration = video_duration
         self.video_path = video_path
+        self.music_path = music_path
+        self.music_volume = max(0.0, min(1.0, float(music_volume)))
+        self.music_start = music_start or "00:00"
+        self.music_auto_ducking = music_auto_ducking
+        self.ducking_mode = ducking_mode
+        self.anti_copyright = anti_copyright
+        self.anti_copyright_mode = anti_copyright_mode
+        self.on_music_volume_change = on_music_volume_change
+        self.music_muted = False
         self.preview_player: Optional[VideoPreviewPlayer] = None
         self.rows = []
+        self._anim_timer = None
+        self._anim_frames = []
+        self._anim_frame_idx = 0
 
         self.transient(parent)
         self.grab_set()
@@ -332,9 +394,114 @@ class SubtitleEditorDialog(ctk.CTkToplevel):
                 player_frame,
                 video_path=self.video_path,
                 max_width=360,
-                max_height=180
+                max_height=180,
+                bgm_path=self.music_path,
+                bgm_volume=self.music_volume,
+                bgm_start_sec=str_to_sec(self.music_start),
+                music_auto_ducking=self.music_auto_ducking,
+                ducking_mode=self.ducking_mode,
+                anti_copyright=self.anti_copyright,
+                anti_copyright_mode=self.anti_copyright_mode
             )
             self.preview_player.pack(pady=(0, 6))
+
+            # Barra de Prévia e Ajuste da Música de Fundo (BGM)
+            if self.music_path and os.path.exists(self.music_path):
+                music_name = Path(self.music_path).name
+                if len(music_name) > 30:
+                    music_name = music_name[:27] + "..."
+
+                bgm_ctrl = ctk.CTkFrame(
+                    player_frame,
+                    fg_color="#09090b",
+                    corner_radius=8,
+                    border_width=1,
+                    border_color="#27272a"
+                )
+                bgm_ctrl.pack(fill="x", padx=12, pady=(0, 8))
+                bgm_ctrl.grid_columnconfigure(2, weight=1)
+
+                lbl_info = ctk.CTkLabel(
+                    bgm_ctrl,
+                    text=f"🎵 Música: {music_name}",
+                    font=ctk.CTkFont(size=11, weight="bold"),
+                    text_color="#38bdf8"
+                )
+                lbl_info.grid(row=0, column=0, padx=(12, 10), pady=6, sticky="w")
+
+                init_pct = int(self.music_volume * 100)
+                self.lbl_bgm_volume = ctk.CTkLabel(
+                    bgm_ctrl,
+                    text=f"Volume BGM: {init_pct}%",
+                    font=ctk.CTkFont(size=11, weight="bold"),
+                    text_color="#e4e4e7"
+                )
+                self.lbl_bgm_volume.grid(row=0, column=1, padx=(0, 8), pady=6, sticky="w")
+
+                def _on_bgm_slider(val):
+                    pct = int(val)
+                    vol = pct / 100.0
+                    self.music_volume = vol
+                    self.lbl_bgm_volume.configure(text=f"Volume BGM: {pct}%")
+                    if self.preview_player:
+                        self.preview_player.set_bgm_volume(vol)
+                    if self.on_music_volume_change:
+                        try:
+                            self.on_music_volume_change(vol)
+                        except Exception:
+                            pass
+
+                self.bgm_slider = ctk.CTkSlider(
+                    bgm_ctrl,
+                    from_=0,
+                    to=100,
+                    number_of_steps=100,
+                    progress_color="#38bdf8",
+                    button_color="#38bdf8",
+                    button_hover_color="#0284c7",
+                    command=_on_bgm_slider,
+                    width=150
+                )
+                self.bgm_slider.set(init_pct)
+                self.bgm_slider.grid(row=0, column=2, padx=(0, 14), pady=6, sticky="ew")
+
+                def _toggle_bgm_mute():
+                    if self.preview_player:
+                        is_muted = self.preview_player.toggle_bgm_mute()
+                        self.music_muted = is_muted
+                        if is_muted:
+                            self.btn_bgm_mute.configure(
+                                text=" 🔇 Música Mutada (Foco na Fala)",
+                                image=icon_manager.get_icon("mute", size=(13, 13), color="#ef4444"),
+                                fg_color="#451a1a",
+                                hover_color="#7f1d1d",
+                                text_color="#fca5a5"
+                            )
+                        else:
+                            self.btn_bgm_mute.configure(
+                                text=" 🔊 Mutar Só a Música",
+                                image=icon_manager.get_icon("volume", size=(13, 13), color="#e4e4e7"),
+                                fg_color="#18181b",
+                                hover_color="#27272a",
+                                text_color="#e4e4e7"
+                            )
+
+                self.btn_bgm_mute = ctk.CTkButton(
+                    bgm_ctrl,
+                    text=" 🔊 Mutar Só a Música",
+                    image=icon_manager.get_icon("volume", size=(13, 13), color="#e4e4e7"),
+                    font=ctk.CTkFont(size=11, weight="bold"),
+                    fg_color="#18181b",
+                    hover_color="#27272a",
+                    text_color="#e4e4e7",
+                    border_width=1,
+                    border_color="#3f3f46",
+                    height=28,
+                    corner_radius=6,
+                    command=_toggle_bgm_mute
+                )
+                self.btn_bgm_mute.grid(row=0, column=3, padx=(0, 10), pady=6, sticky="e")
+
             current_row += 1
 
         self.grid_rowconfigure(current_row, weight=1)
@@ -685,16 +852,45 @@ class SubtitleEditorDialog(ctk.CTkToplevel):
         self.lbl_censor_status.configure(text=f"✓ Auto-detecção: {count} palavra(s) censurada(s)!")
 
     def _on_style_changed(self, choice=None):
-        """Atualiza o banner de pré-visualização em tempo real na janela de revisão."""
+        """Atualiza o banner de pré-visualização animado em tempo real na janela de revisão."""
         try:
+            if getattr(self, "_anim_timer", None):
+                try:
+                    self.after_cancel(self._anim_timer)
+                except Exception:
+                    pass
+                self._anim_timer = None
+
             style_label = self.style_var.get()
             style_key = STYLE_KEY_MAP.get(style_label, "smart_situational")
             meta = subtitle_preview_helper.get_style_info(style_key)
             self.lbl_preview_badge.configure(text=meta.get("badge", "ESTILO"))
             self.lbl_preview_desc.configure(text=meta.get("tagline", ""))
-            p_img = subtitle_preview_helper.render_subtitle_preview_image(style_key, width=320, height=44)
-            self.lbl_preview_img.configure(image=p_img)
-            self.lbl_preview_img.image = p_img
+
+            self._anim_frames = subtitle_preview_helper.get_preview_animation_frames(style_key, width=320, height=44, num_frames=14)
+            self._anim_frame_idx = 0
+            if self._anim_frames:
+                self.lbl_preview_img.configure(image=self._anim_frames[0])
+                self.lbl_preview_img.image = self._anim_frames[0]
+                self._tick_preview_animation()
+            else:
+                p_img = subtitle_preview_helper.render_subtitle_preview_image(style_key, width=320, height=44)
+                self.lbl_preview_img.configure(image=p_img)
+                self.lbl_preview_img.image = p_img
+        except Exception:
+            pass
+
+    def _tick_preview_animation(self):
+        try:
+            if not self.winfo_exists():
+                return
+            if not getattr(self, "_anim_frames", None):
+                return
+            self._anim_frame_idx = (self._anim_frame_idx + 1) % len(self._anim_frames)
+            frame = self._anim_frames[self._anim_frame_idx]
+            self.lbl_preview_img.configure(image=frame)
+            self.lbl_preview_img.image = frame
+            self._anim_timer = self.after(90, self._tick_preview_animation)
         except Exception:
             pass
 
@@ -806,9 +1002,18 @@ class SubtitleEditorDialog(ctk.CTkToplevel):
 
         self.destroy()
         if self.on_confirm:
-            self.on_confirm(final_items, selected_style_key, selected_effect)
+            try:
+                self.on_confirm(final_items, selected_style_key, selected_effect, self.music_volume)
+            except TypeError:
+                self.on_confirm(final_items, selected_style_key, selected_effect)
 
     def destroy(self):
+        if getattr(self, "_anim_timer", None):
+            try:
+                self.after_cancel(self._anim_timer)
+            except Exception:
+                pass
+            self._anim_timer = None
         if hasattr(self, "preview_player") and self.preview_player:
             try:
                 self.preview_player.stop()

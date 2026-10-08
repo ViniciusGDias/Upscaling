@@ -81,7 +81,9 @@ if dist_dir.exists():
         "censorship_editor_dialog.py", "custom_profanity.json", "studio_tab.py",
         "ai_cache_hub.py", "social_analyzer.py", "yt_shorts_tab.py", "instagram_tab.py",
         "batch_history_tab.py", "video_preview_player.py", "windows_notifier.py",
-        "refiner_tab.py", "updater.py", "update_dialog.py", "settings_tab.py"
+        "refiner_tab.py", "refiner_mastercut.py", "updater.py", "update_dialog.py", "settings_tab.py",
+        "director_tab.py", "director_ai.py", "metadata_enricher.py",
+        "anime_finder_tab.py", "anime_finder_ai.py"
     ]:
         p = Path(f)
         if p.exists():
