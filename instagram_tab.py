@@ -11,6 +11,7 @@ from pathlib import Path
 from PIL import Image
 import tkinter as tk
 from tkinter import filedialog, messagebox
+from typing import Optional, Dict, Any, Callable, List
 import customtkinter as ctk
 import icon_manager
 def _copy_text_to_clipboard(widget, text: str):
@@ -277,6 +278,7 @@ class InstagramAnalyzerTab(ctk.CTkFrame):
             btn_chip.pack(side="left", padx=(0, 3), pady=2)
 
         # Opções extras
+        # Idioma e Opções
         opt_row = ctk.CTkFrame(left_frame, fg_color="transparent")
         opt_row.pack(fill="x", padx=15, pady=(8, 0))
         
@@ -300,7 +302,111 @@ class InstagramAnalyzerTab(ctk.CTkFrame):
         )
         self.chk_force_refresh.pack(side="right", pady=4)
 
+        # ─── MOTOR DE IA & MODELO LOCAL (OLLAMA / RTX 5060) ───
+        engine_box = ctk.CTkFrame(left_frame, fg_color="#18181b", corner_radius=8, border_width=1, border_color="#27272a")
+        engine_box.pack(fill="x", padx=15, pady=(6, 4))
 
+        engine_top_row = ctk.CTkFrame(engine_box, fg_color="transparent")
+        engine_top_row.pack(fill="x", padx=10, pady=(6, 4))
+
+        ctk.CTkLabel(
+            engine_top_row, text="Motor de IA:",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            text_color="#a1a1aa"
+        ).pack(side="left")
+
+        try:
+            from settings_manager import get_all_selectable_ollama_models, get_installed_ollama_models
+            installed_ollama = get_installed_ollama_models()
+        except Exception:
+            installed_ollama = []
+            get_all_selectable_ollama_models = lambda: [("qwen2.5:7b", "Qwen 2.5 7B (Padrão Recomendado)")]
+
+        cur_engine = os.getenv("DIRECTOR_ENGINE", "ollama_local" if installed_ollama else "gemini").lower()
+
+        engine_options = [
+            "Ollama Local (RTX 5060)",
+            "Gemini Web (Navegador Pro)",
+            "Gemini (Padrão Cloud)",
+            "Qwen 2.5 Max (Lore/Raciocínio)",
+            "Kimi Moonshot (Arco Longo)",
+        ]
+        init_engine = "Ollama Local (RTX 5060)" if ("ollama" in cur_engine or "local" in cur_engine or installed_ollama) else "Gemini (Padrão Cloud)"
+        self.engine_var = ctk.StringVar(value=init_engine)
+
+        self.opt_engine = ctk.CTkOptionMenu(
+            engine_top_row,
+            values=engine_options,
+            variable=self.engine_var,
+            font=ctk.CTkFont(size=11),
+            height=26,
+            fg_color="#27272a",
+            button_color="#3f3f46",
+            button_hover_color="#ec4899",
+            command=self._on_engine_change
+        )
+        self.opt_engine.pack(side="right", fill="x", expand=True, padx=(8, 0))
+
+        # Linha de Seleção do Modelo Local Ollama
+        self.local_models_list = get_all_selectable_ollama_models()
+        self.local_model_keys_by_label = {label: code for code, label in self.local_models_list}
+        self.local_model_labels_by_code = {code: label for code, label in self.local_models_list}
+
+        def_local_code = "qwen2.5:7b"
+        if any("qwen3.8" in m for m in installed_ollama):
+            def_local_code = "qwen3.8:27b"
+        elif any("qwen2.5:7b" in m for m in installed_ollama):
+            def_local_code = "qwen2.5:7b"
+        elif installed_ollama:
+            def_local_code = installed_ollama[0]
+
+        def_local_label = self.local_model_labels_by_code.get(
+            def_local_code,
+            self.local_models_list[0][1] if self.local_models_list else "qwen2.5:7b"
+        )
+
+        self.row_local_model = ctk.CTkFrame(engine_box, fg_color="transparent")
+        
+        row_lm_lbl = ctk.CTkFrame(self.row_local_model, fg_color="transparent")
+        row_lm_lbl.pack(fill="x", pady=(0, 2))
+        ctk.CTkLabel(
+            row_lm_lbl, text="🧠 Modelo Local (Ollama na GPU):",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            text_color="#10b981"
+        ).pack(side="left")
+
+        self.local_model_var = ctk.StringVar(value=def_local_label)
+        self.opt_local_model = ctk.CTkOptionMenu(
+            self.row_local_model,
+            values=[lbl for _, lbl in self.local_models_list],
+            variable=self.local_model_var,
+            font=ctk.CTkFont(size=11),
+            height=26,
+            fg_color="#111113",
+            button_color="#27272a",
+            button_hover_color="#10b981"
+        )
+        self.opt_local_model.pack(fill="x", pady=(0, 6))
+
+        # Linha para Automação do Gemini Web (Login / Conectar Conta Google)
+        self.row_gemini_web = ctk.CTkFrame(engine_box, fg_color="transparent")
+        ctk.CTkButton(
+            self.row_gemini_web,
+            text="🔑 Conectar Conta Google (Login no Gemini Pro)",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            fg_color="#1e1b4b",
+            hover_color="#312e81",
+            text_color="#a5b4fc",
+            border_width=1,
+            border_color="#4338ca",
+            height=26,
+            command=self._on_connect_gemini_web
+        ).pack(fill="x", pady=(2, 6))
+
+        if "ollama" in self.engine_var.get().lower() or "local" in self.engine_var.get().lower():
+            self.row_local_model.pack(fill="x", padx=10, pady=(0, 4))
+        elif "web" in self.engine_var.get().lower() or "navegador" in self.engine_var.get().lower():
+            self.row_gemini_web.pack(fill="x", padx=10, pady=(0, 4))
 
         # Log
         ctk.CTkLabel(left_frame, text="Log", font=ctk.CTkFont(size=10, weight="bold"), text_color="#3f3f46").pack(anchor="w", padx=15, pady=(4, 2))
@@ -406,6 +512,49 @@ class InstagramAnalyzerTab(ctk.CTkFrame):
                 self.preview_player.load_video(path)
             self._log(f"Vídeo carregado: {path} ({info['resolution']}, {info['duration_str']})")
 
+    def _on_engine_change(self, choice: Optional[str] = None):
+        """Alterna a visibilidade dos seletores conforme o motor."""
+        val = self.engine_var.get().lower() if hasattr(self, "engine_var") else ""
+        if "ollama" in val or "local" in val:
+            if hasattr(self, "row_local_model") and not self.row_local_model.winfo_ismapped():
+                self.row_local_model.pack(fill="x", padx=10, pady=(0, 4))
+        else:
+            if hasattr(self, "row_local_model") and self.row_local_model.winfo_ismapped():
+                self.row_local_model.pack_forget()
+
+        if "web" in val or "navegador" in val:
+            if hasattr(self, "row_gemini_web") and not self.row_gemini_web.winfo_ismapped():
+                self.row_gemini_web.pack(fill="x", padx=10, pady=(0, 4))
+        else:
+            if hasattr(self, "row_gemini_web") and self.row_gemini_web.winfo_ismapped():
+                self.row_gemini_web.pack_forget()
+
+    def _on_connect_gemini_web(self):
+        try:
+            from gemini_web_automator import open_login_window
+            self._log("🌐 Abrindo Google Chrome para login da sua conta Google no Gemini Pro...")
+            open_login_window(on_log=self._log)
+        except Exception as e:
+            self._log(f"⚠️ Erro ao abrir janela de login: {e}")
+
+    def _get_selected_engine(self) -> str:
+        val = self.engine_var.get().lower() if hasattr(self, "engine_var") else ""
+        if "web" in val or "navegador" in val:
+            return "gemini_web"
+        elif "ollama" in val or "local" in val:
+            return "ollama_local"
+        elif "qwen" in val:
+            return "qwen_max"
+        elif "kimi" in val:
+            return "kimi"
+        return "gemini"
+
+    def _get_selected_local_model(self) -> str:
+        if hasattr(self, "local_model_var") and hasattr(self, "local_model_keys_by_label"):
+            lbl = self.local_model_var.get()
+            return self.local_model_keys_by_label.get(lbl, "qwen2.5:7b")
+        return os.getenv("DIRECTOR_LOCAL_MODEL", "qwen2.5:7b")
+
     def _start_analysis(self, force_refresh: bool = False):
         path = self.file_entry.get().strip()
         if not path:
@@ -429,6 +578,9 @@ class InstagramAnalyzerTab(ctk.CTkFrame):
         lang = "en" if "EN" in lang_str else ("es" if "ES" in lang_str else "pt")
         language_en = (lang == "en")
 
+        engine_str = self._get_selected_engine()
+        local_model_str = self._get_selected_local_model()
+
         def worker():
             try:
                 res = analyze_instagram_video(
@@ -438,6 +590,8 @@ class InstagramAnalyzerTab(ctk.CTkFrame):
                     language_en=language_en,
                     language=lang,
                     force_refresh=force,
+                    engine=engine_str,
+                    local_model=local_model_str,
                     on_log=self._log,
                     log_cb=self._log
                 )

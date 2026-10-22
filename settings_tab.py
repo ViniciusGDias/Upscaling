@@ -23,7 +23,12 @@ from settings_manager import (
     test_gemini_connection,
     test_groq_connection,
     test_openrouter_connection,
-    AVAILABLE_GEMINI_MODELS
+    test_ollama_connection,
+    AVAILABLE_GEMINI_MODELS,
+    AVAILABLE_DIRECTOR_ENGINES,
+    AVAILABLE_OLLAMA_MODELS,
+    get_all_selectable_ollama_models,
+    get_installed_ollama_models,
 )
 import icon_manager
 from engine_manager import (
@@ -37,23 +42,10 @@ from updater import (
     open_download_page
 )
 
-# Colors matching Minimal Black Pro
-COLORS = {
-    "bg_dark": "#09090b",
-    "bg_card": "#111113",
-    "bg_card_hover": "#18181b",
-    "accent_primary": "#e2e8f0",
-    "accent_secondary": "#94a3b8",
-    "success": "#22c55e",
-    "warning": "#f59e0b",
-    "error": "#ef4444",
-    "text_primary": "#fafafa",
-    "text_secondary": "#a1a1aa",
-    "text_muted": "#a1a1aa",
-    "border": "#27272a",
-    "border_active": "#52525b",
-    "console_bg": "#050505",
-}
+import urahara_theme
+
+# Colors matching Urahara Shōten Design System (UI/UX Pro Max)
+COLORS = urahara_theme.COLORS
 
 
 class SettingsTab(ctk.CTkFrame):
@@ -268,6 +260,86 @@ class SettingsTab(ctk.CTkFrame):
             corner_radius=6,
         )
         self.model_combo.pack(side="left")
+
+        # Motor do Diretor IA
+        engine_row = ctk.CTkFrame(card, fg_color="transparent")
+        engine_row.pack(fill="x", padx=16, pady=(4, 6))
+
+        ctk.CTkLabel(
+            engine_row,
+            text="Motor do Diretor IA:",
+            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+            text_color=COLORS["text_secondary"],
+            width=160,
+            anchor="w",
+        ).pack(side="left", padx=(0, 10))
+
+        self.engine_combo = ctk.CTkComboBox(
+            engine_row,
+            values=[label for _, label in AVAILABLE_DIRECTOR_ENGINES],
+            font=ctk.CTkFont(family="Segoe UI", size=11),
+            dropdown_font=ctk.CTkFont(family="Segoe UI", size=11),
+            fg_color="#0d0d0f",
+            border_color=COLORS["border"],
+            button_color=COLORS["border"],
+            button_hover_color=COLORS["border_active"],
+            text_color=COLORS["text_primary"],
+            dropdown_fg_color="#18181b",
+            dropdown_text_color=COLORS["text_primary"],
+            dropdown_hover_color="#27272a",
+            width=360,
+            corner_radius=6,
+        )
+        self.engine_combo.pack(side="left")
+
+        # Modelo Local (Ollama)
+        local_row = ctk.CTkFrame(card, fg_color="transparent")
+        local_row.pack(fill="x", padx=16, pady=(4, 8))
+
+        ctk.CTkLabel(
+            local_row,
+            text="Modelo Local (Ollama):",
+            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+            text_color=COLORS["text_secondary"],
+            width=160,
+            anchor="w",
+        ).pack(side="left", padx=(0, 10))
+
+        self.selectable_ollama_models = get_all_selectable_ollama_models()
+        self.local_model_keys_by_label = {label: code for code, label in self.selectable_ollama_models}
+        self.local_model_labels_by_code = {code: label for code, label in self.selectable_ollama_models}
+
+        self.local_model_combo = ctk.CTkComboBox(
+            local_row,
+            values=[label for _, label in self.selectable_ollama_models],
+            font=ctk.CTkFont(family="Segoe UI", size=11),
+            dropdown_font=ctk.CTkFont(family="Segoe UI", size=11),
+            fg_color="#0d0d0f",
+            border_color=COLORS["border"],
+            button_color=COLORS["border"],
+            button_hover_color=COLORS["border_active"],
+            text_color=COLORS["text_primary"],
+            dropdown_fg_color="#18181b",
+            dropdown_text_color=COLORS["text_primary"],
+            dropdown_hover_color="#27272a",
+            width=360,
+            corner_radius=6,
+        )
+        self.local_model_combo.pack(side="left")
+
+        self.test_ollama_btn = ctk.CTkButton(
+            local_row,
+            text="Testar Ollama",
+            font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
+            fg_color="#1e293b",
+            hover_color="#334155",
+            text_color="#94a3b8",
+            height=28,
+            width=110,
+            corner_radius=6,
+            command=self._test_ollama,
+        )
+        self.test_ollama_btn.pack(side="left", padx=(10, 0))
 
         # ── Fallback Gratuito Section (Anti-Parada) ──
         fallback_card = ctk.CTkFrame(
@@ -566,6 +638,20 @@ class SettingsTab(ctk.CTkFrame):
         else:
             self.model_combo.set(AVAILABLE_GEMINI_MODELS[0][1])
 
+        cur_engine = settings.get("director_engine", "gemini")
+        matched_engine_label = None
+        for code, label in AVAILABLE_DIRECTOR_ENGINES:
+            if code == cur_engine:
+                matched_engine_label = label
+                break
+        self.engine_combo.set(matched_engine_label or AVAILABLE_DIRECTOR_ENGINES[0][1])
+
+        cur_local_model = settings.get("director_local_model", "qwen2.5:7b")
+        matched_local_label = self.local_model_labels_by_code.get(cur_local_model)
+        if not matched_local_label and self.selectable_ollama_models:
+            matched_local_label = self.selectable_ollama_models[0][1]
+        self.local_model_combo.set(matched_local_label or "qwen2.5:7b")
+
         self.groq_entry.delete(0, "end")
         self.groq_entry.insert(0, settings.get("groq_key", ""))
 
@@ -586,6 +672,16 @@ class SettingsTab(ctk.CTkFrame):
                 model_code = code
                 break
 
+        selected_engine_label = self.engine_combo.get()
+        engine_code = "gemini"
+        for code, label in AVAILABLE_DIRECTOR_ENGINES:
+            if label == selected_engine_label:
+                engine_code = code
+                break
+
+        selected_local_label = self.local_model_combo.get()
+        local_model_code = self.local_model_keys_by_label.get(selected_local_label, "qwen2.5:7b")
+
         groq_val = self.groq_entry.get().strip()
         if groq_val and (groq_val.startswith("AQ.") or groq_val.startswith("AIzaSy")):
             groq_val = ""
@@ -605,7 +701,9 @@ class SettingsTab(ctk.CTkFrame):
             groq_key=groq_val,
             openrouter_key=or_val,
             felo_key=felo_val,
-            check_updates=True
+            check_updates=True,
+            director_engine=engine_code,
+            director_local_model=local_model_code
         )
 
         if success:
@@ -615,6 +713,31 @@ class SettingsTab(ctk.CTkFrame):
         else:
             self.ai_test_status.configure(text=f"[FALHA] {msg}", text_color=COLORS["error"])
             messagebox.showerror("Erro ao Salvar", msg)
+
+    def _test_ollama(self):
+        """Test local Ollama availability."""
+        selected_local_label = self.local_model_combo.get()
+        local_model_code = self.local_model_keys_by_label.get(selected_local_label, "qwen2.5:7b")
+
+        self.test_ollama_btn.configure(state="disabled", text="Testando...")
+
+        def _worker():
+            ok, msg = test_ollama_connection(local_model_code)
+
+            def _update():
+                self.test_ollama_btn.configure(state="normal", text="Testar Ollama")
+                self.ai_test_status.configure(
+                    text=f"Ollama: {'[OK] ' if ok else '[FALHA] '}{msg}",
+                    text_color=COLORS["success"] if ok else COLORS["warning"]
+                )
+                if ok:
+                    messagebox.showinfo("Ollama Conectado", f"Tudo certo com o servidor local!\n\n{msg}")
+                else:
+                    messagebox.showwarning("Aviso Ollama", f"{msg}\n\nPara iniciar o Ollama, execute 'ollama serve' no terminal ou abra o Ollama na bandeja do Windows.")
+
+            self.after(0, _update)
+
+        threading.Thread(target=_worker, daemon=True).start()
 
     def _test_api_connection(self):
         """Test API connectivity in background thread."""
@@ -734,6 +857,86 @@ class SettingsTab(ctk.CTkFrame):
             action_btn_text="Como Instalar Demucs" if not dem["available"] else None,
             action_cmd=self._show_pytorch_cuda_dialog if not dem["available"] else None,
         )
+
+        # 6. Ollama Local & Modelos
+        ol = engines.get("ollama", {})
+        if ol.get("running"):
+            m_names = ", ".join(ol.get("models", [])[:3])
+            if len(ol.get("models", [])) > 3:
+                m_names += f" (+{len(ol['models']) - 3} modelos)"
+            ol_detail = f"Ollama ativo na GPU! Modelos disponíveis: {m_names if m_names else 'Nenhum'}"
+            ol_btn_text = None if ol.get("has_qwen") else "Baixar qwen2.5:7b"
+            ol_btn_cmd = None if ol.get("has_qwen") else lambda: self._pull_ollama_model("qwen2.5:7b")
+        elif ol.get("installed"):
+            ol_detail = "Ollama instalado, mas o serviço não está rodando no momento."
+            ol_btn_text = "Iniciar Serviço Ollama"
+            ol_btn_cmd = self._start_ollama_service
+        else:
+            ol_detail = "Ollama não instalado. Necessário apenas para IA 100% offline (Anime FX Pro e Diretor Local)."
+            ol_btn_text = "Como Instalar Ollama (Grátis)"
+            ol_btn_cmd = lambda: webbrowser.open("https://ollama.com/download/windows")
+
+        self._render_engine_card(
+            title="IA Local Ollama & Modelos (Modo Offline / GPU)",
+            desc="Processamento neural 100% gratuito e offline para Anime FX Pro e Diretor IA.",
+            is_ok=bool(ol.get("running") and ol.get("has_qwen")),
+            detail=ol_detail,
+            action_btn_text=ol_btn_text,
+            action_cmd=ol_btn_cmd,
+        )
+
+        # 7. Gemini Web Automator
+        gw = engines.get("gemini_web", {})
+        if gw.get("logged_in"):
+            gw_detail = "Conectado com sucesso! Sessão Google ativa para automação com tokens ilimitados do chat web."
+            gw_btn_text = "Re-autenticar Conta"
+        elif gw.get("chrome_installed"):
+            gw_detail = "Google Chrome detectado. Faça login para usar a automação do Gemini Web."
+            gw_btn_text = "Conectar / Fazer Login"
+        else:
+            gw_detail = "Google Chrome não encontrado nos caminhos padrão."
+            gw_btn_text = "Instalar Google Chrome"
+
+        self._render_engine_card(
+            title="Gemini Web Automator (Navegador Pro em Segundo Plano)",
+            desc="Executa o Gemini diretamente pelo navegador sem limites de tokens da API oficial.",
+            is_ok=bool(gw.get("logged_in")),
+            detail=gw_detail,
+            action_btn_text=gw_btn_text,
+            action_cmd=self._open_gemini_web_login,
+        )
+
+    def _start_ollama_service(self):
+        try:
+            import subprocess
+            subprocess.Popen(["ollama", "serve"], creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
+            self.after(1500, self.refresh_engine_status)
+            messagebox.showinfo("Ollama", "Comando de inicialização do Ollama enviado!")
+        except Exception as e:
+            messagebox.showerror("Erro", f"Não foi possível iniciar o Ollama: {e}")
+
+    def _pull_ollama_model(self, model_name: str):
+        messagebox.showinfo("Baixando Modelo", f"Iniciando download do modelo '{model_name}' em segundo plano pelo Ollama.\nIsso pode levar alguns minutos dependendo da sua internet.")
+        def _pull_worker():
+            try:
+                import subprocess
+                res = subprocess.run(["ollama", "pull", model_name], capture_output=True, text=True, timeout=900)
+                if res.returncode == 0:
+                    self.after(0, lambda: messagebox.showinfo("Sucesso!", f"Modelo {model_name} baixado e pronto para uso!"))
+                else:
+                    self.after(0, lambda: messagebox.showwarning("Aviso", f"Ollama pull finalizou: {res.stderr[:200]}"))
+            except Exception as e:
+                self.after(0, lambda: messagebox.showerror("Erro", f"Erro ao baixar modelo: {e}"))
+            finally:
+                self.after(0, self.refresh_engine_status)
+        threading.Thread(target=_pull_worker, daemon=True).start()
+
+    def _open_gemini_web_login(self):
+        try:
+            import gemini_web_automator
+            gemini_web_automator.open_login_window(on_success=self.refresh_engine_status)
+        except Exception as e:
+            messagebox.showerror("Erro", f"Erro ao abrir janela de login: {e}")
 
     def _show_pytorch_cuda_dialog(self):
         """Open a modern guide on how to install PyTorch CUDA and Demucs."""

@@ -15,17 +15,19 @@ import customtkinter as ctk
 # Cache em memória para reaproveitamento instantâneo de ícones
 _ICON_CACHE: Dict[Tuple[str, int, int, str], ctk.CTkImage] = {}
 
-# Paleta padrão Urahara Studio
+import urahara_theme
+
+# Paleta padrão Urahara Shōten (UI/UX Pro Max)
 THEME_COLORS = {
-    "primary": "#10b981",    # Emerald Green Kisuke
-    "primary_dark": "#059669",
-    "white": "#fafafa",      # Off-white linear
-    "muted": "#71717a",      # Zinc 500
-    "subtle": "#a1a1aa",     # Zinc 400
-    "gold": "#f59e0b",       # Amber / Spiritual energy
-    "danger": "#ef4444",     # Red alert
-    "border": "#27272a",
-    "void": "#09090b",
+    "primary": urahara_theme.COLORS["accent_primary"],
+    "primary_dark": urahara_theme.COLORS["accent_hover"],
+    "white": urahara_theme.COLORS["text_primary"],
+    "muted": urahara_theme.COLORS["text_muted"],
+    "subtle": urahara_theme.COLORS["text_secondary"],
+    "gold": urahara_theme.COLORS["accent_amber"],
+    "danger": urahara_theme.COLORS["accent_benihime"],
+    "border": urahara_theme.COLORS["border"],
+    "void": urahara_theme.COLORS["bg_dark"],
 }
 
 

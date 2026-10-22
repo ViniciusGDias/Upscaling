@@ -32,24 +32,12 @@ from upscaler import (
     find_ffplay,
 )
 
+import urahara_theme
+
 COLORS = {
-    "bg_dark": "#09090b",
-    "bg_card": "#111113",
-    "bg_card_hover": "#18181b",
-    "accent_primary": "#e2e8f0",
-    "accent_secondary": "#94a3b8",
-    "accent_director": "#e2e8f0",
-    "accent_director_hover": "#a1a1aa",
-    "success": "#22c55e",
-    "warning": "#f59e0b",
-    "error": "#ef4444",
-    "text_primary": "#fafafa",
-    "text_secondary": "#a1a1aa",
-    "text_muted": "#a1a1aa",
-    "border": "#27272a",
-    "border_active": "#52525b",
-    "console_bg": "#050505",
-    "console_text": "#a1a1aa",
+    **urahara_theme.COLORS,
+    "accent_director": urahara_theme.COLORS["accent_primary"],
+    "accent_director_hover": urahara_theme.COLORS["accent_hover"],
 }
 
 
@@ -295,7 +283,7 @@ class DirectorTab(ctk.CTkFrame):
 
         # Coluna 2: Foco do Conteúdo (Listagem Suspensa / Dropdown)
         focus_col = ctk.CTkFrame(sel_row, fg_color="transparent")
-        focus_col.pack(side="left", fill="x", expand=True, padx=(8, 0))
+        focus_col.pack(side="left", fill="x", expand=True, padx=4)
 
         ctk.CTkLabel(
             focus_col, text="Foco do Conteúdo (Gênero do Corte):",
@@ -320,6 +308,90 @@ class DirectorTab(ctk.CTkFrame):
             command=self._on_content_type_changed,
         )
         self.content_type_menu.pack(fill="x")
+
+        # Coluna 3: Motor de IA (Gemini, Ollama Local, Qwen-Max, Kimi)
+        engine_col = ctk.CTkFrame(sel_row, fg_color="transparent")
+        engine_col.pack(side="left", fill="x", expand=True, padx=(4, 0))
+
+        ctk.CTkLabel(
+            engine_col, text="Motor de IA:",
+            font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
+            text_color=COLORS["text_secondary"], anchor="w",
+        ).pack(fill="x", pady=(0, 4))
+
+        cur_engine = os.getenv("DIRECTOR_ENGINE", "gemini").lower()
+        engine_label_map = {
+            "gemini": "Gemini (Padrão Cloud)",
+            "gemini_web": "Gemini Web (Navegador Pro)",
+            "ollama_local": "Ollama Local (RTX 5060)",
+            "qwen_max": "Qwen 2.5 Max (Lore/Raciocínio)",
+            "kimi": "Kimi Moonshot (Arco Longo)",
+        }
+        init_engine_label = engine_label_map.get(cur_engine, "Gemini (Padrão Cloud)")
+        self.engine_var = ctk.StringVar(value=init_engine_label)
+        engine_options = [
+            "Gemini (Padrão Cloud)",
+            "Gemini Web (Navegador Pro)",
+            "Ollama Local (RTX 5060)",
+            "Qwen 2.5 Max (Lore/Raciocínio)",
+            "Kimi Moonshot (Arco Longo)",
+        ]
+        ctk.CTkOptionMenu(
+            engine_col, values=engine_options, variable=self.engine_var,
+            font=ctk.CTkFont(family="Segoe UI", size=12),
+            fg_color=COLORS["bg_dark"], button_color=COLORS["border"],
+            button_hover_color=COLORS["accent_director"],
+            height=36, corner_radius=8,
+            command=self._on_engine_change,
+        ).pack(fill="x")
+
+        # ─── SELETOR DE MODELO LOCAL OLLAMA (Dinâmico para o Diretor IA) ───
+        from settings_manager import get_all_selectable_ollama_models, get_installed_ollama_models
+        self.director_local_models_list = get_all_selectable_ollama_models()
+        self.director_local_model_keys_by_label = {label: code for code, label in self.director_local_models_list}
+        self.director_local_model_labels_by_code = {code: label for code, label in self.director_local_models_list}
+
+        installed_now = get_installed_ollama_models()
+        def_code = "qwen2.5:7b"
+        if any("qwen3.8" in m for m in installed_now):
+            def_code = "qwen3.8:27b"
+        elif any("qwen2.5:7b" in m for m in installed_now):
+            def_code = "qwen2.5:7b"
+        elif installed_now:
+            def_code = installed_now[0]
+
+        def_label = self.director_local_model_labels_by_code.get(def_code, self.director_local_models_list[0][1])
+
+        self.director_local_model_row = ctk.CTkFrame(card, fg_color="transparent")
+        dlm_hdr = ctk.CTkFrame(self.director_local_model_row, fg_color="transparent")
+        dlm_hdr.pack(fill="x", pady=(0, 2))
+
+        ctk.CTkLabel(
+            dlm_hdr, text="🧠 Modelo de IA Local (Ollama na GPU RTX 5060):",
+            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+            text_color="#10b981", anchor="w"
+        ).pack(side="left")
+
+        self.director_local_model_var = ctk.StringVar(value=def_label)
+        self.director_local_model_menu = ctk.CTkOptionMenu(
+            self.director_local_model_row,
+            values=[label for _, label in self.director_local_models_list],
+            variable=self.director_local_model_var,
+            font=ctk.CTkFont(family="Segoe UI", size=11),
+            height=32, corner_radius=8,
+            fg_color=COLORS["bg_dark"],
+            button_color=COLORS["border"],
+            button_hover_color=COLORS["accent_director"],
+            text_color=COLORS["text_primary"],
+            dropdown_fg_color=COLORS["bg_card"],
+            dropdown_hover_color=COLORS["bg_card_hover"],
+            dropdown_text_color=COLORS["text_primary"],
+        )
+        self.director_local_model_menu.pack(fill="x")
+
+        # Se o motor atual já for Ollama Local, empacota logo
+        if "ollama" in cur_engine:
+            self.director_local_model_row.pack(fill="x", padx=16, pady=(0, 10))
 
         # Linha com badge e descrição dinâmica do foco selecionado
         desc_row = ctk.CTkFrame(card, fg_color="transparent")
@@ -528,6 +600,38 @@ class DirectorTab(ctk.CTkFrame):
             return "sensual"
         return "general"
 
+    def _get_selected_engine(self) -> str:
+        """Map dropdown selection to engine key (gemini, gemini_web, ollama_local, qwen_max, kimi)."""
+        if not hasattr(self, "engine_var"):
+            return os.getenv("DIRECTOR_ENGINE", "gemini").lower()
+        val = self.engine_var.get().lower()
+        if "web" in val or "navegador" in val:
+            return "gemini_web"
+        elif "ollama" in val or "local" in val:
+            return "ollama_local"
+        elif "qwen" in val:
+            return "qwen_max"
+        elif "kimi" in val:
+            return "kimi"
+        return "gemini"
+
+    def _on_engine_change(self, choice: Optional[str] = None):
+        """Toggle Ollama local model dropdown depending on selected engine."""
+        val = self.engine_var.get().lower() if hasattr(self, "engine_var") else ""
+        if "ollama" in val or "local" in val:
+            if hasattr(self, "director_local_model_row") and not self.director_local_model_row.winfo_ismapped():
+                self.director_local_model_row.pack(fill="x", padx=16, pady=(0, 10))
+        else:
+            if hasattr(self, "director_local_model_row") and self.director_local_model_row.winfo_ismapped():
+                self.director_local_model_row.pack_forget()
+
+    def _get_selected_local_model(self) -> str:
+        """Map selected dropdown model to clean Ollama tag code (e.g. qwen3.8:27b)."""
+        if hasattr(self, "director_local_model_var") and hasattr(self, "director_local_model_keys_by_label"):
+            lbl = self.director_local_model_var.get()
+            return self.director_local_model_keys_by_label.get(lbl, "qwen2.5:7b")
+        return os.getenv("DIRECTOR_LOCAL_MODEL", "qwen2.5:7b")
+
     def _on_content_type_changed(self, choice: str):
         """Update the visual badge and guidance description when user selects a content focus."""
         ctype = self._get_selected_content_type()
@@ -673,6 +777,13 @@ class DirectorTab(ctk.CTkFrame):
         self.file_entry.delete(0, "end")
         self.file_entry.insert(0, filepath)
 
+        # Reset excluded ranges and cached analysis when a new video is loaded
+        self._all_excluded_ranges = []
+        self._all_excluded_strs = []
+        self._last_transcript = ""
+        self._last_lore = ""
+        self.candidates = []
+
         # Default output directory to video's folder if empty
         p = Path(filepath)
         if not self.output_dir_entry.get().strip():
@@ -738,6 +849,8 @@ class DirectorTab(ctk.CTkFrame):
         mode_str = "top3" if "Top 3" in self.mode_var.get() else "smart"
         cut_mode_str = self.cut_mode_var.get() if hasattr(self, "cut_mode_var") else "context"
         content_type_str = self._get_selected_content_type()
+        engine_str = self._get_selected_engine()
+        local_model_str = self._get_selected_local_model()
         duration = self.current_video_info.duration if self.current_video_info else 0.0
         ffmpeg_bin = find_ffmpeg() or "ffmpeg"
 
@@ -759,6 +872,8 @@ class DirectorTab(ctk.CTkFrame):
                     on_progress=_on_progress,
                     on_log=_on_log,
                     content_type=content_type_str,
+                    engine=engine_str,
+                    local_model=local_model_str,
                 )
                 self.after(0, lambda: self._on_analysis_finished(True, candidates, transcript, lore))
             except Exception as e:
@@ -798,7 +913,7 @@ class DirectorTab(ctk.CTkFrame):
                 et_sec = _time_str_to_seconds(et_str)
                 if et_sec > st_sec:
                     # Only add if no existing range overlaps significantly
-                    if not any(ranges_overlap(st_sec, et_sec, ex_st, ex_et) for ex_st, ex_et, _ in self._all_excluded_ranges):
+                    if not any(ranges_overlap(st_sec, et_sec, ex_st, ex_et, tolerance=15.0) for ex_st, ex_et, _ in self._all_excluded_ranges):
                         rng_str = f"{st_str} -> {et_str}"
                         self._all_excluded_ranges.append((st_sec, et_sec, rng_str))
                         self._all_excluded_strs.append(rng_str)
@@ -969,6 +1084,8 @@ class DirectorTab(ctk.CTkFrame):
         mode_str = "top3" if "Top 3" in self.mode_var.get() else "smart"
         cut_mode_str = self.cut_mode_var.get() if hasattr(self, "cut_mode_var") else "context"
         content_type_str = self._get_selected_content_type()
+        engine_str = self._get_selected_engine()
+        local_model_str = self._get_selected_local_model()
         duration = self.current_video_info.duration if self.current_video_info else 0.0
         excluded = list(self._all_excluded_strs)  # snapshot of formatted strings for prompt
 
@@ -991,6 +1108,9 @@ class DirectorTab(ctk.CTkFrame):
                     on_progress=_on_progress,
                     on_log=_on_log,
                     content_type=content_type_str,
+                    video_path=str(self.input_path or ""),
+                    engine=engine_str,
+                    local_model=local_model_str,
                 )
                 self.after(0, lambda: self._on_reroll_finished(True, new_candidates))
             except Exception as e:
@@ -1023,7 +1143,7 @@ class DirectorTab(ctk.CTkFrame):
                 st_sec = _time_str_to_seconds(st_str)
                 et_sec = _time_str_to_seconds(et_str)
                 if et_sec > st_sec:
-                    if not any(ranges_overlap(st_sec, et_sec, ex_st, ex_et) for ex_st, ex_et, _ in self._all_excluded_ranges):
+                    if not any(ranges_overlap(st_sec, et_sec, ex_st, ex_et, tolerance=15.0) for ex_st, ex_et, _ in self._all_excluded_ranges):
                         rng_str = f"{st_str} -> {et_str}"
                         self._all_excluded_ranges.append((st_sec, et_sec, rng_str))
                         self._all_excluded_strs.append(rng_str)
@@ -1322,6 +1442,16 @@ class DirectorTab(ctk.CTkFrame):
                     "title": cand.get("title", ""),
                     "genre": cand.get("genre", ""),
                     "quality_score": cand.get("quality_score", 8),
+                    "cut_mode": self.cut_mode_var.get() if hasattr(self, "cut_mode_var") else "context",
+                })
+            except Exception:
+                pass
+            try:
+                from dataset_logger import log_director_feedback
+                log_director_feedback("accepted", Path(clean_input).name, {
+                    "start_sec": round(start_sec, 2),
+                    "end_sec": round(start_sec + dur_sec, 2),
+                    "title": cand.get("title", ""),
                     "cut_mode": self.cut_mode_var.get() if hasattr(self, "cut_mode_var") else "context",
                 })
             except Exception:

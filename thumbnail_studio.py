@@ -167,7 +167,10 @@ def render_shorts_thumbnail(
         else:
             base_size = 78
 
+        from emoji_text_renderer import get_emoji_font, measure_mixed_text, render_mixed_text
+
         font = get_available_font(base_size)
+        emoji_font = get_emoji_font(int(base_size * 0.88))
 
         # Word wrap para caber na largura máxima de 920px (80px de margem lateral)
         max_line_width = 920
@@ -177,8 +180,7 @@ def render_shorts_thumbnail(
 
         for w in words:
             test_line = " ".join(cur_line + [w])
-            bbox = draw.textbbox((0, 0), test_line, font=font)
-            line_w = bbox[2] - bbox[0]
+            line_w, _ = measure_mixed_text(draw, test_line, font, emoji_font)
             if line_w <= max_line_width:
                 cur_line.append(w)
             else:
@@ -190,11 +192,13 @@ def render_shorts_thumbnail(
         if cur_line:
             lines.append(" ".join(cur_line))
 
-        # Alturas das linhas
+        # Alturas e dimensões das linhas
         line_heights = []
+        line_dims = []
         for line in lines:
-            bbox = draw.textbbox((0, 0), line, font=font)
-            line_heights.append(bbox[3] - bbox[1] + 18)
+            lw, lh = measure_mixed_text(draw, line, font, emoji_font)
+            line_dims.append((lw, lh))
+            line_heights.append(lh + 18)
         total_text_h = sum(line_heights)
 
         # Safe Zone no Shorts:
@@ -205,28 +209,38 @@ def render_shorts_thumbnail(
         else:
             start_y = 260
 
-        # Renderização com contorno e sombras de alto impacto
+        # Renderização com contorno e sombras de alto impacto com suporte nativo a emojis
         curr_y = start_y
         for i, line in enumerate(lines):
-            bbox = draw.textbbox((0, 0), line, font=font)
-            lw = bbox[2] - bbox[0]
-            lh = bbox[3] - bbox[1]
+            lw, lh = line_dims[i]
             lx = (target_w - lw) // 2
 
             if text_style == "badge":
-                # Faixa Vermelha (#DC2626) com texto branco
+                # Faixa Vermelha (#DC2626) com texto branco e emojis
                 pad_x, pad_y = 22, 10
                 badge_box = [lx - pad_x, curr_y - pad_y, lx + lw + pad_x, curr_y + lh + pad_y]
                 draw.rounded_rectangle(badge_box, radius=14, fill="#dc2626")
-                draw.text((lx, curr_y), line, font=font, fill="#ffffff", stroke_width=4, stroke_fill="#000000")
+                render_mixed_text(
+                    draw, (lx, curr_y), line,
+                    main_font=font, emoji_font=emoji_font,
+                    fill_color="#ffffff", stroke_color="#000000", stroke_width=4
+                )
             elif text_style == "white":
                 # Texto Branco com contorno preto grosso e sombra
-                draw.text((lx + 5, curr_y + 5), line, font=font, fill="#000000")
-                draw.text((lx, curr_y), line, font=font, fill="#ffffff", stroke_width=7, stroke_fill="#000000")
+                render_mixed_text(
+                    draw, (lx, curr_y), line,
+                    main_font=font, emoji_font=emoji_font,
+                    fill_color="#ffffff", stroke_color="#000000", stroke_width=7,
+                    shadow_color="#000000", shadow_offset=(5, 5)
+                )
             else:
                 # Padrão Shorts Viral: Amarelo Intenso (#FFE500) com contorno preto espesso e sombra
-                draw.text((lx + 5, curr_y + 5), line, font=font, fill="#000000")
-                draw.text((lx, curr_y), line, font=font, fill="#ffe500", stroke_width=7, stroke_fill="#000000")
+                render_mixed_text(
+                    draw, (lx, curr_y), line,
+                    main_font=font, emoji_font=emoji_font,
+                    fill_color="#ffe500", stroke_color="#000000", stroke_width=7,
+                    shadow_color="#000000", shadow_offset=(5, 5)
+                )
 
             curr_y += line_heights[i]
 

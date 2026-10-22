@@ -15,7 +15,11 @@ from director_ai import (
     extract_audio,
     transcribe_video_audio,
 )
-from metadata_enricher import get_enriched_context_for_prompt
+from metadata_enricher import (
+    get_enriched_context_for_prompt,
+    build_episode_intelligence,
+    _parse_episode_info,
+)
 
 COPY_TEMPLATES = {
     "Padrão": "",
@@ -399,10 +403,19 @@ TODOS os 5 títulos devem conter #shorts, emojis emocionais (💔, 🥺, 😱, �
         caption_hint = "Frase curta e de ALTO IMPACTO EMOCIONAL (máx 6-8 palavras) que faz a dorameira parar o scroll (ex: 'A dor nos olhos dela... 💔' ou 'Ele defendeu ela na frente de todos! 🥺❤️')"
         desc_hint = f"CORPO COMPLETO da descrição para dorameiras: Storytelling envolvente da cena + Ficha Técnica (🎬 Dorama: [Nome] | 📺 Onde assistir: [Streaming]) + CTA provocador nos comentários + hashtags ({work_tag} {extra_tags} #seriescoreanas #shorts)."
     else:
-        title_instruction = "Gere 5 títulos Shorts altamente clicáveis com #shorts e emojis."
-        comment_format_hint = f"{work_label}: [Nome Real]\\n\\n{work_tag} #[NomeSemEspaco] {extra_tags} #trend #shorts #viral\\n\\nPergunta engajadora específica sobre a cena para fazer os espectadores responderem nos comentários?"
-        caption_hint = "Frase curta e IMPACTANTE (máx 8-10 palavras) para texto sobreposto no topo do vídeo que impede o scroll"
-        desc_hint = f"CORPO COMPLETO da descrição (300-800 chars). Storytelling envolvente que complemente o vídeo, quebras de linha visuais, emojis a cada 1-2 linhas, perguntas retóricas para gerar comentários e palavras-chave para o algoritmo do YouTube Shorts."
+        title_instruction = """FÓRMULA DE OURO PARA 5 TÍTULOS DE ANIME NO YOUTUBE SHORTS (ALTO CTR):
+1. Curiosidade & Choque Extremo: ex: "O momento exato em que ele descobriu a verdade sobre o Hollow... 😱🔥 #shorts #anime"
+2. Hype & Arrepio & Poder Oculto: ex: "A presença desse cara fez todo mundo congelar na hora! ⚡🩸 #[nome_anime] #shorts"
+3. Plot Twist & Revelação Sombria: ex: "O aviso mais sombrio da história que ninguém prestou atenção 😳⏳ #shorts #[nome_anime]"
+4. Provocação & Debate com a Comunidade: ex: "Você teria coragem de aceitar a proposta dele? 👀👇 #shorts #anime"
+5. Clímax & Cena Épica Inesquecível: ex: "Essa cena arrepiou até quem não assiste o anime... 🤯🍿 #shorts #[nome_anime]"
+REQUISITOS OBRIGATÓRIOS DOS 5 TÍTULOS:
+- Use nomes reais dos personagens na cena (ex: Ichigo, Shinji, Gojo, etc.)
+- Gatilhos mentais fortes (curiosidade, perigo, choque, arrepio)
+- Todos os 5 títulos devem ter #shorts e hashtags específicas da obra!"""
+        comment_format_hint = f"🎬 {work_label}: [Nome do Anime] (Episódio [Nº])\\n🍿 Personagens na cena: [Nomes dos Personagens]\\n\\n💬 Pergunta polêmica para a comunidade: [Pergunta provocativa que divide opiniões entre os fãs, ex: 'Você aceitaria essa proposta ou lutaria sozinho?'] Deixa nos comentários! 👇🔥\\n\\n{work_tag} #[AnimeSemEspaco] {extra_tags} #shorts #anime"
+        caption_hint = "Texto de Gancho Visual para os primeiros 3s (máx 6-8 palavras) que impede o swipe (ex: 'O aviso que o Ichigo ignorou... 😱' ou 'Quando o verdadeiro monstro acorda... 🥶')"
+        desc_hint = f"CORPO COMPLETO da descrição otimizada para o algoritmo do YouTube Shorts (300-600 chars):\\n- Linha 1 de gancho irresistível\\n- Storytelling rápido da cena destacando os nomes e técnicas dos personagens\\n- Ficha Técnica (🎬 Anime: [Nome] | 🍿 Episódio: [Nº])\\n- Chamada para inscrição e like\\n- Bloco de hashtags estratégicas ({work_tag} {extra_tags} #anime #otaku #shorts #viral)"
 
     return f"""{base_context}
 TAREFA: Analise este vídeo e forneça uma estratégia impecável de otimização para viralizar no YouTube Shorts.
@@ -679,6 +692,40 @@ def adapt_instagram_to_yt(insta_data: Dict[str, Any]) -> Dict[str, Any]:
     return res
 
 
+def _detect_work_title(video_path: str, user_work: str = "", user_character: str = "", user_context: str = "", ai_cache=None) -> str:
+    """Detects canonical work title from user input, cache origin, or filename for full web/API grounding."""
+    if user_work and len(user_work.strip()) >= 2:
+        return user_work.strip()
+    if user_character and len(user_character.strip()) >= 2:
+        return user_character.strip()
+
+    # Tenta obter do cache de origem do Mastercut/Diretor IA
+    if ai_cache and video_path:
+        try:
+            cut_origin = ai_cache.get_cut_origin(video_path)
+            if cut_origin:
+                orig_title = cut_origin.get("source_episode") or cut_origin.get("title") or ""
+                if orig_title:
+                    clean_orig = re.sub(r'[-_]\s*S\d+E\d+.*', '', orig_title, flags=re.IGNORECASE)
+                    clean_orig = re.sub(r'(_mastercut.*|_capa.*|_clip.*|\d+m\d+s.*)', '', clean_orig, flags=re.IGNORECASE)
+                    clean_orig = clean_orig.replace("_", " ").strip()
+                    if len(clean_orig) >= 2:
+                        return clean_orig
+        except Exception:
+            pass
+
+    # Tenta extrair a partir do nome do arquivo
+    if video_path:
+        stem = Path(video_path).stem
+        clean_stem = re.sub(r'(_mastercut.*|_capa.*|_clip.*|\d+m\d+s.*)', '', stem, flags=re.IGNORECASE)
+        clean_stem = re.sub(r'[-_]\s*S\d+E\d+.*', '', clean_stem, flags=re.IGNORECASE)
+        clean_stem = clean_stem.replace("_", " ").strip()
+        if len(clean_stem) >= 3 and not clean_stem.lower().startswith("video"):
+            return clean_stem
+
+    return (user_context or "").strip()
+
+
 def analyze_instagram_video(
     video_path: str,
     context: str = "",
@@ -808,11 +855,19 @@ def analyze_instagram_video(
         except Exception as e:
             _log(f"⚠ Aviso ao transcrever áudio: {e}. Prosseguindo com análise contextual...")
 
-    # 2. Enrich context via Anime/Dorama APIs (Kitsu, MyAnimeList, TVMaze)
+    # 2. Enrich context via Anime/Dorama APIs (Kitsu, MyAnimeList, TVMaze, Wikipedia, DuckDuckGo)
     enriched_context = ""
-    target_work = work_name.strip() or context.strip()
+    target_work = _detect_work_title(video_path, user_work=work_name, user_context=context, ai_cache=ai_cache)
     if target_work and len(target_work) >= 2:
-        enriched_context = get_enriched_context_for_prompt(target_work, category=category, on_log=_log)
+        ep_info = _parse_episode_info(f"{target_work} {Path(video_path).stem if video_path else ''} {context}")
+        ep_num = ep_info.get("episode_number")
+        if ep_num and "dorama" not in category.lower():
+            clean_ep_query = f"{target_work} Ep {ep_num}"
+            _log(f"🌐 [EPISÓDIO HUB] Coletando inteligência tática do Episódio #{ep_num} de '{target_work}'...")
+            enriched_context = build_episode_intelligence(clean_ep_query, category=category, on_log=_log)
+        else:
+            _log(f"🌐 [CONSULTA WEB / LORE] Pesquisando dados e fatos canônicos de: '{target_work}'...")
+            enriched_context = get_enriched_context_for_prompt(target_work, category=category, on_log=_log)
         if enriched_context:
             _log(f"✓ Lore e metadados oficiais ({category}) integrados ao prompt do Instagram!")
 
@@ -827,7 +882,9 @@ def analyze_instagram_video(
         language_en=language_en,
         language=language
     )
-    raw_response = call_ai_text(prompt, on_log=_log, max_tokens=4096)
+    engine = kwargs.get("engine") or os.getenv("DIRECTOR_ENGINE", "ollama_local")
+    local_model = kwargs.get("local_model") or os.getenv("DIRECTOR_LOCAL_MODEL", "qwen2.5:7b")
+    raw_response = call_ai_text(prompt, on_log=_log, max_tokens=4096, engine=engine, local_model=local_model)
 
     _log("✨ Formatando resultados da análise...")
     data = _parse_ai_json(raw_response)
@@ -999,11 +1056,19 @@ def analyze_yt_shorts_video(
         except Exception as e:
             _log(f"⚠ Aviso ao transcrever áudio: {e}. Prosseguindo com análise...")
 
-    # 2. Enrich context via Anime/Dorama APIs (Kitsu, MyAnimeList, TVMaze)
+    # 2. Enrich context via Anime/Dorama APIs (Kitsu, MyAnimeList, TVMaze, Wikipedia, DuckDuckGo)
     enriched_context = ""
-    target_work = anime.strip() or character.strip()
+    target_work = _detect_work_title(video_path, user_work=anime, user_character=character, user_context=context, ai_cache=ai_cache)
     if target_work and len(target_work) >= 2:
-        enriched_context = get_enriched_context_for_prompt(target_work, category=category, on_log=_log)
+        ep_info = _parse_episode_info(f"{target_work} {Path(video_path).stem if video_path else ''} {context}")
+        ep_num = ep_info.get("episode_number")
+        if ep_num and "dorama" not in category.lower():
+            clean_ep_query = f"{target_work} Ep {ep_num}"
+            _log(f"🌐 [EPISÓDIO HUB] Coletando inteligência tática do Episódio #{ep_num} de '{target_work}'...")
+            enriched_context = build_episode_intelligence(clean_ep_query, category=category, on_log=_log)
+        else:
+            _log(f"🌐 [CONSULTA WEB / LORE] Pesquisando dados oficiais e contexto de: '{target_work}'...")
+            enriched_context = get_enriched_context_for_prompt(target_work, category=category, on_log=_log)
         if enriched_context:
             _log("✓ Lore e metadados oficiais integrados ao prompt de Shorts!")
 
@@ -1020,7 +1085,9 @@ def analyze_yt_shorts_video(
         language_en=language_en,
         language=language
     )
-    raw_response = call_ai_text(prompt, on_log=_log, max_tokens=4096)
+    engine = kwargs.get("engine") or os.getenv("DIRECTOR_ENGINE", "ollama_local")
+    local_model = kwargs.get("local_model") or os.getenv("DIRECTOR_LOCAL_MODEL", "qwen2.5:7b")
+    raw_response = call_ai_text(prompt, on_log=_log, max_tokens=4096, engine=engine, local_model=local_model)
 
     _log("✨ Formatando resultados de SEO e retenção...")
     data = _parse_ai_json(raw_response)

@@ -1398,14 +1398,94 @@ Forneça os dados reais dessa obra em formato JSON estrito:
 
 
 
+def fetch_wikipedia_summary(query: str, on_log: Optional[Callable] = None) -> Optional[Dict[str, Any]]:
+    """
+    Fetches real-time canonical summary from official Wikipedia REST API (Portuguese and English fallback).
+    Free, zero-auth, high availability.
+    """
+    clean_q = clean_media_query(query).strip()
+    if not clean_q or len(clean_q) < 2:
+        return None
+
+    _safe_log(on_log, f"🌐 [WIKIPEDIA API] Pesquisando enciclopédia para: '{clean_q}'...")
+
+    for lang in ["pt", "en"]:
+        try:
+            encoded_title = urllib.parse.quote(clean_q.replace(" ", "_"))
+            url = f"https://{lang}.wikipedia.org/api/rest_v1/page/summary/{encoded_title}"
+            req = urllib.request.Request(
+                url,
+                headers={"User-Agent": "UpscalingMetadataEnricher/3.0 (https://github.com/ViniciusGDias/Upscaling)"}
+            )
+            with urllib.request.urlopen(req, timeout=3.5) as resp:
+                if resp.status == 200:
+                    data = json.loads(resp.read().decode("utf-8"))
+                    extract = data.get("extract", "").strip()
+                    title = data.get("title", clean_q)
+                    if extract and len(extract) > 40:
+                        _safe_log(on_log, f"✓ Wikipedia ({lang.upper()}): {title} ({len(extract)} caracteres)")
+                        return {
+                            "type": "general_knowledge",
+                            "source": f"Wikipedia ({lang.upper()})",
+                            "title": title,
+                            "synopsis": extract[:800],
+                            "genres": "Cultura Pop / Obra Canônica",
+                            "score": "Oficial Wikipedia",
+                        }
+        except Exception:
+            continue
+    return None
+
+
+def fetch_duckduckgo_search_summary(query: str, on_log: Optional[Callable] = None) -> Optional[Dict[str, Any]]:
+    """
+    Fetches instant answer and web search abstract via DuckDuckGo Instant Answer API.
+    Zero-auth, zero rate-limit, 100% free open API.
+    """
+    clean_q = clean_media_query(query).strip()
+    if not clean_q:
+        return None
+
+    _safe_log(on_log, f"🌐 [DUCKDUCKGO API] Pesquisando web ao vivo para: '{clean_q}'...")
+    try:
+        url = f"https://api.duckduckgo.com/?q={urllib.parse.quote(clean_q)}&format=json&no_html=1&skip_disambig=1"
+        req = urllib.request.Request(
+            url,
+            headers={"User-Agent": "UpscalingMetadataEnricher/3.0"}
+        )
+        with urllib.request.urlopen(req, timeout=3.5) as resp:
+            if resp.status == 200:
+                data = json.loads(resp.read().decode("utf-8"))
+                abstract = data.get("AbstractText", "").strip()
+                heading = data.get("Heading", clean_q)
+                if not abstract and data.get("RelatedTopics"):
+                    for topic in data.get("RelatedTopics", []):
+                        if isinstance(topic, dict) and topic.get("Text"):
+                            abstract = topic["Text"]
+                            break
+                if abstract and len(abstract) > 30:
+                    _safe_log(on_log, f"✓ DuckDuckGo Instant Knowledge: {heading}")
+                    return {
+                        "type": "web_search",
+                        "source": "DuckDuckGo Web Knowledge",
+                        "title": heading,
+                        "synopsis": abstract[:800],
+                        "genres": "Pesquisa Web em Tempo Real",
+                        "score": "Web Grounding",
+                    }
+    except Exception as e:
+        _safe_log(on_log, f"⚠️ DuckDuckGo API: {e}")
+    return None
+
+
 def get_enriched_context_for_prompt(
     query_or_title: str,
     category: str = "anime",
     on_log: Optional[Callable[[str], None]] = None
 ) -> str:
     """
-    Searches anime or dorama APIs and returns a structured markdown context block
-    ready to inject into any Gemini AI prompt (YT Shorts, Instagram, Director AI, Refiner).
+    Searches anime, dorama, or web APIs (Wikipedia / DuckDuckGo) and returns a structured
+    markdown context block ready to inject into any AI prompt (Refiner, Director, Studio).
     """
     if not query_or_title or len(query_or_title.strip()) < 2:
         return ""
@@ -1422,6 +1502,12 @@ def get_enriched_context_for_prompt(
         data = fetch_anime_metadata(query_or_title, on_log=on_log)
         if not data:
             data = fetch_dorama_metadata(query_or_title, on_log=on_log)
+
+    # Fallback to free public knowledge APIs (Wikipedia + DuckDuckGo)
+    if not data:
+        data = fetch_wikipedia_summary(query_or_title, on_log=on_log)
+    if not data:
+        data = fetch_duckduckgo_search_summary(query_or_title, on_log=on_log)
 
     if not data:
         return ""
@@ -1453,6 +1539,15 @@ def get_enriched_context_for_prompt(
   - Trata-se de uma série dramática com atores reais e forte apelo emocional (química romântica, vingança, segredos de família ou separação).
   - Use os nomes dos personagens e dos atores coreanos conhecidos para atrair os fãs (dorameiras).
   - Foque nos momentos de choque emocional, réplicas impactantes, troca de olhares e ganchos de curiosidade irresistíveis!
+"""
+    elif data.get("type") in ("general_knowledge", "web_search"):
+        block = f"""
+[CONHECIMENTO & METADADOS DA WEB EM TEMPO REAL ({src.upper()})]
+• Obra / Título: {title_display}
+• Fonte de Grounding: {src}
+• Sinopse e Fatos Canônicos Verificados:
+  "{synopsis}"
+• DIRETRIZ PARA A IA: Use este conhecimento factual da web para identificar personagens, contexto da cena, terminologias reais e gerar cortes e roteiros com fidelidade absoluta!
 """
     else:
         block = f"""

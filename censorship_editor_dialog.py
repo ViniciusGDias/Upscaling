@@ -16,28 +16,22 @@ import icon_manager
 from PIL import Image
 from pathlib import Path
 from typing import List, Dict, Any, Callable, Optional
-from censorship_manager import apply_soft_blur_to_box
+from censorship_manager import apply_soft_blur_to_box, apply_zoom_focus_to_frame
 
+
+import urahara_theme
 
 COLORS = {
-    "bg_dark": "#0B0E14",
-    "bg_card": "#151A23",
-    "bg_card_hover": "#1E2533",
-    "border": "#2A3447",
-    "accent": "#00D4FF",
-    "accent_hover": "#00AACC",
-    "accent_green": "#10B981",
-    "accent_green_hover": "#059669",
-    "text_primary": "#FFFFFF",
-    "text_secondary": "#94A3B8",
-    "text_muted": "#64748B",
-    "error": "#EF4444",
-    "warning": "#F59E0B",
+    **urahara_theme.COLORS,
+    "accent": urahara_theme.COLORS["accent_primary"],
+    "accent_hover": urahara_theme.COLORS["accent_hover"],
+    "accent_green": urahara_theme.COLORS["accent_primary"],
+    "accent_green_hover": urahara_theme.COLORS["accent_hover"],
 }
 
 
 class CensorshipEditorDialog(ctk.CTkToplevel):
-    """Janela modal para inspecionar, mover, redimensionar e criar censuras manuais."""
+    """Janela modal para inspecionar, mover, redimensionar e criar censuras manuais (Blur ou Zoom no Rosto)."""
 
     def __init__(
         self,
@@ -45,18 +39,21 @@ class CensorshipEditorDialog(ctk.CTkToplevel):
         video_path: str,
         initial_detections: Optional[List[Dict[str, Any]]] = None,
         blur_strength: str = "medium",
+        censor_method: str = "blur",
         on_confirm: Optional[Callable[[List[Dict[str, Any]], str], None]] = None,
         **kwargs
     ):
         super().__init__(parent, **kwargs)
-        self.title("Anime Shield — Ajuste Interativo & Manual de Censura Visual")
-        self.geometry("1080x790")
-        self.minsize(940, 680)
+        self.title("Anime Shield — Ajuste Interativo & Manual de Censura Visual (Blur & Zoom)")
+        self.geometry("1080x810")
+        self.minsize(960, 700)
         self.configure(fg_color=COLORS["bg_dark"])
 
         self.video_path = video_path
         self.on_confirm = on_confirm
         self.blur_strength = blur_strength
+        self.censor_method = censor_method
+        self.preview_simulated = False
 
         # Abre o vídeo para leitura de quadros
         self.cap = cv2.VideoCapture(video_path)
@@ -87,9 +84,19 @@ class CensorshipEditorDialog(ctk.CTkToplevel):
         if not raw_dets:
             return []
 
+        default_action = "zoom" if "zoom" in str(self.censor_method).lower() else "blur"
+
         # Se já estiver no formato de intervalos (com 'start' e 'end')
         if "start" in raw_dets[0] and "end" in raw_dets[0]:
-            return [dict(d) for d in raw_dets]
+            out = []
+            for d in raw_dets:
+                dc = dict(d)
+                if "action" not in dc:
+                    dc["action"] = default_action
+                if "zoom_factor" not in dc:
+                    dc["zoom_factor"] = 1.8
+                out.append(dc)
+            return out
 
         # Agrupa detecções pontuais próximas com persistência de ~0.5s
         sorted_dets = sorted(raw_dets, key=lambda x: x["time"])
@@ -98,17 +105,23 @@ class CensorshipEditorDialog(ctk.CTkToplevel):
         curr_start = None
         curr_end = None
         curr_lbl = "bust"
+        curr_action = default_action
+        curr_zf = 1.8
 
         for d in sorted_dets:
             t = d["time"]
             box = list(d["box"])
             lbl = d.get("label", "bust")
+            act = d.get("action", default_action)
+            zf = float(d.get("zoom_factor", 1.8))
 
             if curr_start is None:
                 curr_start = max(0.0, t - 0.1)
                 curr_end = t + 0.45
                 curr_box = box
                 curr_lbl = lbl
+                curr_action = act
+                curr_zf = zf
             elif t <= curr_end + 0.35:
                 # Continua o mesmo bloco
                 curr_end = t + 0.45
@@ -125,19 +138,25 @@ class CensorshipEditorDialog(ctk.CTkToplevel):
                     "start": round(curr_start, 2),
                     "end": round(min(self.video_duration, curr_end), 2),
                     "box": curr_box,
-                    "label": curr_lbl
+                    "label": curr_lbl,
+                    "action": curr_action,
+                    "zoom_factor": curr_zf
                 })
                 curr_start = max(0.0, t - 0.1)
                 curr_end = t + 0.45
                 curr_box = box
                 curr_lbl = lbl
+                curr_action = act
+                curr_zf = zf
 
         if curr_start is not None:
             intervals.append({
                 "start": round(curr_start, 2),
                 "end": round(min(self.video_duration, curr_end), 2),
                 "box": curr_box,
-                "label": curr_lbl
+                "label": curr_lbl,
+                "action": curr_action,
+                "zoom_factor": curr_zf
             })
 
         return intervals
@@ -184,13 +203,29 @@ class CensorshipEditorDialog(ctk.CTkToplevel):
         self.canvas_label.bind("<B1-Motion>", self._on_canvas_drag)
         self.canvas_label.bind("<ButtonRelease-1>", self._on_canvas_release)
 
-        # Dica de mouse
-        ctk.CTkLabel(
-            left_col,
-            text="💡 Dica: Você pode clicar e arrastar a caixa de blur diretamente sobre o vídeo!",
+        # Barra de modo de visualização e dica
+        mode_bar = ctk.CTkFrame(left_col, fg_color="transparent")
+        mode_bar.grid(row=1, column=0, padx=12, pady=(0, 6), sticky="ew")
+
+        self.btn_preview_mode = ctk.CTkButton(
+            mode_bar,
+            text="👁️ Ver com Efeito Aplicado",
+            width=185,
+            height=28,
+            fg_color=COLORS["border"],
+            hover_color=COLORS["bg_card_hover"],
+            font=ctk.CTkFont(size=11, weight="bold"),
+            command=self._toggle_preview_mode
+        )
+        self.btn_preview_mode.pack(side="left")
+
+        self.preview_hint_lbl = ctk.CTkLabel(
+            mode_bar,
+            text="💡 Arraste a caixa até o rosto do personagem!",
             font=ctk.CTkFont(size=11),
             text_color=COLORS["accent"]
-        ).grid(row=1, column=0, padx=12, pady=(0, 6), sticky="w")
+        )
+        self.preview_hint_lbl.pack(side="left", padx=10)
 
         # Controles de navegação da timeline
         nav_frame = ctk.CTkFrame(left_col, fg_color="transparent")
@@ -261,6 +296,53 @@ class CensorshipEditorDialog(ctk.CTkToplevel):
         self.adjust_scroll = ctk.CTkScrollableFrame(right_col, fg_color=COLORS["bg_dark"], corner_radius=8)
         self.adjust_scroll.grid(row=2, column=0, padx=10, pady=2, sticky="nsew")
         self.adjust_scroll.grid_columnconfigure(0, weight=1)
+
+        # ── BLOCO 0: TIPO DE EFEITO (BLUR VS ZOOM NO ROSTO) ──
+        box_action = ctk.CTkFrame(self.adjust_scroll, fg_color=COLORS["bg_card"], corner_radius=6, border_width=1, border_color=COLORS["border"])
+        box_action.pack(fill="x", padx=6, pady=4)
+
+        ctk.CTkLabel(
+            box_action,
+            text="🎬 Tipo de Censura nesta Região:",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            text_color=COLORS["accent"]
+        ).pack(anchor="w", padx=8, pady=(6, 4))
+
+        self.action_segmented = ctk.CTkSegmentedButton(
+            box_action,
+            values=["🌫️ Desfoque (Blur)", "🔍 Zoom no Foco (Close)"],
+            command=self._on_action_segmented_changed,
+            selected_color=COLORS["accent"],
+            selected_hover_color=COLORS["accent_hover"],
+            height=28
+        )
+        self.action_segmented.set("🔍 Zoom no Foco (Close)" if "zoom" in str(self.censor_method).lower() else "🌫️ Desfoque (Blur)")
+        self.action_segmented.pack(fill="x", padx=8, pady=(0, 6))
+
+        # Opções específicas para Zoom
+        self.zoom_opts_frame = ctk.CTkFrame(box_action, fg_color="transparent")
+        self.zoom_opts_frame.pack(fill="x", padx=8, pady=(0, 6))
+
+        ctk.CTkLabel(self.zoom_opts_frame, text="Intensidade do Zoom:", font=ctk.CTkFont(size=11)).pack(side="left")
+        self.zoom_factor_menu = ctk.CTkOptionMenu(
+            self.zoom_opts_frame,
+            values=["1.4x (Leve)", "1.8x (Recomendado - Foco Rosto)", "2.2x (Close Forte)"],
+            width=200,
+            height=24,
+            command=self._on_zoom_factor_changed
+        )
+        self.zoom_factor_menu.set("1.8x (Recomendado - Foco Rosto)")
+        self.zoom_factor_menu.pack(side="right")
+
+        self.zoom_hint_lbl = ctk.CTkLabel(
+            box_action,
+            text="💡 Posicione a caixa no rosto. O vídeo dará zoom nessa área e cortará a parte sensível.",
+            font=ctk.CTkFont(size=10),
+            text_color=COLORS["accent_green"],
+            wraplength=340,
+            justify="left"
+        )
+        self.zoom_hint_lbl.pack(anchor="w", padx=8, pady=(0, 6))
 
         # ── BLOCO 1: EDIÇÃO DE INTERVALO DE TEMPO ──
         box_time = ctk.CTkFrame(self.adjust_scroll, fg_color=COLORS["bg_card"], corner_radius=6, border_width=1, border_color=COLORS["border"])
@@ -527,23 +609,114 @@ class CensorshipEditorDialog(ctk.CTkToplevel):
         elif self.regions:
             self._jump_to_time(self.regions[0]["start"] + 0.1)
 
+    def _toggle_preview_mode(self):
+        """Alterna entre o modo de demarcação de caixa e a visualização simulada do efeito final."""
+        self.preview_simulated = not self.preview_simulated
+        if self.preview_simulated:
+            self.btn_preview_mode.configure(
+                text="📐 Voltar p/ Ajustar Caixa",
+                fg_color=COLORS["accent"],
+                hover_color=COLORS["accent_hover"]
+            )
+            self.preview_hint_lbl.configure(
+                text="✨ Modo Simulação: Veja exatamente o resultado final da censura!",
+                text_color=COLORS["accent_green"]
+            )
+        else:
+            self.btn_preview_mode.configure(
+                text="👁️ Ver com Efeito Aplicado",
+                fg_color=COLORS["border"],
+                hover_color=COLORS["bg_card_hover"]
+            )
+            self.preview_hint_lbl.configure(
+                text="💡 Arraste a caixa até o rosto do personagem!",
+                text_color=COLORS["accent"]
+            )
+        self._render_current_frame()
+
+    def _on_action_segmented_changed(self, value: str):
+        """Alterna a ação da região selecionada entre Zoom no Rosto e Blur Suave."""
+        if self.selected_region_idx is None:
+            return
+        action = "zoom" if "zoom" in str(value).lower() else "blur"
+        r = self.regions[self.selected_region_idx]
+        r["action"] = action
+        if action == "zoom":
+            self.zoom_opts_frame.pack(fill="x", padx=8, pady=(0, 6))
+            self.zoom_hint_lbl.configure(
+                text="💡 Posicione a caixa no rosto. O vídeo dará zoom nessa área e cortará a parte sensível.",
+                text_color=COLORS["accent_green"]
+            )
+        else:
+            self.zoom_opts_frame.pack_forget()
+            self.zoom_hint_lbl.configure(
+                text="💡 Posicione a caixa sobre o decote/região que receberá o desfoque suave.",
+                text_color=COLORS["accent"]
+            )
+        self._render_current_frame()
+        self._refresh_regions_list()
+
+    def _on_zoom_factor_changed(self, value: str):
+        """Altera a intensidade do zoom para a região selecionada."""
+        if self.selected_region_idx is None:
+            return
+        try:
+            factor = float(str(value).split("x")[0])
+        except Exception:
+            factor = 1.8
+        r = self.regions[self.selected_region_idx]
+        r["zoom_factor"] = factor
+        self._render_current_frame()
+        self._refresh_regions_list()
+
     def _render_current_frame(self):
-        """Renderiza o quadro atual com o blur suave e borda indicativa."""
+        """Renderiza o quadro atual com o efeito (blur suave ou zoom focado) ou caixas indicativas."""
         frame_idx = int(self.current_time * self.fps)
         self.cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
         ret, frame = self.cap.read()
         if not ret or frame is None:
             return
 
-        # Aplica o blur das regiões ativas neste segundo
         active_idx = self._find_region_at_time(self.current_time)
-        for idx, r in enumerate(self.regions):
-            if r["start"] <= self.current_time <= r["end"]:
-                box = r["box"]
-                frame = apply_soft_blur_to_box(frame, box, blur_strength=self.blur_strength)
-                # Borda guia suave
-                color = (0, 212, 255) if idx == active_idx else (100, 100, 100)
-                cv2.rectangle(frame, (box[0], box[1]), (box[2], box[3]), color, 2)
+
+        if self.preview_simulated:
+            # MODO SIMULAÇÃO: Aplica os efeitos reais (Zoom focado no rosto ou Blur suave)
+            for idx, r in enumerate(self.regions):
+                if r["start"] <= self.current_time <= r["end"]:
+                    box = r["box"]
+                    act = r.get("action", "blur")
+                    if act == "zoom":
+                        zf = float(r.get("zoom_factor", 1.8))
+                        frame = apply_zoom_focus_to_frame(frame, box, zoom_factor=zf)
+                    else:
+                        frame = apply_soft_blur_to_box(frame, box, blur_strength=self.blur_strength)
+        else:
+            # MODO DEMARCAÇÃO DE CAIXA: Desenha as bordas e rótulos
+            for idx, r in enumerate(self.regions):
+                if r["start"] <= self.current_time <= r["end"]:
+                    box = r["box"]
+                    act = r.get("action", "blur")
+                    is_active = (idx == active_idx)
+
+                    if act == "zoom":
+                        # Caixa de Zoom: Borda Ciano vibrante com mira no centro
+                        color = (255, 229, 0) if is_active else (180, 150, 20) # BGR
+                        cv2.rectangle(frame, (box[0], box[1]), (box[2], box[3]), color, 2)
+                        tag = f"FOCO ZOOM ({r.get('zoom_factor', 1.8):.1f}x)"
+                        cv2.putText(frame, tag, (box[0], max(22, box[1] - 8)),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 2, cv2.LINE_AA)
+                        # Mira sutil central
+                        cx = (box[0] + box[2]) // 2
+                        cy = (box[1] + box[3]) // 2
+                        cv2.drawMarker(frame, (cx, cy), color, markerType=cv2.MARKER_CROSS, markerSize=18, thickness=2)
+                    else:
+                        # Caixa de Blur: Aplica blur e desenha contorno
+                        frame = apply_soft_blur_to_box(frame, box, blur_strength=self.blur_strength)
+                        color = (0, 212, 255) if is_active else (100, 100, 100)
+                        cv2.rectangle(frame, (box[0], box[1]), (box[2], box[3]), color, 2)
+                        tag = "DESFOQUE (BLUR)"
+                        cv2.putText(frame, tag, (box[0], max(22, box[1] - 8)),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 2, cv2.LINE_AA)
 
         # Redimensiona para caber na tela mantendo proporção
         h_frame, w_frame = frame.shape[:2]
@@ -708,8 +881,12 @@ class CensorshipEditorDialog(ctk.CTkToplevel):
             r = self.regions[idx]
             x1, y1, x2, y2 = r["box"]
             dur = max(0.0, r["end"] - r["start"])
+            act = r.get("action", "blur")
+            zf = float(r.get("zoom_factor", 1.8))
+            badge = f"🔍 ZOOM {zf:.1f}x" if act == "zoom" else "🌫️ BLUR"
+
             self.region_info_lbl.configure(
-                text=f"Região #{idx + 1}: {r['start']:.2f}s até {r['end']:.2f}s  (Duração: {dur:.2f}s)\nPosição: X={x1}..{x2} | Y={y1}..{y2}  ({x2 - x1}x{y2 - y1}px)",
+                text=f"Região #{idx + 1} [{badge}]: {r['start']:.2f}s até {r['end']:.2f}s  (Duração: {dur:.2f}s)\nPosição: X={x1}..{x2} | Y={y1}..{y2}  ({x2 - x1}x{y2 - y1}px)",
                 text_color=COLORS["accent"]
             )
             self.lbl_time_summary.configure(
@@ -722,6 +899,27 @@ class CensorshipEditorDialog(ctk.CTkToplevel):
                 self.entry_end.delete(0, "end")
                 self.entry_end.insert(0, f"{r['end']:.2f}")
             self.del_btn.configure(state="normal")
+
+            # Atualiza o SegmentedButton e menu de Zoom
+            self.action_segmented.set("🔍 Zoom no Foco (Close)" if act == "zoom" else "🌫️ Desfoque (Blur)")
+            if act == "zoom":
+                self.zoom_opts_frame.pack(fill="x", padx=8, pady=(0, 6))
+                if abs(zf - 1.4) < 0.1:
+                    self.zoom_factor_menu.set("1.4x (Leve)")
+                elif abs(zf - 2.2) < 0.1:
+                    self.zoom_factor_menu.set("2.2x (Close Forte)")
+                else:
+                    self.zoom_factor_menu.set("1.8x (Recomendado - Foco Rosto)")
+                self.zoom_hint_lbl.configure(
+                    text="💡 Posicione a caixa no rosto. O vídeo dará zoom nessa área e cortará a parte sensível.",
+                    text_color=COLORS["accent_green"]
+                )
+            else:
+                self.zoom_opts_frame.pack_forget()
+                self.zoom_hint_lbl.configure(
+                    text="💡 Posicione a caixa sobre o decote/região que receberá o desfoque suave.",
+                    text_color=COLORS["accent"]
+                )
         else:
             self.region_info_lbl.configure(
                 text="Sem censura ativa neste segundo.\nClique abaixo para adicionar ou pule para uma existente.",
@@ -828,17 +1026,100 @@ class CensorshipEditorDialog(ctk.CTkToplevel):
         cx = self.vid_w // 2
         cy = int(self.vid_h * 0.55) # Ligeiramente abaixo do centro para focar no busto/tronco
 
+        current_action = "zoom" if "zoom" in str(self.action_segmented.get()).lower() else "blur"
+        try:
+            current_zf = float(str(self.zoom_factor_menu.get()).split("x")[0])
+        except Exception:
+            current_zf = 1.8
+
         new_region = {
             "start": round(self.current_time, 2),
             "end": round(min(self.video_duration, self.current_time + 2.5), 2),
             "box": [cx - box_w // 2, cy - box_h // 2, cx + box_w // 2, cy + box_h // 2],
-            "label": "manual"
+            "label": "manual",
+            "action": current_action,
+            "zoom_factor": current_zf
         }
         self.regions.append(new_region)
         self.regions.sort(key=lambda x: x["start"])
         self._render_current_frame()
         self._update_region_panel()
         self._refresh_regions_list()
+
+    def _refresh_regions_list(self):
+        """Atualiza a lista de cards de intervalos censurados."""
+        if not hasattr(self, "region_listbox") or self.region_listbox is None:
+            return
+
+        for w in self.region_listbox.winfo_children():
+            w.destroy()
+
+        if not self.regions:
+            ctk.CTkLabel(
+                self.region_listbox,
+                text="Nenhuma região demarcada. Clique em 'Nova Censura Aqui' para criar.",
+                font=ctk.CTkFont(size=11),
+                text_color=COLORS["text_muted"]
+            ).pack(pady=10)
+            return
+
+        for idx, r in enumerate(self.regions):
+            card = ctk.CTkFrame(self.region_listbox, fg_color=COLORS["bg_card"], corner_radius=6)
+            card.pack(fill="x", padx=4, pady=2)
+            card.grid_columnconfigure(1, weight=1)
+
+            dur = max(0.0, r["end"] - r["start"])
+            act = r.get("action", "blur")
+            zf = float(r.get("zoom_factor", 1.8))
+            badge_text = f"🔍 Zoom {zf:.1f}x" if act == "zoom" else "🌫️ Blur"
+            badge_color = "#0284c7" if act == "zoom" else COLORS["border"]
+
+            # Badge do tipo
+            b_lbl = ctk.CTkLabel(
+                card,
+                text=badge_text,
+                font=ctk.CTkFont(size=10, weight="bold"),
+                fg_color=badge_color,
+                corner_radius=4,
+                width=80,
+                height=20
+            )
+            b_lbl.grid(row=0, column=0, padx=(6, 4), pady=4)
+
+            # Texto do tempo
+            t_lbl = ctk.CTkLabel(
+                card,
+                text=f"#{idx+1}: {r['start']:.2f}s → {r['end']:.2f}s ({dur:.1f}s)",
+                font=ctk.CTkFont(size=11),
+                text_color=COLORS["text_primary"],
+                anchor="w"
+            )
+            t_lbl.grid(row=0, column=1, padx=4, pady=4, sticky="w")
+
+            # Botão ir até
+            ctk.CTkButton(
+                card,
+                text="Ir",
+                width=36,
+                height=22,
+                font=ctk.CTkFont(size=10, weight="bold"),
+                fg_color=COLORS["accent"],
+                hover_color=COLORS["accent_hover"],
+                command=lambda s=r["start"]: self._jump_to_time(s)
+            ).grid(row=0, column=2, padx=2, pady=4)
+
+            # Botão excluir
+            ctk.CTkButton(
+                card,
+                text="✕",
+                width=24,
+                height=22,
+                font=ctk.CTkFont(size=10, weight="bold"),
+                fg_color="transparent",
+                hover_color=COLORS["error"],
+                text_color=COLORS["error"],
+                command=lambda i=idx: self._delete_region_by_index(i)
+            ).grid(row=0, column=3, padx=(2, 6), pady=4)
 
     def _clear_all_regions(self):
         self.regions.clear()

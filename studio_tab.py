@@ -31,24 +31,12 @@ from video_trimmer import (
     trim_video_file
 )
 
+import urahara_theme
+
 COLORS = {
-    "bg_dark": "#09090b",
-    "bg_card": "#111113",
-    "bg_card_hover": "#18181b",
-    "accent_primary": "#8b5cf6",
-    "accent_secondary": "#a78bfa",
-    "accent_studio": "#7c3aed",
-    "accent_studio_hover": "#6d28d9",
-    "success": "#22c55e",
-    "warning": "#f59e0b",
-    "error": "#ef4444",
-    "text_primary": "#fafafa",
-    "text_secondary": "#a1a1aa",
-    "text_muted": "#a1a1aa",
-    "border": "#27272a",
-    "border_active": "#7c3aed",
-    "console_bg": "#050505",
-    "console_text": "#a1a1aa",
+    **urahara_theme.COLORS,
+    "accent_studio": urahara_theme.COLORS["accent_benihime"],
+    "accent_studio_hover": urahara_theme.COLORS["accent_benihime_hover"],
 }
 
 
@@ -114,8 +102,12 @@ class StudioPipelineTab(ctk.CTkFrame):
         self.censor_profanity = ctk.BooleanVar(value=True)
         self.censor_visual = ctk.BooleanVar(value=True)
         self.censor_blur_strength = ctk.StringVar(value="Médio (Recomendado)")
+        self.censor_method = ctk.StringVar(value="🔍 Zoom no Foco (Close-up / Sem Blur)")
         self.censor_mode = ctk.StringVar(value="Interativo (Revisar & Ajustar Áreas)")
         self.custom_censor_regions: List[Dict[str, Any]] = []
+        self.include_anime_fx = ctk.BooleanVar(value=True)
+        self.anime_fx_use_local_ai = ctk.BooleanVar(value=True)
+        self.anime_fx_model = ctk.StringVar(value="qwen2.5:7b")
 
         # Variáveis de Corte e Aparo de Vídeo (Início, Fim e Meio)
         self.trim_enabled = ctk.BooleanVar(value=False)
@@ -128,6 +120,7 @@ class StudioPipelineTab(ctk.CTkFrame):
 
         self.input_path = ctk.StringVar(value="")
         self.output_dir = ctk.StringVar(value="")
+        self._last_output_path: Optional[str] = None
 
         self._anim_timer = None
         self._anim_frames = []
@@ -161,12 +154,27 @@ class StudioPipelineTab(ctk.CTkFrame):
         )
         self.start_btn.grid(row=0, column=0, padx=(0, 8), pady=0, sticky="ew")
 
+        self.watch_btn = ctk.CTkButton(
+            btn_bar,
+            text="Assistir Vídeo Pronto",
+            image=icon_manager.get_icon("play", size=(16, 16), color="#09090b"), compound="left",
+            height=48,
+            width=200,
+            font=ctk.CTkFont(size=14, weight="bold"),
+            fg_color="#10B981",
+            hover_color="#059669",
+            text_color="#09090b",
+            command=self._open_ready_video,
+            state="disabled"
+        )
+        self.watch_btn.grid(row=0, column=1, padx=(0, 8), pady=0)
+
         self.review_btn = ctk.CTkButton(
             btn_bar,
             text="Transcrever & Revisar",
             image=icon_manager.get_icon("sparkle", size=(14, 14), color=COLORS["accent_studio"]), compound="left",
             height=48,
-            width=200,
+            width=180,
             font=ctk.CTkFont(size=13, weight="bold"),
             fg_color=COLORS["bg_card"],
             hover_color=COLORS["bg_card_hover"],
@@ -175,15 +183,27 @@ class StudioPipelineTab(ctk.CTkFrame):
             text_color=COLORS["accent_secondary"],
             command=self._start_transcribe_and_review
         )
-        self.review_btn.grid(row=0, column=1, padx=(0, 8), pady=0)
+        self.review_btn.grid(row=0, column=2, padx=(0, 8), pady=0)
+
+        self.folder_btn = ctk.CTkButton(
+            btn_bar,
+            text="Pasta",
+            image=icon_manager.get_icon("folder", size=(14, 14), color=COLORS["text_secondary"]), compound="left",
+            width=95, height=48,
+            fg_color=COLORS["bg_card"], hover_color=COLORS["bg_card_hover"],
+            border_width=1, border_color=COLORS["border"],
+            text_color=COLORS["text_secondary"], font=ctk.CTkFont(size=13),
+            command=self._open_ready_folder, state="disabled"
+        )
+        self.folder_btn.grid(row=0, column=3, padx=(0, 8), pady=0)
 
         self.cancel_btn = ctk.CTkButton(
-            btn_bar, text="Cancelar", width=110, height=48,
+            btn_bar, text="Cancelar", width=95, height=48,
             fg_color=COLORS["bg_card"], hover_color=COLORS["bg_card_hover"],
-            text_color=COLORS["error"], font=ctk.CTkFont(size=14),
+            text_color=COLORS["error"], font=ctk.CTkFont(size=13),
             command=self._cancel, state="disabled"
         )
-        self.cancel_btn.grid(row=0, column=2, pady=0)
+        self.cancel_btn.grid(row=0, column=4, pady=0)
 
         # Scrollable area containing header, controls, and log
         self.scroll = ctk.CTkScrollableFrame(
@@ -666,7 +686,7 @@ class StudioPipelineTab(ctk.CTkFrame):
         ctk.CTkLabel(shield_row0, text="(Evita desmonetização e shadowban no Shorts/TikTok/Reels)",
                      font=ctk.CTkFont(size=11), text_color=COLORS["text_muted"]).pack(side="left", padx=10)
 
-        # Linha 1: Switches
+        # Linha 1: Switches & Método (Zoom vs Blur)
         shield_row1 = ctk.CTkFrame(safety_frame, fg_color="transparent")
         shield_row1.grid(row=1, column=0, columnspan=2, padx=16, pady=(2, 10), sticky="ew")
         shield_row1.grid_columnconfigure((0, 1, 2), weight=1)
@@ -675,19 +695,22 @@ class StudioPipelineTab(ctk.CTkFrame):
                       progress_color=COLORS["accent_studio"], font=ctk.CTkFont(size=12),
                       text_color=COLORS["text_primary"]).grid(row=0, column=0, padx=(0, 15), sticky="w")
 
-        ctk.CTkSwitch(shield_row1, text="Censura Visual (Blur em Busto & Partes Íntimas)", variable=self.censor_visual,
+        ctk.CTkSwitch(shield_row1, text="Censura Visual (IA Anime Shield)", variable=self.censor_visual,
                       progress_color=COLORS["accent_studio"], font=ctk.CTkFont(size=12),
                       text_color=COLORS["text_primary"]).grid(row=0, column=1, padx=(0, 15), sticky="w")
 
-        blur_menu_frame = ctk.CTkFrame(shield_row1, fg_color="transparent")
-        blur_menu_frame.grid(row=0, column=2, sticky="e")
-        ctk.CTkLabel(blur_menu_frame, text="Blur:", font=ctk.CTkFont(size=11, weight="bold"),
+        method_menu_frame = ctk.CTkFrame(shield_row1, fg_color="transparent")
+        method_menu_frame.grid(row=0, column=2, sticky="e")
+        ctk.CTkLabel(method_menu_frame, text="Tipo:", font=ctk.CTkFont(size=11, weight="bold"),
                      text_color=COLORS["text_secondary"]).pack(side="left", padx=(0, 6))
         ctk.CTkOptionMenu(
-            blur_menu_frame,
-            values=["Suave", "Médio (Recomendado)", "Forte"],
-            variable=self.censor_blur_strength,
-            width=180,
+            method_menu_frame,
+            values=[
+                "🔍 Zoom no Foco (Close-up / Sem Blur)",
+                "🌫️ Desfoque Suave (Blur)"
+            ],
+            variable=self.censor_method,
+            width=230,
             height=28,
             fg_color=COLORS["bg_card"],
             button_color=COLORS["border"],
@@ -710,13 +733,28 @@ class StudioPipelineTab(ctk.CTkFrame):
                 "Manual (Definir Intervalos)"
             ],
             variable=self.censor_mode,
-            width=270,
+            width=245,
             height=28,
             fg_color=COLORS["bg_card"],
             button_color=COLORS["border"],
             dropdown_fg_color=COLORS["bg_card"]
         )
         self.censor_mode_menu.grid(row=0, column=1, padx=(0, 10), sticky="w")
+
+        blur_menu_frame = ctk.CTkFrame(shield_row2, fg_color="transparent")
+        blur_menu_frame.grid(row=0, column=2, padx=(0, 8), sticky="e")
+        ctk.CTkLabel(blur_menu_frame, text="Blur:", font=ctk.CTkFont(size=11, weight="bold"),
+                     text_color=COLORS["text_secondary"]).pack(side="left", padx=(0, 4))
+        ctk.CTkOptionMenu(
+            blur_menu_frame,
+            values=["Suave", "Médio (Recomendado)", "Forte"],
+            variable=self.censor_blur_strength,
+            width=140,
+            height=28,
+            fg_color=COLORS["bg_card"],
+            button_color=COLORS["border"],
+            dropdown_fg_color=COLORS["bg_card"]
+        ).pack(side="left")
 
         self.edit_censor_btn = ctk.CTkButton(
             shield_row2,
@@ -731,7 +769,79 @@ class StudioPipelineTab(ctk.CTkFrame):
             font=ctk.CTkFont(size=11, weight="bold"),
             command=self._open_censorship_editor
         )
-        self.edit_censor_btn.grid(row=0, column=2, padx=(8, 0), sticky="e")
+        self.edit_censor_btn.grid(row=0, column=3, padx=(4, 0), sticky="e")
+
+        # Row 6: Anime FX Pro & Cenas Mangá (Baki & Sukuna)
+        anime_fx_frame = ctk.CTkFrame(steps_frame, fg_color=COLORS["bg_dark"], corner_radius=8)
+        anime_fx_frame.grid(row=6, column=0, columnspan=4, padx=16, pady=(4, 14), sticky="ew")
+        anime_fx_frame.grid_columnconfigure(0, weight=1)
+
+        fx_header = ctk.CTkFrame(anime_fx_frame, fg_color="transparent")
+        fx_header.grid(row=0, column=0, padx=16, pady=(10, 4), sticky="ew")
+        fx_header.grid_columnconfigure(0, weight=1)
+
+        ctk.CTkSwitch(
+            fx_header,
+            text="⚔️ Anime FX Pro — Recorte de Mangá com IA & Tipografia de Elite (Anti-Copyright)",
+            variable=self.include_anime_fx,
+            progress_color=COLORS["accent_studio"],
+            font=ctk.CTkFont(size=12, weight="bold"),
+            text_color=COLORS["text_primary"]
+        ).grid(row=0, column=0, sticky="w")
+
+        # Sublinha: Curadoria Inteligente de Clímax & Feelings via IA Local (Ollama)
+        fx_ai_row = ctk.CTkFrame(anime_fx_frame, fg_color="transparent")
+        fx_ai_row.grid(row=1, column=0, padx=16, pady=(2, 4), sticky="ew")
+
+        ctk.CTkSwitch(
+            fx_ai_row,
+            text="🤖 Curadoria de Punchlines via IA Local (Ollama)",
+            variable=self.anime_fx_use_local_ai,
+            progress_color=COLORS["accent_primary"],
+            font=ctk.CTkFont(size=11, weight="bold"),
+            text_color=COLORS["text_primary"]
+        ).pack(side="left", padx=(0, 12))
+
+        ctk.CTkLabel(
+            fx_ai_row,
+            text="Modelo:",
+            font=ctk.CTkFont(size=10, weight="bold"),
+            text_color=COLORS["text_secondary"]
+        ).pack(side="left", padx=(0, 4))
+
+        self.anime_fx_model_menu = ctk.CTkOptionMenu(
+            fx_ai_row,
+            variable=self.anime_fx_model,
+            values=["qwen2.5:7b", "qwen2.5:14b", "deepseek-r1:8b", "llama3.1:8b"],
+            font=ctk.CTkFont(size=10),
+            fg_color=COLORS["bg_card"],
+            button_color=COLORS["accent_dark"],
+            button_hover_color=COLORS["accent_primary"],
+            width=115, height=24, corner_radius=6,
+            command=lambda _: self._start_ollama_check()
+        )
+        self.anime_fx_model_menu.pack(side="left", padx=(0, 12))
+
+        self.ollama_status_badge = ctk.CTkLabel(
+            fx_ai_row,
+            text="Verificando Ollama...",
+            font=ctk.CTkFont(size=10, weight="bold"),
+            text_color=COLORS["accent_secondary"]
+        )
+        self.ollama_status_badge.pack(side="left")
+
+        # Inicia verificação assíncrona com segurança após início da mainloop
+        self.after(600, self._start_ollama_check)
+
+        fx_desc = ctk.CTkFrame(anime_fx_frame, fg_color="transparent")
+        fx_desc.grid(row=2, column=0, padx=16, pady=(0, 10), sticky="ew")
+
+        ctk.CTkLabel(
+            fx_desc,
+            text="Recorte Neural de Mangá (ISNet-Anime) • Detecção de Feeling • Speed Lines Radiais • Anti-Colisão",
+            font=ctk.CTkFont(size=11),
+            text_color=COLORS["accent_secondary"]
+        ).pack(side="left")
 
         # Console
         console_frame = ctk.CTkFrame(self.scroll, fg_color=COLORS["bg_card"], corner_radius=12)
@@ -1035,6 +1145,45 @@ class StudioPipelineTab(ctk.CTkFrame):
         if path:
             self.music_path.set(path)
             self.include_music.set(True)
+
+    def _start_ollama_check(self):
+        """Inicia verificação assíncrona do Ollama a partir da thread principal."""
+        try:
+            if not self.winfo_exists():
+                return
+            cur_model = str(self.anime_fx_model.get()).strip() or "qwen2.5:7b"
+            threading.Thread(target=self._check_ollama_status_worker, args=(cur_model,), daemon=True).start()
+        except Exception:
+            pass
+
+    def _check_ollama_status_worker(self, cur_model: str):
+        """Worker em background que realiza ping HTTP sem tocar em variáveis do Tkinter."""
+        try:
+            import requests
+            r = requests.get("http://localhost:11434/api/tags", timeout=2.5)
+            if r.status_code == 200:
+                models = [m.get("name") for m in r.json().get("models", []) if m.get("name")]
+                has_cur = any(cur_model in m for m in models)
+                st_txt = f"[Online] Ollama Conectado ({cur_model})" if has_cur else "[Online] Ollama Conectado"
+                st_col = COLORS["success"]
+            else:
+                st_txt = "[Offline] Ollama (Fallback Heuristico)"
+                st_col = COLORS["text_muted"]
+        except Exception:
+            st_txt = "[Offline] Ollama (Fallback Heuristico)"
+            st_col = COLORS["text_muted"]
+
+        def _update_ui():
+            try:
+                if hasattr(self, "ollama_status_badge") and self.winfo_exists():
+                    self.ollama_status_badge.configure(text=st_txt, text_color=st_col)
+            except Exception:
+                pass
+
+        try:
+            self.after(0, _update_ui)
+        except Exception:
+            pass
 
     def _log(self, msg):
         def _append():
@@ -1365,6 +1514,8 @@ class StudioPipelineTab(ctk.CTkFrame):
         elif "Forte" in blur_val:
             blur_key = "strong"
 
+        censor_method_val = "zoom" if "zoom" in self.censor_method.get().lower() else "blur"
+
         # Se já temos regiões customizadas salvas, abre direto com elas
         if self.custom_censor_regions:
             CensorshipEditorDialog(
@@ -1372,6 +1523,7 @@ class StudioPipelineTab(ctk.CTkFrame):
                 video_path=input_path,
                 initial_detections=self.custom_censor_regions,
                 blur_strength=blur_key,
+                censor_method=censor_method_val,
                 on_confirm=self._on_censorship_approved
             )
             return
@@ -1383,6 +1535,7 @@ class StudioPipelineTab(ctk.CTkFrame):
                 video_path=input_path,
                 initial_detections=[],
                 blur_strength=blur_key,
+                censor_method=censor_method_val,
                 on_confirm=self._on_censorship_approved
             )
             return
@@ -1400,6 +1553,7 @@ class StudioPipelineTab(ctk.CTkFrame):
                     video_path=input_path,
                     initial_detections=dets,
                     blur_strength=blur_key,
+                    censor_method=censor_method_val,
                     on_confirm=self._on_censorship_approved
                 ))
             except Exception as e:
@@ -1409,6 +1563,7 @@ class StudioPipelineTab(ctk.CTkFrame):
                     video_path=input_path,
                     initial_detections=[],
                     blur_strength=blur_key,
+                    censor_method=censor_method_val,
                     on_confirm=self._on_censorship_approved
                 ))
             finally:
@@ -1537,6 +1692,8 @@ class StudioPipelineTab(ctk.CTkFrame):
             else:
                 censor_blur_key = "medium"
 
+            censor_method_key = "zoom" if "zoom" in self.censor_method.get().lower() else "blur"
+
             ok = render_video_with_style(
                 input_path=input_path,
                 output_path=output_path,
@@ -1553,24 +1710,38 @@ class StudioPipelineTab(ctk.CTkFrame):
                 subtitle_pop=subtitle_pop,
                 censor_profanity=self.censor_profanity.get(),
                 censor_visual=self.censor_visual.get(),
+                censor_method=censor_method_key,
                 censor_blur_strength=censor_blur_key,
                 custom_censor_regions=self.custom_censor_regions if self.custom_censor_regions else None,
                 include_watermark_png=self.include_watermark.get(),
                 include_cta=self.include_cta.get(),
                 include_blur_sides=self.include_blur_sides.get(),
+                include_anime_fx=self.include_anime_fx.get(),
+                use_local_ai=self.anime_fx_use_local_ai.get(),
+                local_ai_model=self.anime_fx_model.get().strip() or "qwen2.5:7b",
                 on_log=self._log,
                 on_progress=lambda p, l: self._set_progress(35 + int(p * 0.65), l),
             )
 
             if ok:
+                self._last_output_path = output_path
                 self._log("=" * 50)
                 self._log("PIPELINE CONCLUIDO COM SUCESSO!")
                 self._log(f"Arquivo gerado: {output_path}")
+                self._log("Dica: Clique no botao '[Assistir Video Pronto]' para reproduzir agora.")
                 self._set_progress(100, "Concluido!")
-                self.after(0, lambda: messagebox.showinfo(
-                    "Studio Pipeline",
-                    f"Video finalizado com sucesso!\n\n{output_path}"
-                ))
+
+                def _notify_and_ask():
+                    self.watch_btn.configure(state="normal")
+                    self.folder_btn.configure(state="normal")
+                    resp = messagebox.askyesno(
+                        "Studio Pipeline - Sucesso!",
+                        f"Video finalizado com sucesso!\n\nArquivo:\n{Path(output_path).name}\n\nDeseja assistir ao video pronto agora?"
+                    )
+                    if resp:
+                        self._open_ready_video()
+
+                self.after(0, _notify_and_ask)
             else:
                 self._log("Falha na renderizacao. Verifique as mensagens de erro acima.")
                 self._set_progress(0, "Erro")
@@ -1590,6 +1761,30 @@ class StudioPipelineTab(ctk.CTkFrame):
             self.after(0, lambda: self.start_btn.configure(state="normal"))
             self.after(0, lambda: self.review_btn.configure(state="normal"))
             self.after(0, lambda: self.cancel_btn.configure(state="disabled"))
+            if getattr(self, "_last_output_path", None) and os.path.exists(self._last_output_path):
+                self.after(0, lambda: self.watch_btn.configure(state="normal"))
+                self.after(0, lambda: self.folder_btn.configure(state="normal"))
+
+    def _open_ready_video(self):
+        path = getattr(self, "_last_output_path", None)
+        if path and os.path.exists(path):
+            try:
+                os.startfile(os.path.normpath(path))
+            except Exception as e:
+                self._log(f"Erro ao abrir video: {e}")
+        else:
+            messagebox.showwarning("Studio Pipeline", "Nenhum video finalizado encontrado para reproduzir.")
+
+    def _open_ready_folder(self):
+        path = getattr(self, "_last_output_path", None)
+        if path and os.path.exists(path):
+            try:
+                import subprocess
+                subprocess.Popen(f'explorer /select,"{os.path.normpath(path)}"')
+            except Exception as e:
+                self._log(f"Erro ao abrir pasta: {e}")
+        else:
+            messagebox.showwarning("Studio Pipeline", "Nenhum video finalizado encontrado para localizar na pasta.")
 
     def _cancel(self):
         self._cancel_flag = True

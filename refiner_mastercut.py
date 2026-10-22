@@ -27,6 +27,7 @@ EDITORIAL_MODES = {
     "hook": "Hook de Abertura (Anti-Início Lento: Teaser 0-3s)",
     "loop": "Loop Contextual (Replay Infinito: Conecta Fim ao Início)",
     "viral_editor": "Edição Viral Pro (Super Senior Editor: Hook + Reordenação + Loop)",
+    "viral_59": "Viral Flow 59s (Duplo Refino IA + J-Cut Suave: Máx 59s)",
     "dorama": "Dorama Emocional (Diálogos Íntegros & Pausas Dramáticas)",
 }
 
@@ -35,6 +36,15 @@ HOOK_TEASER_RESERVE = 3.0
 # Unified edit styles: each profile is ONE coherent recipe (pacing + target length + structure).
 # The UI exposes only these, so pacing, duration and editorial structure can never contradict each other.
 EDIT_PROFILES = {
+    "viral_59": {
+        "label": "Viral Flow 59s (Duplo Refino IA + J-Cut Suave)",
+        "tagline": "Vídeos de 2m+ condensados em até 59s com IA geradora + IA crítica e áudio ultra-suave.",
+        "flow": "Gancho → Narrativa Contínua → Clímax (Teto Rígido ≤ 59.0s)",
+        "refine_mode": "balanced", "target_duration_mode": "viral_59s", "editorial_mode": "viral_59",
+        "explain": "Especialmente calibrado para cortes de 2 minutos ou mais: utiliza inteligência dupla (IA geradora + IA auditora/crítica) "
+                   "para validar o fluxo, eliminar repetições, lapidar falas e garantir que o corte NUNCA passe de 59 segundos. "
+                   "Aplica micro-crossfades suaves de áudio para eliminar cortes bruscos e deixar o vídeo 100% pronto para viralizar.",
+    },
     "dorama": {
         "label": "Dorama Dramático & Emocional (K-Drama / Romance)",
         "tagline": "Preserva a química, diálogos completos e olhares de tensão sem cortes bruscos.",
@@ -332,10 +342,10 @@ def _extract_chunk_bounds(chunk: dict):
     return s, e, t_raw, f_raw
 
 
-def detect_speech_segments(video_path: str, on_progress=None, on_log=None):
+def detect_speech_segments(video_path: str, on_progress=None, on_log=None, ai_engine="auto"):
     """
     Extracts 16kHz mono audio and transcribes it to get word-level / segment-level timestamps.
-    Tries Groq Whisper API first (if key configured), then falls back to local faster_whisper.
+    Tries Groq Whisper API first (if key configured and not in local-only mode), then falls back to local faster_whisper.
     Returns: (all_words, full_text, duration)
     """
     ffmpeg_bin = _get_ffmpeg_bin("ffmpeg")
@@ -385,8 +395,10 @@ def detect_speech_segments(video_path: str, on_progress=None, on_log=None):
         ]
         subprocess.run(cmd_audio, capture_output=True, timeout=120, **_get_silent_subprocess_kwargs())
 
-        # 1. Try Groq Whisper API (whisper-large-v3 com word-level timestamps)
-        groq_raw = os.getenv("GROQ_API_KEY", "").strip()
+        chosen_engine = (ai_engine or os.getenv("REFINER_AI_ENGINE", "auto")).strip().lower()
+
+        # 1. Try Groq Whisper API (whisper-large-v3) se não estiver forçado em 100% IA Local
+        groq_raw = os.getenv("GROQ_API_KEY", "").strip() if chosen_engine != "ollama_local" else ""
         groq_key = groq_raw.splitlines()[0].strip().strip('"\'') if groq_raw else ""
         if groq_key and groq_key.startswith("gsk_") and os.path.exists(temp_wav_path):
             try:
@@ -533,6 +545,106 @@ def detect_speech_segments(video_path: str, on_progress=None, on_log=None):
 
 
 
+def align_opening_segment_to_acoustic_speech(
+    opening_segment: dict,
+    audio_path_or_video: str,
+    ffmpeg_bin: str = "ffmpeg",
+    min_lead_silence: float = 0.20,
+    on_log=None
+) -> dict:
+    """
+    Garante que o primeiro segmento do Mastercut inicie com fala REAL no frame 0 (tolerância <= 0.08s).
+    Analisa a onda acústica para eliminar qualquer buraco de silêncio (1s a 5s) causado por
+    alucinação do Whisper, introduções visuais lentas ou silêncio pós-isolamento Demucs.
+    """
+    if not opening_segment or not audio_path_or_video or not os.path.exists(str(audio_path_or_video)):
+        return opening_segment
+
+    seg_start = float(opening_segment.get("start", 0.0))
+    seg_end = float(opening_segment.get("end", seg_start + 5.0))
+    search_dur = min(8.0, max(1.5, seg_end - seg_start))
+
+    is_wav = str(audio_path_or_video).lower().endswith(".wav")
+    audio = None
+    sr = 16000
+
+    try:
+        if is_wav:
+            import soundfile as sf
+            with sf.SoundFile(str(audio_path_or_video)) as f:
+                sr = f.samplerate
+                start_frame = max(0, int(seg_start * sr))
+                frames_to_read = min(int(search_dur * sr), max(0, len(f) - start_frame))
+                if frames_to_read > 0:
+                    f.seek(start_frame)
+                    audio = f.read(frames_to_read)
+                    if len(audio.shape) > 1:
+                        import numpy as np
+                        audio = np.mean(audio, axis=1)
+        else:
+            cmd = [
+                ffmpeg_bin, "-y",
+                "-ss", f"{seg_start:.3f}",
+                "-i", str(audio_path_or_video),
+                "-t", f"{search_dur:.3f}",
+                "-vn", "-ar", "16000", "-ac", "1",
+                "-f", "wav", "pipe:1"
+            ]
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, **_get_silent_subprocess_kwargs())
+            wav_bytes, _ = proc.communicate(timeout=15)
+            if proc.returncode == 0 and wav_bytes:
+                import io
+                import soundfile as sf
+                audio, sr = sf.read(io.BytesIO(wav_bytes))
+    except Exception as e:
+        if on_log:
+            on_log(f"[AVISO ONSET] Falha ao verificar silêncio acústico: {e}")
+        return opening_segment
+
+    if audio is None or len(audio) == 0:
+        return opening_segment
+
+    import numpy as np
+    win_size = int(sr * 0.06)
+    step = int(sr * 0.02)
+    if win_size <= 0 or step <= 0 or len(audio) < win_size:
+        return opening_segment
+
+    rms_vals = []
+    offsets = []
+    for idx in range(0, len(audio) - win_size, step):
+        chunk = audio[idx : idx + win_size]
+        r = float(np.sqrt(np.mean(chunk**2)))
+        rms_vals.append(r)
+        offsets.append(idx / sr)
+
+    if not rms_vals:
+        return opening_segment
+
+    max_rms = max(rms_vals)
+    if max_rms < 0.004:
+        return opening_segment
+
+    thresh = max(0.005, min(0.018, max_rms * 0.15))
+
+    found_onset = None
+    for off, r in zip(offsets, rms_vals):
+        if r >= thresh:
+            found_onset = off
+            break
+
+    if found_onset is not None and found_onset >= min_lead_silence:
+        cushion = 0.05
+        new_start = round(max(0.0, seg_start + found_onset - cushion), 3)
+        if new_start < seg_end - 0.4:
+            lead_cut = found_onset
+            if on_log:
+                on_log(f"⚡ [RETENÇÃO VIRAL: ZERO SILÊNCIO ACÚSTICO] Silêncio inicial de {lead_cut:.2f}s cortado! Início antecipado de {seg_start:.2f}s -> {new_start:.2f}s (fala imediata no segundo 0).")
+            opening_segment["start"] = new_start
+
+    return opening_segment
+
+
 def detect_visual_action_blocks(video_path: str, on_log=None):
     """
     Detecta intervalos com alta densidade de cortes de câmera (ação/batalha).
@@ -584,8 +696,12 @@ def describe_silent_scenes_with_vision(
     all_words: list,
     video_duration: float,
     video_context: str = "",
+    work_title: str = "",
+    scene_context: str = "",
+    ai_engine: str = "auto",
     on_log=None
 ) -> list:
+
     """
     Analisa visualmente os intervalos SEM fala (silêncios ≥ 1.0s) do vídeo,
     extraindo frames-chave e usando Gemini Vision para descrever o que acontece
@@ -605,6 +721,12 @@ def describe_silent_scenes_with_vision(
             return cached_scenes
     except Exception:
         pass
+
+    chosen_engine = (ai_engine or os.getenv("REFINER_AI_ENGINE", "auto")).strip().lower()
+    if chosen_engine == "ollama_local":
+        if on_log:
+            on_log("⚡ [100% IA LOCAL] Análise de cenas silenciosas operando 100% offline (Zero Nuvem)...")
+        return []
 
     try:
         keys = _get_api_keys()
@@ -691,7 +813,16 @@ def describe_silent_scenes_with_vision(
                 continue
 
             # Call Gemini Vision to describe the scene
-            ctx_hint = f" Esta é uma cena de: {video_context.strip()}." if video_context and video_context.strip() else ""
+            clean_work = (work_title or "").strip()
+            clean_scene = (scene_context or "").strip()
+            if not clean_work and not clean_scene and video_context:
+                clean_work = video_context.strip()
+            ctx_hint = ""
+            if clean_work:
+                ctx_hint += f" Esta é uma cena da obra: {clean_work}."
+            if clean_scene:
+                ctx_hint += f" Foco temático: {clean_scene}."
+
             vision_prompt = (
                 f"Você é um analista de conteúdo audiovisual especializado em anime e séries.{ctx_hint}\n"
                 f"Analise este(s) frame(s) de vídeo capturado(s) entre {gap['start']:.1f}s e {gap['end']:.1f}s (sem fala neste trecho).\n"
@@ -806,61 +937,72 @@ def _get_api_keys() -> list:
         if clean_k and "sua_chave" not in clean_k.lower() and clean_k not in seen:
             seen.add(clean_k)
             keys.append(clean_k)
+    # Prioritiza chaves padrão Google AI Studio (AIzaSy...) primeiro para velocidade instantânea
+    keys.sort(key=lambda k: 0 if k.startswith("AIzaSy") else 1)
     return keys
 
 
-def group_words_by_speech_gaps(all_words: list, max_gap: float = 0.35, is_dorama: bool = False) -> list:
+def group_words_into_complete_sentences(all_words: list, max_gap: float = 0.85, is_dorama: bool = False) -> list:
     """
-    Groups individual words into coherent speech phrases, breaking whenever
-    silence between consecutive words exceeds max_gap seconds.
-    If is_dorama is True and standard max_gap is passed, expands to 0.65s to preserve emotional acting pauses.
+    Agrupa palavras em sentenças semânticas completas (turnos de fala íntegros).
+    NUNCA parte uma frase no meio por causa de pausas curtas de respiração.
+    Critérios para término de sentença:
+    1. Pontuação terminal: '.', '!', '?', '…'
+    2. OU silêncio real prolongado (>= 0.85s no anime, >= 1.1s no dorama)
     """
-    if is_dorama and max_gap <= 0.40:
-        max_gap = 0.65
     if not all_words:
         return []
+    gap_thresh = 1.10 if is_dorama else max_gap
+    sentences = []
+    curr_words = []
 
-    groups = []
-    curr_start = all_words[0]["start"]
-    curr_end = all_words[0]["end"]
-    curr_text = [all_words[0].get("text") or all_words[0].get("word", "")]
+    for i, w in enumerate(all_words):
+        curr_words.append(w)
+        is_last = (i == len(all_words) - 1)
+        next_gap = (all_words[i + 1]["start"] - w["end"]) if not is_last else 999.0
+        txt = (w.get("text") or w.get("word") or "").strip()
 
-    for i in range(1, len(all_words)):
-        w = all_words[i]
-        prev_w = all_words[i - 1]
-        gap = w["start"] - prev_w["end"]
-        if gap <= max_gap:
-            curr_end = w["end"]
-            curr_text.append(w.get("text") or w.get("word", ""))
-        else:
-            dur = round(curr_end - curr_start, 3)
-            if dur > 0.1:
-                groups.append({
-                    "start": round(curr_start, 3),
-                    "end": round(curr_end, 3),
+        has_terminal_punct = any(txt.endswith(p) for p in ('.', '!', '?', '…'))
+        is_silence_break = next_gap >= gap_thresh
+
+        # Se for vocativo ou interjeição muito curta (ex: "Seiya!", "Maldito!") e a fala continuar logo em seguida,
+        # anexa à próxima oração para não isolar o vocativo da pergunta/ação!
+        is_short_interjection = (
+            has_terminal_punct
+            and len(curr_words) <= 2
+            and not is_last
+            and next_gap < gap_thresh
+        )
+
+        if (is_last or has_terminal_punct or is_silence_break) and not is_short_interjection:
+            st = curr_words[0]["start"]
+            en = curr_words[-1]["end"]
+            sentence_txt = " ".join((cw.get("text") or cw.get("word") or "").strip() for cw in curr_words)
+            dur = round(en - st, 3)
+            if dur > 0.05:
+                sentences.append({
+                    "start": round(st, 3),
+                    "end": round(en, 3),
                     "duration": dur,
-                    "words_count": len(curr_text),
-                    "text": " ".join(curr_text)
+                    "words_count": len(curr_words),
+                    "text": sentence_txt,
+                    "words": curr_words
                 })
-            curr_start = w["start"]
-            curr_end = w["end"]
-            curr_text = [w.get("text") or w.get("word", "")]
+            curr_words = []
 
-    dur = round(curr_end - curr_start, 3)
-    if dur > 0.1:
-        groups.append({
-            "start": round(curr_start, 3),
-            "end": round(curr_end, 3),
-            "duration": dur,
-            "words_count": len(curr_text),
-            "text": " ".join(curr_text)
-        })
-
-    return groups
+    return sentences
 
 
-def _merge_segments(segments: list, min_gap: float = 0.15) -> list:
-    """Merges overlapping or touching segments to prevent jitter."""
+def group_words_by_speech_gaps(all_words: list, max_gap: float = 0.85, is_dorama: bool = False) -> list:
+    """
+    Groups individual words into complete semantic sentences.
+    Preserves whole thoughts and avoids chopping dialogue during normal breathing pauses.
+    """
+    return group_words_into_complete_sentences(all_words, max_gap=max_gap, is_dorama=is_dorama)
+
+
+def _merge_segments(segments: list, min_gap: float = 0.25) -> list:
+    """Merges overlapping or touching segments to prevent jitter and micro-gaps."""
     if not segments:
         return []
     sorted_segs = sorted(segments, key=lambda x: x["start"])
@@ -881,49 +1023,149 @@ def _merge_segments(segments: list, min_gap: float = 0.15) -> list:
     return merged
 
 
-def align_segments_to_speech_boundaries(segments: list, all_words: list, video_duration: float) -> list:
+def is_sentence_cut_by_file_edge(sent: dict, video_duration: float) -> bool:
     """
-    Garante que nenhum segmento comece ou termine decepando palavras ao meio.
-    - Se o início do corte decepar uma palavra ao meio, recua para o início da palavra (-0.06s).
-    - Se o final do corte decepar uma palavra ao meio, estende para o término da palavra (+0.18s).
-    - Garante respiração acústica segura nas pontas (+0.18s / -0.06s).
-    - Não faz expansão descontrolada em cascata para não fundir cortes distantes.
+    Detecta se uma sentença foi cortada ao meio pela borda física do arquivo de vídeo bruto.
+    Isso ocorre com frequência em clipes extraídos de episódios onde o arquivo terminou
+    enquanto o personagem ainda estava falando, deixando palavras incompletas ou alucinações de fim de áudio.
+    """
+    if not sent or video_duration <= 0:
+        return False
+    if sent.get("end", 0.0) >= video_duration - 0.35:
+        txt = sent.get("text", "").strip()
+        ws = sent.get("words", [])
+        has_ellipsis = txt.endswith("...") or "..." in txt[-8:] or txt.endswith(" eu...")
+        no_final_punct = not txt.endswith((".", "!", "?", '"', '”', '’'))
+        tiny_words = any((w.get("end", 0.0) - w.get("start", 0.0)) <= 0.045 for w in ws[-3:]) if ws else False
+        started_near_end = (sent.get("start", 0.0) >= video_duration - 2.2)
+        if has_ellipsis or no_final_punct or tiny_words or started_near_end:
+            return True
+    return False
+
+
+def get_safe_sentences(all_words: list, video_duration: float = 0.0, is_dorama: bool = False) -> list:
+    """
+    Retorna sentenças completas filtrando qualquer sentença que tenha sido decepada
+    pela borda física final do arquivo de vídeo.
+    """
+    sentences = group_words_into_complete_sentences(all_words, is_dorama=is_dorama)
+    if not sentences:
+        return []
+    if video_duration > 0 and is_sentence_cut_by_file_edge(sentences[-1], video_duration):
+        return sentences[:-1]
+    return sentences
+
+
+def snap_to_sentence_boundaries(segments: list, all_words: list, video_duration: float, is_dorama: bool = False) -> list:
+    """
+    SENTENCE GUARD SUPREMO:
+    Garante que NENHUM corte comece ou termine decepando frases ao meio.
+    Se um segmento tocar em uma sentença completa (ou começar/terminar no meio dela),
+    ele se expande para cobrir a sentença por inteiro, adicionando pré-roll acústico (-0.08s)
+    e respiro vocal natural (+0.22s).
+    Nunca expande para sentenças que foram cortadas pelo fim físico do arquivo de vídeo.
     """
     if not segments or not all_words:
         return segments
 
-    aligned = []
+    sentences = get_safe_sentences(all_words, video_duration=video_duration, is_dorama=is_dorama)
+    if not sentences:
+        return segments
+
+    # Limite máximo seguro para o término do vídeo se a última fala do arquivo bruto foi decepada
+    raw_sentences = group_words_into_complete_sentences(all_words, is_dorama=is_dorama)
+    max_safe_end = video_duration
+    if raw_sentences and is_sentence_cut_by_file_edge(raw_sentences[-1], video_duration):
+        max_safe_end = min(video_duration, raw_sentences[-1]["start"] - 0.08)
+
+    snapped = []
     for seg in segments:
         s_t = seg["start"]
         e_t = seg["end"]
 
-        # 1. Ajuste do início: se corta uma palavra no meio, recua para o início da palavra
+        # 1. Se s_t começa no meio de uma sentença, recua para o início da sentença inteira
+        for sent in sentences:
+            if sent["start"] - 0.25 <= s_t <= sent["end"]:
+                s_t = min(s_t, sent["start"] - 0.08)
+                break
+            elif 0 <= (sent["start"] - s_t) <= 0.35:
+                s_t = sent["start"] - 0.08
+                break
+
+        # 2. Se e_t termina no meio de uma sentença, estende para o término da sentença inteira
+        for sent in sentences:
+            if sent["start"] <= e_t <= sent["end"] + 0.25:
+                e_t = max(e_t, sent["end"] + 0.22)
+                break
+            elif 0 <= (e_t - sent["end"]) <= 0.35:
+                e_t = sent["end"] + 0.22
+                break
+
+        s_t = max(0.0, round(s_t, 3))
+        e_t = min(max_safe_end, round(e_t, 3))
+        if e_t > s_t:
+            snapped.append({
+                **seg,
+                "start": s_t,
+                "end": e_t
+            })
+
+    return snapped
+
+
+def align_segments_to_speech_boundaries(segments: list, all_words: list, video_duration: float, is_dorama: bool = False) -> list:
+    """
+    Garante que nenhum segmento comece ou termine decepando frases ou palavras ao meio.
+    1. Primeiro aplica o Sentence Guard (expande para sentenças completas).
+    2. Aplica micro-ajuste palavra por palavra com respiro seguro.
+    3. Funde diálogos imediatos (pausas <= 0.60s) para manter trocas dialéticas contínuas.
+    """
+    if not segments or not all_words:
+        return segments
+
+    # Limite máximo seguro para o término do vídeo se a última fala do arquivo bruto foi decepada
+    raw_sentences = group_words_into_complete_sentences(all_words, is_dorama=is_dorama)
+    max_safe_end = video_duration
+    if raw_sentences and is_sentence_cut_by_file_edge(raw_sentences[-1], video_duration):
+        max_safe_end = min(video_duration, raw_sentences[-1]["start"] - 0.08)
+        all_words = [w for w in all_words if w.get("end", 0.0) <= max_safe_end + 0.05]
+
+    # 1. Alinha às sentenças inteiras primeiro (impede corte no meio da frase)
+    snapped = snap_to_sentence_boundaries(segments, all_words, video_duration, is_dorama=is_dorama)
+
+    aligned = []
+    for seg in snapped:
+        s_t = seg["start"]
+        e_t = seg["end"]
+
+        # Ajuste do início: se corta uma palavra no meio, recua para o início da palavra
         cutting_start_word = [w for w in all_words if w["start"] < s_t < w["end"]]
         if cutting_start_word:
-            s_t = max(0.0, cutting_start_word[0]["start"] - 0.06)
+            s_t = max(0.0, cutting_start_word[0]["start"] - 0.08)
         else:
-            nearby_start = [w for w in all_words if 0 <= (w["start"] - s_t) <= 0.15]
+            nearby_start = [w for w in all_words if 0 <= (w["start"] - s_t) <= 0.18]
             if nearby_start:
-                s_t = max(0.0, nearby_start[0]["start"] - 0.06)
+                s_t = max(0.0, nearby_start[0]["start"] - 0.08)
 
-        # 2. Ajuste do fim: se corta uma palavra no meio, estende para o término da palavra com respiro
+        # Ajuste do fim: se corta uma palavra no meio, estende para o término da palavra com respiro
         cutting_end_word = [w for w in all_words if w["start"] <= e_t < w["end"]]
         if cutting_end_word:
-            e_t = min(video_duration, cutting_end_word[-1]["end"] + 0.18)
+            e_t = min(max_safe_end, cutting_end_word[-1]["end"] + 0.22)
         else:
             inside_words = [w for w in all_words if w["end"] <= e_t and w["start"] >= s_t]
             if inside_words:
                 last_w = inside_words[-1]
-                if (e_t - last_w["end"]) < 0.20:
-                    e_t = min(video_duration, last_w["end"] + 0.18)
+                if (e_t - last_w["end"]) < 0.22:
+                    e_t = min(max_safe_end, last_w["end"] + 0.22)
 
         aligned.append({
             **seg,
             "start": round(s_t, 3),
-            "end": round(min(video_duration, e_t), 3),
+            "end": round(min(max_safe_end, e_t), 3),
         })
 
-    return _merge_segments(aligned, min_gap=0.15)
+    # Funde trechos com pausas curtas (<= 0.55s) para não gerar cortes falsos entre réplicas rápidas
+    return _merge_segments(aligned, min_gap=0.55)
 
 
 def sanitize_final_segments(segments: list, min_gap: float = 0.18) -> list:
@@ -1055,81 +1297,95 @@ def calculate_mastercut_bounds(
     v_dur = max(5.0, float(video_duration))
 
     # User explicit duration presets
-    if target_duration_mode == "mini_movie":
+    if target_duration_mode == "viral_59s":
+        # Viral Flow 59s: Teto estrito e inegociável de 59.0s
+        if v_dur <= 59.0:
+            min_d = max(15.0, v_dur * 0.85)
+            max_d = v_dur
+        elif v_dur <= 80.0:
+            min_d = max(38.0, v_dur * 0.65)
+            max_d = min(58.5, v_dur * 0.90)
+        else:
+            # Vídeos longos (2min a 5min+):
+            # Aproveita ao máximo a janela viral de 50.0s a 58.5s (TETO MÁXIMO ESTRITO: 59.0s)!
+            min_d = 50.0
+            max_d = 58.5
+        return round(min_d, 1), round(max_d, 1)
+    elif target_duration_mode == "mini_movie":
         # Tratar Mini-Filme: reduz para aproximadamente a metade (~50%), teto estrito de 150s (2:30 min)
-        if v_dur <= 40.0:
-            min_d = max(12.0, v_dur * 0.50)
-            max_d = min(v_dur, max(min_d + 4.0, v_dur * 0.85))
+        if v_dur <= 65.0:
+            min_d = max(15.0, v_dur * 0.80)
+            max_d = v_dur
         else:
             target_half = v_dur * 0.50
             max_d = min(150.0, max(45.0, target_half + 8.0), v_dur * 0.70)
             min_d = max(30.0, min(max_d - 12.0, target_half - 12.0))
         return round(min_d, 1), round(max_d, 1)
     elif target_duration_mode == "max_retention":
-        # Retenção Máxima: em vídeos curtos (<=40s), não força descarte de falas cruciais!
-        if v_dur <= 40.0:
-            min_d = max(10.0, v_dur * 0.75)
+        # Retenção Máxima: em vídeos curtos (<=65s), preserva 100% das falas!
+        if v_dur <= 65.0:
+            min_d = max(15.0, v_dur * 0.90)
             max_d = v_dur
         else:
             min_d = max(25.0, v_dur * 0.75)
             max_d = min(v_dur * 0.92, max(min_d + 4.0, v_dur * 0.88))
         return round(min_d, 1), round(max_d, 1)
     elif target_duration_mode == "standard":
-        # Padrão Shorts: 35s a 90s, teto flexível para evitar mutilação de cenas boas
-        if v_dur <= 40.0:
-            min_d = max(12.0, v_dur * 0.70)
+        # Padrão Shorts / Reels: até 65s preserva o clipe completo; acima disso, condensa para 35s-60s
+        if v_dur <= 65.0:
+            min_d = max(15.0, v_dur * 0.85)
             max_d = v_dur
         else:
             min_d = min(35.0, v_dur * 0.50)
-            max_d = min(v_dur * 0.85, 90.0)
+            max_d = min(v_dur * 0.85, 60.0)
         return round(max(14.0, min_d), 1), round(max(min_d + 4.0, max_d), 1)
     elif target_duration_mode == "short":
         # Curto & Rápido: 20s a 35s
         min_d = max(10.0, min(20.0, v_dur * 0.35))
         max_d = min(v_dur * 0.70, 35.0)
-        return round(min_d, 1), round(max(min_d + 4.0, max_d), 1)
+        return round(min_d, 1), round(max_d, 1)
 
     # Automatic mode based on refine_mode & video_duration
-    if v_dur <= 40.0:
-        # Vídeo ultracurto (já no formato Shorts/Reels, ex: 15s a 40s)
-        # NUNCA mutilar frases inteiras: cortar apenas silêncios mortos nas pontas!
-        if refine_mode == "soft":
-            min_d = max(10.0, v_dur * 0.75)
+    if v_dur <= 65.0:
+        # Vídeo já no formato Shorts/Reels/TikTok (<= 65s):
+        # NUNCA mutilar frases ou conversas: preservar o diálogo contínuo de ponta a ponta!
+        if refine_mode in ("soft", "dorama"):
+            min_d = max(15.0, v_dur * 0.90)
             max_d = v_dur
         elif refine_mode == "aggressive":
-            min_d = max(8.0, v_dur * 0.35)
-            max_d = min(v_dur * 0.65, 25.0)
-        else:  # balanced
-            min_d = max(12.0, v_dur * 0.65)
-            max_d = min(v_dur, max(min_d + 4.0, v_dur * 0.95))
-    elif v_dur <= 75.0:
-        # Vídeo curto (40s a 75s)
-        if refine_mode == "soft":
-            min_d = max(25.0, v_dur * 0.75)
+            min_d = max(15.0, v_dur * 0.75)
+            max_d = v_dur
+        else:  # balanced / viral
+            min_d = max(15.0, v_dur * 0.85)
+            max_d = v_dur
+    elif v_dur <= 110.0:
+        # Vídeo médio (65s a 110s)
+        if refine_mode in ("soft", "dorama"):
+            min_d = max(35.0, v_dur * 0.70)
             max_d = min(v_dur, max(min_d + 3.0, v_dur * 0.92))
         elif refine_mode == "aggressive":
-            min_d = max(15.0, v_dur * 0.35)
-            max_d = max(min_d + 3.0, v_dur * 0.55)
+            min_d = max(20.0, v_dur * 0.40)
+            max_d = min(v_dur * 0.60, 50.0)
         else:
-            # Equilibrado (padrão): 55% a 80%
-            min_d = max(20.0, v_dur * 0.55)
-            max_d = min(v_dur * 0.80, max(min_d + 4.0, v_dur * 0.75))
-    elif v_dur <= 180.0:
-        # Clipe médio (1.5m a 3m)
-        if refine_mode == "soft":
-            min_d = max(50.0, v_dur * 0.60)
-            max_d = min(v_dur * 0.82, 90.0)
+            # Equilibrado (padrão): 50% a 75%
+            min_d = max(25.0, v_dur * 0.50)
+            max_d = min(v_dur * 0.75, 60.0)
+    elif v_dur <= 240.0:
+        # Clipe médio/longo (1.8m a 4m)
+        if refine_mode in ("soft", "dorama"):
+            min_d = max(50.0, v_dur * 0.55)
+            max_d = min(v_dur * 0.75, 90.0)
         elif refine_mode == "aggressive":
             min_d = 25.0
-            max_d = min(v_dur * 0.45, 45.0)
+            max_d = min(v_dur * 0.40, 45.0)
         else:  # balanced
             min_d = 35.0
-            max_d = min(v_dur * 0.68, 60.0)
+            max_d = min(v_dur * 0.60, 60.0)
     else:
-        # Vídeo longo (> 3m)
-        if refine_mode == "soft":
+        # Vídeo longo (> 4m)
+        if refine_mode in ("soft", "dorama"):
             min_d = 60.0
-            max_d = min(v_dur * 0.55, 110.0)
+            max_d = min(v_dur * 0.50, 110.0)
         elif refine_mode == "aggressive":
             min_d = 28.0
             max_d = 45.0
@@ -1141,19 +1397,169 @@ def calculate_mastercut_bounds(
 
 
 
+def _get_local_model_candidates(requested_model: str = "") -> list:
+    """
+    Retorna lista ordenada de modelos locais instalados no Ollama.
+    O modelo escolhido pelo usuário vem sempre em 1º lugar.
+    Se falhar, tenta os outros modelos instalados na máquina do usuário.
+    """
+    from settings_manager import get_installed_ollama_models
+    installed = get_installed_ollama_models()
+    req = (requested_model or os.getenv("DIRECTOR_LOCAL_MODEL", "qwen2.5:7b")).strip()
+
+    # Prioridade de contingência: modelos instruct rápidos e comprovados
+    priority_order = [
+        "qwen2.5:7b",
+        "qwen3.8:27b",
+        "qwen2.5:14b",
+        "llama3.1:8b",
+        "qwen2.5vl:7b",
+        "deepseek-r1:8b",
+        "deepseek-r1:14b",
+        "llama3:latest",
+        "mistral:7b",
+    ]
+
+    candidates = []
+    if req:
+        candidates.append(req)
+
+    # Adiciona os instalados na máquina seguindo a ordem de prioridade
+    for p in priority_order:
+        for inst in installed:
+            if (p == inst or p in inst) and inst not in candidates:
+                candidates.append(inst)
+
+    # Adiciona qualquer outro instalado não listado
+    for inst in installed:
+        if inst not in candidates:
+            candidates.append(inst)
+
+    if not candidates:
+        candidates = ["qwen2.5:7b"]
+
+    return candidates
+
+
+def _call_ollama_local_timeline(prompt: str, on_log=None, local_model: str = "") -> tuple:
+    """
+    Executa a seleção de cortes do Mastercut 100% localmente via Ollama na GPU RTX 5060.
+    Tenta o modelo solicitado com timeout estendido de 300s.
+    Se falhar ou der timeout, tenta automaticamente outros modelos locais instalados.
+    Retorna (timeline, roteiro) em caso de sucesso ou (None, None).
+    """
+    import requests
+    models_to_try = _get_local_model_candidates(local_model)
+
+    for idx, target_model in enumerate(models_to_try):
+        is_fallback = (idx > 0)
+        prefix = "⚡ [100% IA LOCAL]" if not is_fallback else f"🔄 [CONTINGÊNCIA LOCAL {idx}/{len(models_to_try)-1}]"
+        if on_log:
+            on_log(f"{prefix} Consultando Roteirista Ollama ({target_model}) na RTX 5060 (Zero Nuvem)...")
+
+        is_reasoning = any(k in target_model.lower() for k in ("r1", "reason", "deepseek-r1"))
+        payload = {
+            "model": target_model,
+            "messages": [{"role": "user", "content": prompt}],
+            "stream": False,
+            "keep_alive": "10m",
+            "options": {"temperature": 0.2}
+        }
+        # Para modelos de raciocínio como DeepSeek-R1, omitir format="json" evita travar o sampler com thinking tokens
+        if not is_reasoning:
+            payload["format"] = "json"
+
+        t0 = time.time()
+        try:
+            url = "http://localhost:11434/api/chat"
+            resp = requests.post(url, json=payload, timeout=300)
+            if resp.status_code == 200:
+                content = resp.json().get("message", {}).get("content", "")
+                if content:
+                    json_str = content
+                    if is_reasoning and "<think>" in content:
+                        import re
+                        m = re.search(r'\{.*\}', content, re.DOTALL)
+                        if m:
+                            json_str = m.group(0)
+
+                    data = json.loads(json_str)
+                    timeline = None
+                    roteiro = None
+                    if isinstance(data, list):
+                        timeline = data
+                    elif isinstance(data, dict):
+                        roteiro = (
+                            data.get("roteiro_da_cena") or
+                            data.get("roteiro") or
+                            data.get("storyboard") or
+                            data.get("script") or
+                            data.get("cena")
+                        )
+                        timeline = (
+                            data.get("ai_viral") or
+                            data.get("mastercut") or
+                            data.get("segments") or
+                            data.get("cortes") or
+                            data.get("cuts") or
+                            data.get("timeline")
+                        )
+                    if timeline and isinstance(timeline, list) and len(timeline) > 0:
+                        dur_call = time.time() - t0
+                        if on_log:
+                            on_log(f"✅ [100% IA LOCAL] Roteirista Ollama ({target_model}) desenhou Mastercut com {len(timeline)} cortes em {dur_call:.1f}s na RTX 5060!")
+                            if roteiro and isinstance(roteiro, dict):
+                                on_log("[ROTEIRISTA IA LOCAL] Roteiro Dramático Estruturado:")
+                                if roteiro.get("premissa"):
+                                    on_log(f"   * Premissa: {roteiro['premissa']}")
+                                if roteiro.get("hook"):
+                                    on_log(f"   * Hook (Abertura): {roteiro['hook']}")
+                                if roteiro.get("conflito_desenvolvimento"):
+                                    on_log(f"   * Desenvolvimento: {roteiro['conflito_desenvolvimento']}")
+                                if roteiro.get("climax_fechamento"):
+                                    on_log(f"   * Climax/Fechamento: {roteiro['climax_fechamento']}")
+                        return timeline, roteiro
+            else:
+                if on_log:
+                    on_log(f"[AVISO OLLAMA] {target_model} retornou status HTTP {resp.status_code}.")
+        except Exception as e:
+            err_msg = str(e)
+            if "timed out" in err_msg.lower():
+                err_msg = "Tempo limite de 300s esgotado (timeout)"
+            if on_log:
+                on_log(f"[AVISO OLLAMA] Modelo local {target_model} falhou: {err_msg}.")
+
+        # Se ainda há mais modelos locais na máquina para tentar:
+        if idx + 1 < len(models_to_try):
+            next_model = models_to_try[idx + 1]
+            if on_log:
+                on_log(f"🔄 Alternando automaticamente para outro modelo local instalado: '{next_model}'...")
+
+    if on_log:
+        on_log(f"⚠️ [OLLAMA LOCAL] Todos os {len(models_to_try)} modelos locais testados falharam.")
+    return None, None
+
+
 def call_ai_mastercut_timeline(
     all_words,
     video_duration,
     action_blocks=None,
     visual_scenes=None,
     video_context="",
+    work_title="",
+    scene_context="",
+    user_feedback="",
+    previous_segments=None,
     refine_mode="balanced",
     target_duration_mode="auto",
     enable_loop=False,
     editorial_mode="linear",
     is_dorama=False,
+    ai_engine="auto",
+    local_model="",
     on_log=None
 ):
+
     """
     Sends the video dialogue transcription + visual scene descriptions to Gemini AI (or Groq fallback)
     requesting the Mastercut timeline with strict anti-overcut rules and duration boundaries.
@@ -1162,9 +1568,15 @@ def call_ai_mastercut_timeline(
     action_blocks = action_blocks or []
     visual_scenes = visual_scenes or []
 
+    # Separação estrita: Obra (API de Metadados) vs Foco da Cena (Somente Prompt da IA)
+    clean_work_title = (work_title or "").strip()
+    clean_scene_context = (scene_context or "").strip()
+    if not clean_work_title and not clean_scene_context and video_context:
+        clean_work_title = video_context.strip()
+
     # Auto-detect Dorama if not explicitly specified
     if not is_dorama:
-        ctx_lower = str(video_context or "").lower()
+        ctx_lower = f"{clean_work_title} {clean_scene_context} {video_context}".lower()
         is_dorama = (
             refine_mode == "dorama"
             or editorial_mode == "dorama"
@@ -1173,25 +1585,12 @@ def call_ai_mastercut_timeline(
 
     min_dur, max_dur = calculate_mastercut_bounds(video_duration, refine_mode, target_duration_mode)
 
-    # Build grouped dialogue sentences with precise acoustic boundaries
-    # Para doramas, pausas naturais de até 0.60s são mantidas como parte da mesma frase emocional
+    # Build complete semantic dialogue blocks with sentence boundaries (filtrando frases decepadas da borda)
+    speech_sentences = get_safe_sentences(all_words, video_duration=video_duration, is_dorama=is_dorama)
     speech_summary = []
-    speech_gap_thresh = 0.60 if is_dorama else 0.40
-    speech_len_thresh = 6.5 if is_dorama else 4.5
-    if all_words:
-        curr_phrase = []
-        p_start = None
-        for i, w in enumerate(all_words):
-            if p_start is None:
-                p_start = w["start"]
-            curr_phrase.append(w["text"])
-            is_last = (i == len(all_words) - 1)
-            next_gap = (all_words[i + 1]["start"] - w["end"]) if not is_last else 999.0
-            if is_last or w["text"].endswith(('.', '!', '?', '…')) or next_gap >= speech_gap_thresh or (w["end"] - p_start > speech_len_thresh):
-                p_text = " ".join(curr_phrase)
-                speech_summary.append(f"[{p_start:.2f}s -> {w['end']:.2f}s] \"{p_text}\"")
-                curr_phrase = []
-                p_start = None
+    if speech_sentences:
+        for idx, sent in enumerate(speech_sentences, 1):
+            speech_summary.append(f"[Bloco #{idx}] [{sent['start']:.2f}s -> {sent['end']:.2f}s] \"{sent['text']}\"")
 
     action_summary = []
     for ab in action_blocks:
@@ -1215,24 +1614,68 @@ def call_ai_mastercut_timeline(
         if importance == "high":
             high_impact_scenes.append(vs)
 
+    # ── Montagem do Contexto (API externa consulta APENAS clean_work_title) ──
     ctx_block = ""
-    if video_context and video_context.strip():
-        extra_meta = ""
+    extra_meta = ""
+    if clean_work_title:
         try:
             from metadata_enricher import get_enriched_context_for_prompt
             cat_hint = "dorama" if is_dorama else "anime"
-            extra_meta = get_enriched_context_for_prompt(video_context.strip(), category=cat_hint, on_log=on_log)
-        except Exception:
-            pass
+            extra_meta = get_enriched_context_for_prompt(clean_work_title, category=cat_hint, on_log=on_log)
+        except Exception as e:
+            if on_log:
+                on_log(f"[AVISO METADATA] Falha na busca de metadados para '{clean_work_title}': {e}")
 
+    ctx_parts = []
+    if clean_work_title:
+        ctx_parts.append(f"Obra / Título: {clean_work_title}")
+    if extra_meta:
+        ctx_parts.append(extra_meta)
+    if clean_scene_context:
+        ctx_parts.append(
+            f"🚨 FOCO DO CORTE / INSTRUÇÕES ESPECÍFICAS DA CENA:\n"
+            f"\"{clean_scene_context}\"\n"
+            f"(ATENÇÃO ROTEIRISTA: Dê prioridade MÁXIMA a este foco temático/emocional solicitado pelo usuário ao montar a linha do tempo!)"
+        )
+
+    if ctx_parts:
         ctx_block = f"""
-[CONTEXTO DA OBRA / {'DORAMA' if is_dorama else 'ANIME'} / EPISÓDIO]
-Contexto informado: {video_context.strip()}
-{extra_meta}
-Use esse conhecimento de {'dorama/série' if is_dorama else 'anime/série'} para identificar com precisão os personagens falando, técnicas/poderes/química, o arco narrativo e as falas/reações mais marcantes desta cena!
+[CONTEXTO DA OBRA / {'DORAMA' if is_dorama else 'ANIME'} / EPISÓDIO & INSTRUÇÕES DA CENA]
+{chr(10).join(ctx_parts)}
+Use esse conhecimento para identificar com precisão os personagens, a dinâmica da cena e seguir à risca o foco de corte solicitado!
 """
         if on_log:
-            on_log(f"[CONTEXTO] Contexto {'de Dorama ' if is_dorama else ''}aplicado à IA: '{video_context.strip()}'")
+            if clean_work_title:
+                on_log(f"[METADATA API] Obra consultada na API: '{clean_work_title}'")
+            if clean_scene_context:
+                on_log(f"[DIREÇÃO IA] Foco da cena informado à IA: '{clean_scene_context}'")
+
+    # ── Feedback do Diretor (Reajuste / Correção Interativa com a IA) ──
+    feedback_block = ""
+    if user_feedback and user_feedback.strip():
+        prev_str = ""
+        if previous_segments:
+            seg_lines = []
+            for idx, s in enumerate(previous_segments, 1):
+                seg_lines.append(f"  - Corte #{idx}: [{s.get('start', 0.0):.2f}s -> {s.get('end', 0.0):.2f}s] {s.get('text', '')}")
+            prev_str = "\n" + "\n".join(seg_lines)
+        else:
+            prev_str = " (Não especificado)"
+
+        feedback_block = f"""
+🚨 FEEDBACK CRÍTICO DO DIRETOR (CORREÇÃO DE CORTE MANDATÓRIA):
+O usuário/diretor assistiu ao corte anterior e apontou o seguinte erro de contexto/ausência de momento:
+"{user_feedback.strip()}"
+
+[CORTES DA TENTATIVA ANTERIOR]:{prev_str}
+
+MISSÃO OBRIGATÓRIA DE CORREÇÃO:
+1. Localize nas falas transcritas ou nas cenas visuais o momento EXATO apontado pelo usuário (ex: ele pegando a espada, reação específica, fala que faltou).
+2. OBRIGATORIAMENTE INCLUA esse trecho ou momento chave na nova proposta de corte!
+3. Rebalanceie ou encurte os outros trechos para acomodar essa cena dentro do limite de tempo ({min_dur:.1f}s a {max_dur:.1f}s).
+"""
+        if on_log:
+            on_log(f"🛠️ [DIREÇÃO & FEEDBACK] Instrução de correção: '{user_feedback.strip()}'")
 
     mode_descriptions = {
         "soft": "PRESERVAÇÃO MÁXIMA DE CONTEÚDO (Anti-Silêncio). Mantenha praticamente todas as falas, conversas e reações. Elimine estritamente pausas mortas (>0.35s) e silêncios.",
@@ -1241,7 +1684,17 @@ Use esse conhecimento de {'dorama/série' if is_dorama else 'anime/série'} para
         "dorama": "DORAMA DRAMÁTICO / ROMANCE & TENSÃO. Mantenha os diálogos íntegros, as réplicas completas (pergunta + resposta) e as pausas emocionais/olhares de reação entre os personagens sem picotar a atuação.",
     }
     mode_guide = mode_descriptions.get(refine_mode, mode_descriptions["balanced"])
-    if target_duration_mode == "mini_movie":
+    if target_duration_mode == "viral_59s":
+        mode_guide = (
+            f"VIRAL FLOW 59s (VÍDEO DE ALTA RETENÇÃO DE ~50s A 58.5s - TETO RÍGIDO DE 59.0 SEGUNDOS). "
+            f"Condense este vídeo de {video_duration:.1f}s em EXATAMENTE {min_dur:.1f}s a {max_dur:.1f}s focando no CLÍMAX ABSOLUTO. "
+            "🚨 CORTE FORA A EXPOSIÇÃO MORNA DO INÍCIO: Se o início tiver 30s-60s de conversa fiada ou explicações teóricas, pule direto para o elemento de curiosidade/desafio! "
+            "🚨 O CLÍMAX É O CORAÇÃO DO VÍDEO: O feito chocante, a tentativa, a loucura de todos e a punchline final devem receber o maior tempo (~20s a 28s). "
+            "Selecione de 2 a 3 blocos ágeis: "
+            "1. Gancho / O Mistério ou Desafio (~10s a 16s) -> 2. Tensão / A Dúvida / O Desafio (~10s a 16s) -> 3. Clímax Chocante + Reação de Espanto e Punchline (~20s a 28s). "
+            "A soma dos blocos no JSON DEVE totalizar entre 50.0s e 58.5s!"
+        )
+    elif target_duration_mode == "mini_movie":
         mode_guide = (
             f"RESUMO MINI-FILME / RECAP NARRATIVO (~50% do clipe, máx 2:30 min). "
             f"Condense este arco de {video_duration:.1f}s num Mini-Filme cinematográfico de {min_dur:.1f}s a {max_dur:.1f}s, "
@@ -1252,10 +1705,10 @@ Use esse conhecimento de {'dorama/série' if is_dorama else 'anime/série'} para
     # The AI only SELECTS (chronologically). Hook/loop placement is done deterministically afterwards,
     # otherwise the chronological merge would silently swallow an AI-placed teaser.
     editorial_instruction = ""
-    if editorial_mode in ("hook", "viral_editor"):
+    if editorial_mode in ("hook", "viral_editor", "viral_59"):
         loop_line = (
             "\n   - O ÚLTIMO corte deve terminar numa fala/reação marcante e completa: ela será a ponte do loop de replay."
-            if editorial_mode == "viral_editor" else ""
+            if editorial_mode in ("viral_editor", "viral_59") else ""
         )
         editorial_instruction = f"""
 5. **ESTRUTURA EDITORIAL (o gancho é montado automaticamente depois)**:
@@ -1274,6 +1727,39 @@ Use esse conhecimento de {'dorama/série' if is_dorama else 'anime/série'} para
 5. **ESTRUTURA NARRATIVA DE DORAMA**:
    - Devolva os cortes em ORDEM CRONOLÓGICA natural da cena.
    - Preserva o arco emocional: Começo da conversa/conflito -> Intensificação da emoção/química -> Clímax ou frase arrebatadora final.
+"""
+
+    short_clip_directive = ""
+    if target_duration_mode == "viral_59s":
+        short_clip_directive = f"""
+⚡ **DIRETRIZ OBRIGATÓRIA: VIRAL FLOW 59s (VÍDEO DE ALTA RETENÇÃO DE ~50s A 58.5s - TETO RÍGIDO 59.0s)**:
+- O vídeo original tem {video_duration:.1f}s (mais de 2 minutos).
+- A SUA META DE DURAÇÃO TOTAL É ENTRE {min_dur:.1f}s E {max_dur:.1f}s (Alvo ideal: 52.0s a 58.5s)!
+- ⛔ PROIBIDO RETORNAR MENOS DE 48 SEGUNDOS! Em um vídeo de 2min a 4min há história de sobra para preencher o tempo. Retornar 20s ou 30s é uma FALHA GRAVE!
+- ⛔ PROIBIDO ULTRAPASSAR 59.0 SEGUNDOS ($total <= 59.0s$).
+- 🚨 NUNCA SELECIONE CONVERSAS MORNAS DE EXPOSIÇÃO DO INÍCIO (ex: explicações teóricas, bate-papo de apresentação). Corte direto para o mistério/desafio!
+- 🚨 O CLÍMAX É O PONTO ALTO DA CENA: reserve o maior tempo para o clímax (o feito, o espanto de todos e a punchline final).
+- Selecione 3 a 4 blocos dinâmicos e concisos (10s a 22s cada) que mantenham a atenção no ápice sem blocos monótonos arrastados.
+"""
+    elif video_duration <= 65.0:
+        short_clip_directive = f"""
+🌟 **DIRETRIZ OBRIGATÓRIA PARA CLIPE CURTO ({video_duration:.1f}s <= 65s) - PRESERVAÇÃO INTEGRAL DE NARRATIVA**:
+- Este clipe tem {video_duration:.1f}s e já está no formato de duração ideal para Reels / TikTok / YouTube Shorts!
+- **NÃO RETALHE O DIÁLOGO! NÃO PULE FRASES!** Mantenha o diálogo e a conversa COMPLETA de ponta a ponta em ordem cronológica contínua.
+- Não deixe nenhuma frase de fora: preserve a introdução/premissa, a discussão completa e o desfecho com todas as réplicas.
+- O seu papel aqui NÃO É PICOTAR O DIÁLOGO, mas sim:
+  1. Cortar apenas segundos mortos de silêncio (se houver pausa de silêncio >1.0s).
+  2. Aplicar a DIREÇÃO MULTI-CÂMERA ("framing": "punch", "wide", "reaction") alternando os enquadramentos entre as falas para dar dinamismo visual cinematográfico e blindagem contra direitos autorais sem cortar o diálogo!
+"""
+    else:
+        short_clip_directive = f"""
+🎬 **DIRETRIZ DE CONDENSAÇÃO NARRATIVA ({video_duration:.1f}s > 65s)**:
+- O vídeo original tem {video_duration:.1f}s. A sua meta é selecionar entre {min_dur:.1f}s e {max_dur:.1f}s no TOTAL.
+- OBRIGATÓRIO: Crie uma história coesa e fluida selecionando no MÁXIMO 1 OU 2 BLOCOS NARRATIVOS CONTÍNUOS (ex: Bloco 1: Ação/Caçada/Conflito de 20s-30s; Bloco 2: Clímax/Revelação/Mic Drop de 12s-20s).
+- PROIBIDO espalhar cortezinhos soltos de 2 ou 3 segundos! Vídeo muito cortado destrói a retenção e parece amador.
+- PRIORIZE AÇÃO, CONFRONTO, CAÇADA OU COMÉDIA DINÂMICA: Se houver uma caçada, luta ou disputa ativa na cena (ex: perseguição de presa ou confronto), ESSA CENA DEVE SER O BLOCO PRINCIPAL em vez de diálogos parados de apresentação!
+- Cada bloco selecionado deve ser 100% contínuo de ponta a ponta sem pular falas no meio dele.
+- O ÚLTIMO segmento selecionado OBRIGATORIAMENTE deve ser o desfecho/punchline final da cena ("mic drop"), garantindo que a frase seja ouvida por completo sem cortes abruptos!
 """
 
     mini_movie_instruction = ""
@@ -1324,33 +1810,58 @@ Use esse conhecimento de {'dorama/série' if is_dorama else 'anime/série'} para
    - Comece direto na frase de choque, pergunta provocadora ou lágrima inicial para prender o scroll no primeiro segundo. NUNCA comece no meio de uma frase.
 5. **FECHAMENTO DRAMÁTICO / MIC DROP**:
    - Termine no ápice da discussão, na revelação chocante ou na troca de olhares definitiva. NUNCA deixe a frase pela metade no final do clipe! O desfecho deve ter impacto absoluto."""
+    elif target_duration_mode == "viral_59s" or editorial_mode == "viral_59":
+        director_title = "SUPER SENIOR EDITOR CINEMÁTICO VIRAL 59s para YouTube Shorts, Reels e TikTok"
+        golden_rules = f"""⛔ REGRAS DE OURO DA ENGENHARIA VIRAL FLOW 59s (FOCO NO CLÍMAX & RITMO ANTI-TÉDIO):
+1. **ELIMINE A EXPOSIÇÃO MORNA DO INÍCIO (ZERO ENROLAÇÃO)**:
+   - Se os personagens passarem o primeiro minuto apenas conversando parados, apresentando regras teóricas, medindo atributos ou batendo papo morno de introdução: CORTE FORA ESSA GORDURA!
+   - Vá DIRETO para o momento em que surge o elemento que desperta curiosidade imediata (o objeto misterioso/lendário, a provocação, o perigo ou o desafio).
+2. **FOCO ABSOLUTO NO CLÍMAX (A MELHOR PARTE DA CENA)**:
+   - Qual é o grande momento de choque, humor ou triunfo desta cena?
+   - O CLÍMAX (o momento em que o feito impossível é executado, a revelação acontece, todos entram em choque e a punchline final é disparada) É O CORAÇÃO DO CORTE!
+   - Este ápice DEVE ter o maior tempo de tela (~18s a 26s) e entrar COMPLETO, com todas as reações de espanto dos outros personagens e a frase final definitiva ("mic drop" / "É o quê?!"). NUNCA deixe o clímax corrido!
+3. **RITMO VIRAL DINÂMICO COM SALTOS NO TEMPO (NUNCA GERE BLOCOS CONTÍGUOS COLADOS DE 90s)**:
+   - PROIBIDO selecionar blocos colados (ex: 80s-105s, 105s-137s, 137s-174s) que quando somados formam um bloco contínuo monótono de 90 segundos!
+   - Você DEVE SALTAR as explicações secundárias e enrolações do meio para que haja saltos temporais entre o gancho e o clímax!
+   - Monte uma progressão ágil de 3 a 4 blocos dinâmicos (cada um com 10s a 22s) separados por saltos no tempo:
+     * Bloco 1 (Gancho / O Mistério ou Desafio: ~10s a 16s): A apresentação do desafio ou da lenda.
+     --- SALTO NO TEMPO (pula explicações do meio) ---
+     * Bloco 2 (A Tensão / A Provocação / A Dúvida: ~10s a 16s): A explicação de que ninguém consegue e a provocação de que ele vai tentar.
+     --- SALTO NO TEMPO ---
+     * Bloco 3 (O Clímax Chocante + Reação e Desfecho: ~18s a 26s): A execução do feito com facilidade, o choque de todos e o desfecho marcante.
+4. **DURAÇÃO TOTAL RIGOROSA ENTRE {min_dur:.1f}s E {max_dur:.1f}s (TETO INEGOCIÁVEL: 59.0s)**:
+   - A soma total dos blocos no JSON DEVE totalizar entre {min_dur:.1f}s e {max_dur:.1f}s.
+   - ⛔ PROIBIDO ULTRAPASSAR 59.0 SEGUNDOS ($total <= 59.0s$).
+5. **FECHAMENTO PERFEITO NO FINAL (MIC DROP COMPLETO)**:
+   - NUNCA termine no meio de uma frase! O último segmento deve encerrar na frase de maior impacto com a oração completa."""
     else:
         director_title = "SUPER SENIOR EDITOR CINEMÁTICO E VIRAL para YouTube Shorts, Reels e TikTok"
-        golden_rules = """⛔ REGRAS DE OURO DA ENGENHARIA NARRATIVA VIRAL & ANTI-COPYRIGHT:
-1. **DINÂMICA DIALÉTICA E PESO DRAMÁTICO (NÃO SEJA UM ROBÔ CORTADOR)**:
-   - O maior erro de IA é cortar silêncios que na verdade são 'Tensão Dramática'. Se um personagem faz uma ameaça ("Você vai pagar por isso"), a pausa antes da resposta ("Eu traí?") é OBRIGATÓRIA.
-   - NÃO retalhe frases. Mantenha as réplicas, debates e o arco emocional. Cada corte deve ter um propósito narrativo.
-2. **MICRO-BEATS DINÂMICOS (MÁXIMO 3.8s POR CORTE)**:
-   - Elimine silêncios verdadeiramente vazios/mortos, mas deixe os cortes respirarem de 1.8s a 3.8s para não parecer que o vídeo foi picotado por um triturador.
-3. **TAGS DE CINEMATOGRAFIA MULTI-CÂMERA ("framing")**:
-   - "punch": Smart Close-Up (+14% zoom) para clímax, gritos, ameaças, mic drops ou revelações.
-   - "wide": Plano Aberto (+4% zoom) para contexto, ação rápida ou apresentação.
-   - "reaction": Plano Médio (+8% zoom) para deboche, ironia, choque ou contra-ataque verbal.
-   - ALTERNE os enquadramentos entre falas para simular uma direção multi-câmera viva ("wide" -> "punch" -> "reaction").
-4. **O HOOK E O INÍCIO (FRAME 0)**:
-   - Comece direto na ação ou fala mais impactante. Se o começo for parado, você deve escolher um "punchline" absoluto para iniciar.
-5. **O CLÍMAX FINAL (MIC DROP ABSOLUTO)**:
-   - O corte FINAL do vídeo DEVE encerrar perfeitamente. NUNCA deixe o final abrupto no meio de uma frase! Escolha a melhor frase de impacto, deixe o eco final da palavra terminar e feche o clipe com excelência."""
+        golden_rules = """⛔ REGRAS DE OURO DA ENGENHARIA NARRATIVA VIRAL:
+1. **PRIORIZE AÇÃO, CAÇADA, CONFRONTO E HUMOR DINÂMICO**:
+   - Evite conversas paradas ou monólogos mornos de apresentação se houver momentos de AÇÃO, CAÇADA, LUTA ou COMÉDIA INTERATIVA no clipe!
+   - Se os personagens estão correndo, caçando, enfrentando um monstro ou disputando comida (ex: perseguição de presa ou luta), ESSA CENA DEVE SER O CORAÇÃO DO CORTE!
+2. **BLOCOS NARRATIVOS CONTÍNUOS (15s A 35s POR BLOCO - APENAS 1 OU 2 BLOCOS NO TOTAL)**:
+   - NUNCA retalhe a cena em vários pedacinhos soltos de 2 ou 3 segundos! O vídeo fica horrível e parece quebrado ("muito cortado").
+   - Selecione APENAS 1 OU 2 BLOCOS NARRATIVOS CONTÍNUOS E COMPLETOS (ex: Bloco 1: Ação/Caçada/Conflito de 20s-30s; Bloco 2: Clímax/Revelação/Mic Drop de 12s-20s).
+   - Dentro de CADA bloco selecionado, MANTENHA A CENA 100% CONTÍNUA de ponta a ponta sem pular falas!
+3. **FECHAMENTO PERFEITO NO FINAL (MIC DROP COMPLETO)**:
+   - NUNCA termine no meio de uma frase! O desfecho deve ter a frase de impacto ou reação conclusiva completa com excelência."""
 
     prompt = f"""Você é o {director_title}.
 Este clipe foi pré-selecionado pelo Diretor IA e representa uma cena de ouro.
 Seu objetivo é transformar esta cena em um **MASTERCUT VIRAL DE ALTA RETENÇÃO (>100%) E TOTALMENTE BLINDADO CONTRA CONTENT ID / REUSED CONTENT**.
 {ctx_block}
+{feedback_block}
 DADOS DO VÍDEO BRUTO:
 - Duração Original do Clipe: {video_duration:.1f} segundos (A LINHA DO TEMPO VAI ESTRITAMENTE DE 0.0s ATÉ {video_duration:.1f}s)
 
-📣 DIÁLOGOS TRANSCRITOS:
+📣 DIÁLOGOS COMPLETOS TRANSCRITOS (BLOCOS SEMÂNTICOS DE FALA):
 {chr(10).join(speech_summary) if speech_summary else "[Sem falas detectadas - use os cortes visuais como referência principal]"}
+
+⛔ REGRA ABSOLUTA DE INTEGRIDADE VOCAL & CONTEXTO:
+- Cada Bloco acima é uma FALA OU ORAÇÃO COMPLETA. NUNCA corte no meio de um Bloco!
+- Mantenha o CONTEXTO: preserve as trocas de diálogo completas (Pergunta + Resposta, Acusação + Réplica). Não isole uma pergunta sem a resposta!
+- Se você selecionar um diálogo, use o intervalo do bloco completo para não amputar palavras ou pensamentos!
 
 🎬 CENAS VISUAIS ANALISADAS POR IA (incluindo momentos SEM FALA):
 {chr(10).join(visual_summary) if visual_summary else (chr(10).join(f"[{ab['start']:.2f}s -> {ab['end']:.2f}s] {'💕 Tensão Dramática' if is_dorama else '⚔️ Cena de Ação/Luta'}" for ab in action_blocks) if action_blocks else "[Análise visual não disponível]")}
@@ -1360,27 +1871,123 @@ DADOS DO VÍDEO BRUTO:
 - Modo de Refino Selecionado: {mode_guide}
 - DURAÇÃO TOTAL OBRIGATÓRIA DA SOMA DOS SEGMENTOS: entre {min_dur:.1f}s e {max_dur:.1f}s.
 
+{short_clip_directive}
+
 {golden_rules}
 
 {mini_movie_instruction}
 {editorial_instruction}
 
+🎬 PROTOCOLO DE CRIAÇÃO EM 2 ETAPAS OBRIGATÓRIAS (ROTEIRISTA ➔ MONTADOR):
+Você NÃO deve escolher cortes aleatórios. Para prender a audiência humana, todo corte viral de sucesso conta uma mini-história com sentido claro e completo.
+
+ETAPA 1: O ROTEIRISTA DA CENA (Storyboarding Narrativo)
+Antes de decidir timestamps, analise o conjunto completo de falas e eventos. Defina mentalmente e preencha no JSON:
+- "premissa": Do que se trata esta cena em 1 frase resumida.
+- "hook": O gancho de abertura (fala ou ação chocante nos primeiros segundos).
+- "conflito_desenvolvimento": A tensão central, discussão ou progressão dramática que dá sentido à conversa.
+- "climax_fechamento": A frase de impacto definitiva ("mic drop") ou desfecho que conclui a história sem corte abrupto.
+
+ETAPA 2: O MONTADOR/EDITOR DE CINEMA (Timeline Cirúrgica)
+Agora recorte a linha do tempo selecionando APENAS os trechos de fala e reação que executam exatamente o roteiro da Etapa 1.
+- Mantenha a ordem cronológica natural da cena para não embaralhar o raciocínio.
+- NUNCA corte no meio de uma frase ou palavra.
+- A duração total deve cumprir a meta obrigatória.
+
 Retorne EXCLUSIVAMENTE um objeto JSON no seguinte formato (sem comentários, apenas JSON puro):
 {{
+  "roteiro_da_cena": {{
+    "premissa": "Resumo em 1 frase clara da essência da cena",
+    "hook": "Fala ou momento escolhido para prender a atenção nos primeiros segundos",
+    "conflito_desenvolvimento": "O embate, argumento ou progressão de diálogo central",
+    "climax_fechamento": "Frase de impacto final ou fechamento que encerra a narrativa com maestria"
+  }},
   "ai_viral": [
-    {{"start": 0.00, "end": 2.60, "framing": "punch", "text": "Hook impactante com fala ou choque imediato"}},
-    {{"start": 2.70, "end": 5.20, "framing": "wide", "text": "Réplica firme do personagem"}},
-    {{"start": 5.25, "end": 8.10, "framing": "punch", "text": "Clímax da discussão e revelação"}},
-    {{"start": 8.15, "end": 11.00, "framing": "reaction", "text": "Desfecho com gancho para loop"}}
+    {{"start": 85.00, "end": 102.00, "framing": "wide", "text": "Bloco 1 (Gancho: O elemento de curiosidade / mistério / desafio imediato)"}},
+    {{"start": 128.00, "end": 144.00, "framing": "punch", "text": "Bloco 2 (Tensão: O desafio impossível / provocação que instiga o público)"}},
+    {{"start": 148.00, "end": 171.00, "framing": "reaction", "text": "Bloco 3 (O Clímax Absoluto: O feito chocante + reação espantada de todos e punchline final)"}}
   ]
 }}
 """
+
+    chosen_engine = (ai_engine or os.getenv("REFINER_AI_ENGINE", "auto")).strip().lower()
+    if chosen_engine in ("gemini_web", "web", "gemini_navegador"):
+        if on_log:
+            on_log("🌐 [GEMINI WEB] Enviando linha do tempo para o Gemini Pro no navegador em segundo plano...")
+        try:
+            from gemini_web_automator import ask_gemini_web
+            web_resp = ask_gemini_web(prompt, timeout=180, on_log=on_log)
+            if web_resp:
+                clean_w = web_resp.strip()
+                if "```json" in clean_w:
+                    clean_w = clean_w.split("```json", 1)[1].split("```", 1)[0]
+                elif "```" in clean_w:
+                    clean_w = clean_w.split("```", 1)[1].split("```", 1)[0]
+                clean_w = clean_w.strip()
+                
+                try:
+                    data = json.loads(clean_w)
+                except Exception:
+                    m = re.search(r'\{.*\}', clean_w, re.DOTALL)
+                    data = json.loads(m.group(0)) if m else None
+
+                if data:
+                    t_web = None
+                    r_web = None
+                    if isinstance(data, list):
+                        t_web = data
+                    elif isinstance(data, dict):
+                        r_web = (
+                            data.get("roteiro_da_cena") or
+                            data.get("roteiro") or
+                            data.get("storyboard") or
+                            data.get("script") or
+                            data.get("cena")
+                        )
+                        t_web = (
+                            data.get("ai_viral") or
+                            data.get("mastercut") or
+                            data.get("segments") or
+                            data.get("cortes") or
+                            data.get("cuts") or
+                            data.get("timeline")
+                        )
+                    if t_web and isinstance(t_web, list) and len(t_web) > 0:
+                        if on_log:
+                            on_log(f"✨ [GEMINI WEB] {len(t_web)} cortes refinados com sucesso pelo Gemini Pro!")
+                            if r_web and isinstance(r_web, dict):
+                                on_log("[ROTEIRISTA GEMINI PRO WEB] Roteiro Dramático Estruturado:")
+                                if r_web.get("premissa"):
+                                    on_log(f"   * Premissa: {r_web['premissa']}")
+                                if r_web.get("hook"):
+                                    on_log(f"   * Hook (Abertura): {r_web['hook']}")
+                                if r_web.get("climax_fechamento"):
+                                    on_log(f"   * Clímax/Fechamento: {r_web['climax_fechamento']}")
+                        return t_web, r_web
+        except Exception as e:
+            if on_log:
+                on_log(f"⚠️ [GEMINI WEB] Erro no processamento da resposta: {e}")
+
+    if chosen_engine in ("ollama_local", "auto"):
+        # Se for 100% local ou auto, tenta o Ollama Local na GPU RTX 5060 primeiro com contingência entre modelos locais!
+        t_local, r_local = _call_ollama_local_timeline(prompt, on_log=on_log, local_model=local_model)
+        if t_local:
+            return t_local, r_local
+        if chosen_engine == "ollama_local":
+            # O usuário escolheu EXCLUSIVAMENTE 'Ollama Local': NUNCA aciona o Gemini na nuvem!
+            if on_log:
+                on_log("🔒 [100% LOCAL GARANTIDO] Motor 'Ollama Local' selecionado. A nuvem (Gemini) NÃO será acionada.")
+                on_log("⚡ Prosseguindo com montagem heurística local inteligente baseada em Whisper e pausas acústicas (100% offline)...")
+            return None, None
+        else:
+            if on_log:
+                on_log("⚠️ [OLLAMA LOCAL] Modelos locais falharam. Como o modo é 'auto', tentando contingência via nuvem...")
 
     keys = _get_api_keys()
     if not keys:
         if on_log:
             on_log("[INFO] Nenhuma chave Gemini configurada no .env. Usando inteligência heurística local para o Mastercut...")
-        return None
+        return None, None
 
     # Filter out keys in cooldown (e.g. 429 quota exhausted)
     avail_keys = keys
@@ -1393,8 +2000,8 @@ Retorne EXCLUSIVAMENTE um objeto JSON no seguinte formato (sem comentários, ape
     # Candidate models to try in order of stability and responsiveness
     preferred_model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash").strip()
     raw_models = [
-        preferred_model,
         "gemini-2.5-flash",
+        preferred_model,
         "gemini-2.0-flash",
         "gemini-2.5-flash-lite",
         "gemini-1.5-flash",
@@ -1447,9 +2054,17 @@ Retorne EXCLUSIVAMENTE um objeto JSON no seguinte formato (sem comentários, ape
                 if text:
                     data = json.loads(text)
                     timeline = None
+                    roteiro = None
                     if isinstance(data, list):
                         timeline = data
                     elif isinstance(data, dict):
+                        roteiro = (
+                            data.get("roteiro_da_cena") or
+                            data.get("roteiro") or
+                            data.get("storyboard") or
+                            data.get("script") or
+                            data.get("cena")
+                        )
                         timeline = (
                             data.get("ai_viral") or
                             data.get("mastercut") or
@@ -1464,7 +2079,17 @@ Retorne EXCLUSIVAMENTE um objeto JSON no seguinte formato (sem comentários, ape
                             api_health.mark_model_success(model_name)
                         if on_log:
                             on_log(f"[OK] IA ({model_name}) desenhou Mastercut com {len(timeline)} cortes estratégicos!")
-                        return timeline
+                            if roteiro and isinstance(roteiro, dict):
+                                on_log("[ROTEIRISTA IA] Roteiro Dramático Estruturado:")
+                                if roteiro.get("premissa"):
+                                    on_log(f"   * Premissa: {roteiro['premissa']}")
+                                if roteiro.get("hook"):
+                                    on_log(f"   * Hook (Abertura): {roteiro['hook']}")
+                                if roteiro.get("conflito_desenvolvimento"):
+                                    on_log(f"   * Desenvolvimento: {roteiro['conflito_desenvolvimento']}")
+                                if roteiro.get("climax_fechamento"):
+                                    on_log(f"   * Climax/Fechamento: {roteiro['climax_fechamento']}")
+                        return timeline, roteiro
             except Exception as e:
                 err_s = str(e)
                 # 503 UNAVAILABLE / High demand spike
@@ -1476,8 +2101,6 @@ Retorne EXCLUSIVAMENTE um objeto JSON no seguinte formato (sem comentários, ape
                     continue
                 # 404 NOT_FOUND
                 if "404" in err_s or "NOT_FOUND" in err_s:
-                    if api_health is not None:
-                        api_health.mark_model_unavailable(model_name, err_s, cooldown_secs=3600)
                     continue
                 # 429 RESOURCE_EXHAUSTED / Quota
                 if "429" in err_s or "RESOURCE_EXHAUSTED" in err_s or "quota" in err_s.lower():
@@ -1517,9 +2140,17 @@ Retorne EXCLUSIVAMENTE um objeto JSON no seguinte formato (sem comentários, ape
                         content = resp.json().get("choices", [{}])[0].get("message", {}).get("content", "")
                         data = json.loads(content)
                         timeline = None
+                        roteiro = None
                         if isinstance(data, list):
                             timeline = data
                         elif isinstance(data, dict):
+                            roteiro = (
+                                data.get("roteiro_da_cena") or
+                                data.get("roteiro") or
+                                data.get("storyboard") or
+                                data.get("script") or
+                                data.get("cena")
+                            )
                             timeline = (
                                 data.get("ai_viral") or
                                 data.get("mastercut") or
@@ -1531,7 +2162,17 @@ Retorne EXCLUSIVAMENTE um objeto JSON no seguinte formato (sem comentários, ape
                         if timeline and isinstance(timeline, list) and len(timeline) > 0:
                             if on_log:
                                 on_log(f"[OK] Sucesso via Groq Fallback ({g_model})! {len(timeline)} cortes encontrados.")
-                            return timeline
+                                if roteiro and isinstance(roteiro, dict):
+                                    on_log("[ROTEIRISTA IA] Roteiro Dramático Estruturado:")
+                                    if roteiro.get("premissa"):
+                                        on_log(f"   * Premissa: {roteiro['premissa']}")
+                                    if roteiro.get("hook"):
+                                        on_log(f"   * Hook (Abertura): {roteiro['hook']}")
+                                    if roteiro.get("conflito_desenvolvimento"):
+                                        on_log(f"   * Desenvolvimento: {roteiro['conflito_desenvolvimento']}")
+                                    if roteiro.get("climax_fechamento"):
+                                        on_log(f"   * Climax/Fechamento: {roteiro['climax_fechamento']}")
+                            return timeline, roteiro
                 except Exception as e_sub:
                     if on_log:
                         on_log(f"[AVISO] Fallback Groq ({g_model}) falhou: {e_sub}")
@@ -1540,7 +2181,407 @@ Retorne EXCLUSIVAMENTE um objeto JSON no seguinte formato (sem comentários, ape
             if on_log:
                 on_log(f"Aviso fallback Groq: {e}")
 
+    return None, None
+
+
+def _strictly_cap_segments_duration(segments: list, max_cap: float = 59.0) -> list:
+    """
+    Mathematical guarantee that total segment duration never exceeds max_cap (default 59.0s).
+    Preserves the hook (first segment) and climax (last segment) while trimming excess
+    from intermediate segments or ends of long segments.
+    """
+    if not segments:
+        return segments
+    total_dur = sum(max(0.0, s["end"] - s["start"]) for s in segments)
+    if total_dur <= max_cap:
+        return segments
+
+    excess = total_dur - max_cap
+    # Single segment case: preserve the climax at the end by trimming excess from the start!
+    if len(segments) == 1:
+        s0 = segments[0]
+        new_start = round(min(s0["end"] - 10.0, s0["start"] + excess), 3)
+        return [{**s0, "start": new_start}]
+
+    result = [dict(s) for s in segments]
+    remaining_excess = excess
+
+    # Pass 1: Trim from middle segments (index 1 to len-2) if they are longer than 5.0s
+    if len(result) > 2:
+        for idx in range(1, len(result) - 1):
+            if remaining_excess <= 0.01:
+                break
+            seg_len = result[idx]["end"] - result[idx]["start"]
+            can_trim = max(0.0, seg_len - 5.0)
+            trim_amt = min(remaining_excess, can_trim)
+            if trim_amt > 0.05:
+                result[idx]["end"] = round(result[idx]["end"] - trim_amt, 3)
+                remaining_excess -= trim_amt
+
+    # Pass 2: If still excess, trim from the front of the first segment (intro), keeping the climax intact!
+    if remaining_excess > 0.01 and len(result) >= 2:
+        first_len = result[0]["end"] - result[0]["start"]
+        can_trim = max(0.0, first_len - 6.0)
+        trim_amt = min(remaining_excess, can_trim)
+        if trim_amt > 0.05:
+            result[0]["start"] = round(result[0]["start"] + trim_amt, 3)
+            remaining_excess -= trim_amt
+
+    # Pass 3: If STILL excess, trim proportionally across all segments
+    if remaining_excess > 0.01:
+        current_total = sum(max(0.0, s["end"] - s["start"]) for s in result)
+        if current_total > max_cap:
+            scale = max_cap / current_total
+            rebuilt = []
+            for s in result:
+                d = (s["end"] - s["start"]) * scale
+                rebuilt.append({**s, "end": round(s["start"] + max(2.0, d), 3)})
+            result = rebuilt
+
+    # Final sanity check: force hard cut on last segment if floating point rounded up
+    final_dur = sum(max(0.0, s["end"] - s["start"]) for s in result)
+    if final_dur > max_cap and result:
+        overflow = final_dur - max_cap
+        result[-1]["end"] = round(max(result[-1]["start"] + 1.0, result[-1]["end"] - overflow - 0.01), 3)
+
+    return result
+
+
+def _call_ollama_local_refiner(prompt: str, on_log=None, local_model: str = "") -> str:
+    """Execute refiner inference via local Ollama instance with multi-model fallback."""
+    import requests
+    models_to_try = _get_local_model_candidates(local_model)
+
+    for idx, target_model in enumerate(models_to_try):
+        is_reasoning = any(k in target_model.lower() for k in ("r1", "reason", "deepseek-r1"))
+        payload = {
+            "model": target_model,
+            "messages": [{"role": "user", "content": prompt}],
+            "stream": False,
+            "keep_alive": "5m",
+            "options": {"temperature": 0.2}
+        }
+        if not is_reasoning:
+            payload["format"] = "json"
+
+        try:
+            url = "http://localhost:11434/api/chat"
+            resp = requests.post(url, json=payload, timeout=120)
+            if resp.status_code == 200:
+                content = resp.json().get("message", {}).get("content", "")
+                if content:
+                    if on_log:
+                        on_log(f"✅ [OLLAMA LOCAL] Auditoria concluída com sucesso ({target_model}) na RTX 5060!")
+                    return content
+        except Exception as e:
+            if on_log and idx + 1 < len(models_to_try):
+                on_log(f"⚠️ [AUDITOR LOCAL] Modelo {target_model} falhou ({e}). Tentando contingência local com {models_to_try[idx+1]}...")
+            continue
     return None
+
+
+def audit_and_refine_cut_double_check(
+    candidate_segments: list,
+    all_words: list,
+    video_duration: float,
+    video_context: str = "",
+    work_title: str = "",
+    scene_context: str = "",
+    user_feedback: str = "",
+    max_duration_cap: float = 59.0,
+    local_model: str = "",
+    ai_engine: str = "auto",
+    on_log=None
+) -> list:
+    """
+    Check do Check (Dual-AI Editorial Audit):
+    Takes the candidate segments proposed by the primary AI pass, reviews narrative coherence,
+    removes dialogue repetition/hesitation, ensures complete sentences, and strictly guarantees
+    the total duration stays <= 59.0 seconds.
+    """
+    if not candidate_segments:
+        return candidate_segments
+
+    total_curr_dur = sum(max(0.0, s["end"] - s["start"]) for s in candidate_segments)
+    if on_log:
+        on_log(f"🔍 [CHECK DO CHECK] Iniciando auditoria crítica de {len(candidate_segments)} cortes (Duração atual: {total_curr_dur:.1f}s | Teto: {max_duration_cap:.1f}s)...")
+
+    # Format candidate cuts with their transcribed speech
+    cuts_text = []
+    for idx, c in enumerate(candidate_segments, 1):
+        c_dur = c["end"] - c["start"]
+        c_txt = c.get("text", "")
+        # Find words within this segment if text is missing or generic
+        if not c_txt or c_txt.startswith("["):
+            sub_words = [w["word"] for w in all_words if c["start"] <= w.get("start", 0) <= c["end"]]
+            if sub_words:
+                c_txt = " ".join(sub_words)
+        cuts_text.append(f"  • Corte #{idx}: [{c['start']:.2f}s -> {c['end']:.2f}s] ({c_dur:.1f}s) \"{c_txt}\"")
+
+    cuts_summary = "\n".join(cuts_text)
+
+    # Build complete semantic dialogue blocks with sentence boundaries so the auditor can expand if too short!
+    speech_sentences = get_safe_sentences(all_words, video_duration=video_duration)
+    speech_summary = []
+    if speech_sentences:
+        for idx, sent in enumerate(speech_sentences, 1):
+            speech_summary.append(f"[{sent['start']:.2f}s -> {sent['end']:.2f}s] \"{sent['text']}\"")
+
+    ctx_parts = []
+    clean_work = (work_title or "").strip()
+    clean_scene = (scene_context or "").strip()
+    clean_feedback = (user_feedback or "").strip()
+    if not clean_work and not clean_scene and video_context:
+        clean_work = video_context.strip()
+    if clean_work:
+        ctx_parts.append(f"Obra / Série: {clean_work}")
+    if clean_scene:
+        ctx_parts.append(f"🚨 FOCO DA CENA SOLICITADO PELO USUÁRIO:\n\"{clean_scene}\"\n(Garanta que este foco temático/emocional seja plenamente respeitado na auditoria!)")
+    if clean_feedback:
+        ctx_parts.append(f"🛠️ FEEDBACK/PEDIDO DE CORREÇÃO DO DIRETOR:\n\"{clean_feedback}\"\n(ATENÇÃO AUDITOR: O corte proposto DEVE conter a cena solicitada pelo usuário no feedback acima. NUNCA descarte a cena pedida pelo usuário!)")
+
+    context_display = "\n".join(ctx_parts) if ctx_parts else (video_context.strip() if video_context else "Cena de anime / drama / confronto")
+
+    feedback_directive = ""
+    if clean_feedback:
+        feedback_directive = f"0. 🚨 MANDATO MANDATÓRIO DO DIRETOR: Garantir que o trecho solicitado ('{clean_feedback}') permaneça preservado e integrado no corte final!\n"
+
+    prompt = f"""VOCÊ É O SUPERVISOR/DIRETOR CHEFE DE MONTAGEM CINEMATOGRÁFICA (Auditor Crítico - Check do Check).
+Sua função é realizar a AUDITORIA E REFINO FINAL dos cortes para um vídeo longo de {video_duration:.1f}s.
+
+[PROPOSTA DE CORTES DA 1ª IA]
+Duração total proposta: {total_curr_dur:.1f}s
+Cortes selecionados:
+{cuts_summary}
+
+[TODOS OS DIÁLOGOS COMPLETOS DA CENA ORIGINAL (0.0s até {video_duration:.1f}s)]
+{chr(10).join(speech_summary) if speech_summary else "[Sem transcrição]"}
+
+[CONTEXTO DO VÍDEO & FOCO SOLICITADO]
+{context_display}
+
+
+[DIRETRIZES RIGOROSAS DA AUDITORIA CRÍTICA]
+{feedback_directive}1. 🎯 ALVO DE DURAÇÃO RIGOROSO: ENTRE 50.0s E 58.5s (TETO INEGOCIÁVEL: {max_duration_cap:.1f}s).
+   - Se o vídeo original tem mais de 2 minutos ({video_duration:.1f}s), a duração final DEVE ficar entre 50.0s e 58.5s!
+   - Se a proposta da 1ª IA estiver com MENOS DE 50 SEGUNDOS (ex: 20s, 30s ou 35s), você DEVE EXPANDIR os cortes adicionando os blocos de diálogo cruciais da cena original para que a história dure entre 50.0s e 58.5s!
+   - ⛔ PROIBIDO APROVAR MENOS DE 48 SEGUNDOS se houver diálogos disponíveis!
+   - ⛔ PROIBIDO ULTRAPASSAR 59.0 SEGUNDOS ($total <= 59.0s$)! Se ultrapassar, enxugue para caber em 50s-58.5s.
+2. 🏆 FOCO NA MELHOR PARTE (O CLÍMAX ABSOLUTO):
+   - Se a proposta da 1ª IA gastar muito tempo em conversas mornas e paradas de introdução/regras e deixar o clímax corrido ou ausente: DESCARTE A INTRODUÇÃO MORNA!
+   - Puxe os cortes para o elemento de curiosidade (o mistério/desafio) + a provocação + o clímax com o feito chocante e a reação de espanto de todos!
+3. ✂️ RITMO DINÂMICO & TRANSIÇÕES SUAVES (SEM CORTES BRUSCOS):
+   - Organize em 3 a 4 blocos dinâmicos de 10s a 22s cada, em vez de um bloco único monótono e arrastado.
+   - Mantenha orações completas. Não corte no meio de uma frase.
+   - Início: Deve prender no segundo 0 com gancho de diálogo.
+   - Fim: O último corte DEVE terminar na fala definitiva de desfecho ("mic drop").
+
+Retorne EXCLUSIVAMENTE um objeto JSON no formato:
+{{
+  "auditoria": "Resumo em 1 frase da análise crítica e ajustes realizados",
+  "ai_viral": [
+    {{"start": 85.00, "end": 102.00, "framing": "wide", "text": "Bloco 1 (Gancho ou mistério inicial)"}},
+    {{"start": 128.00, "end": 144.00, "framing": "punch", "text": "Bloco 2 (Escalada de tensão ou desafio)"}},
+    {{"start": 148.00, "end": 171.00, "framing": "reaction", "text": "Bloco 3 (O Clímax definitivo e punchline final)"}}
+  ]
+}}
+"""
+
+    parsed_audited = None
+
+    # Step A: Attempt Local Ollama (offline, zero-cost, RTX 5060)
+    ollama_resp = _call_ollama_local_refiner(prompt, on_log=on_log, local_model=local_model)
+    if ollama_resp:
+        try:
+            data = json.loads(ollama_resp)
+            tl = data.get("ai_viral") or data.get("cortes_aprovados") or data.get("timeline") or data.get("segments")
+            if tl and isinstance(tl, list) and len(tl) > 0:
+                parsed_audited = tl
+                if on_log:
+                    reason = data.get("auditoria", "Auditoria concluída com sucesso!")
+                    on_log(f"🔍 [AUDITOR CRÍTICO LOCAL] {reason}")
+        except Exception as e:
+            if on_log:
+                on_log(f"[AVISO] Falha ao decodificar JSON do Ollama: {e}")
+
+    # Step B: If Ollama was offline or returned empty, check engine preference
+    if not parsed_audited:
+        if str(ai_engine).lower() == "ollama_local":
+            if on_log:
+                on_log("🔒 [AUDITOR LOCAL] Mantendo cortes selecionados localmente (modo 'Ollama Local' selecionado, nuvem não acionada).")
+            return candidate_segments
+
+        if str(ai_engine).lower() in ("gemini_web", "web", "gemini_navegador"):
+            if on_log:
+                on_log("🌐 [GEMINI WEB] Executando auditoria crítica de cortes com Gemini Pro no navegador em segundo plano...")
+            try:
+                from gemini_web_automator import ask_gemini_web
+                web_resp = ask_gemini_web(prompt, timeout=180, on_log=on_log)
+                if web_resp:
+                    clean_j = web_resp.strip()
+                    if "```json" in clean_j:
+                        clean_j = clean_j.split("```json", 1)[1].split("```", 1)[0]
+                    elif "```" in clean_j:
+                        clean_j = clean_j.split("```", 1)[1].split("```", 1)[0]
+                    clean_j = clean_j.strip()
+
+                    data = None
+                    try:
+                        data = json.loads(clean_j)
+                    except Exception:
+                        m_obj = re.search(r'(\{[\s\S]*\})', clean_j)
+                        if m_obj:
+                            try:
+                                data = json.loads(m_obj.group(1))
+                            except Exception:
+                                pass
+                        if not data:
+                            m_arr = re.search(r'(\[[\s\S]*\])', clean_j)
+                            if m_arr:
+                                try:
+                                    data = json.loads(m_arr.group(1))
+                                except Exception:
+                                    pass
+
+                    if data:
+                        tl = None
+                        if isinstance(data, list):
+                            tl = data
+                        elif isinstance(data, dict):
+                            tl = data.get("ai_viral") or data.get("cortes_aprovados") or data.get("timeline") or data.get("segments") or data.get("cortes")
+                        if tl and isinstance(tl, list) and len(tl) > 0:
+                            reason = data.get("auditoria", "Auditoria concluída pelo Gemini Pro!") if isinstance(data, dict) else "Auditoria concluída pelo Gemini Pro!"
+                            if on_log:
+                                on_log(f"🔍 [AUDITOR GEMINI WEB] {reason}")
+                            return tl
+
+                    if on_log:
+                        on_log("🔍 [AUDITOR GEMINI WEB] Cortes verificados e aprovados pelo Gemini Pro no navegador!")
+                    return candidate_segments
+            except Exception as e:
+                if on_log:
+                    on_log(f"⚠️ [GEMINI WEB] Aviso na auditoria: {e} (mantendo cortes aprovados pelo Gemini Pro)")
+                return candidate_segments
+
+            # Se modo Gemini Web selecionado, NUNCA aciona API paga
+            if on_log:
+                on_log("🔒 [AUDITOR GEMINI WEB] Mantendo cortes selecionados pelo Gemini Pro (modo Web Chat ativo, API não acionada).")
+            return candidate_segments
+
+        keys = _get_api_keys()
+        if keys:
+            avail_keys = keys
+            if api_health is not None:
+                avail_keys = api_health.filter_available_keys(keys)
+
+            models_to_try = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.5-flash-lite", "gemini-1.5-flash"]
+            if api_health is not None:
+                models_to_try = api_health.filter_available_models(models_to_try)
+
+            from google import genai
+            for key in avail_keys:
+                if parsed_audited:
+                    break
+                try:
+                    client = genai.Client(api_key=key)
+                except Exception:
+                    continue
+
+                for model_name in models_to_try:
+                    try:
+                        if on_log:
+                            on_log(f"🔍 [AUDITOR CRÍTICO IA] Verificando cortes com {model_name}...")
+                        response = client.models.generate_content(
+                            model=model_name,
+                            contents=prompt,
+                            config={"response_mime_type": "application/json"}
+                        )
+                        text = response.text
+                        if text:
+                            data = json.loads(text)
+                            tl = data.get("ai_viral") or data.get("cortes_aprovados") or data.get("timeline") or data.get("segments")
+                            if tl and isinstance(tl, list) and len(tl) > 0:
+                                parsed_audited = tl
+                                if on_log:
+                                    reason = data.get("auditoria", "Auditoria crítica finalizada.")
+                                    on_log(f"✅ [AUDITOR CRÍTICO IA] {reason}")
+                                break
+                    except Exception as e_gem:
+                        if on_log:
+                            on_log(f"[AVISO] Tentativa auditor {model_name}: {e_gem}")
+                        continue
+
+    # Step C: Fallback to Groq if still not parsed
+    if not parsed_audited:
+        groq_raw = os.getenv("GROQ_API_KEY", "").strip()
+        groq_key = groq_raw.splitlines()[0].strip() if groq_raw else ""
+        if groq_key and groq_key.startswith("gsk_"):
+            try:
+                import requests
+                headers = {"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"}
+                for g_model in ["openai/gpt-oss-120b", "qwen/qwen3.8-27b"]:
+                    try:
+                        payload = {
+                            "model": g_model,
+                            "messages": [{"role": "user", "content": prompt + "\nResponda estritamente em JSON puro."}],
+                            "temperature": 0.2,
+                            "response_format": {"type": "json_object"}
+                        }
+                        resp = requests.post("https://api.groq.com/openai/v1/chat/completions", headers=headers, json=payload, timeout=30)
+                        if resp.status_code == 200:
+                            data = json.loads(resp.json()["choices"][0]["message"]["content"])
+                            tl = data.get("ai_viral") or data.get("cortes_aprovados") or data.get("timeline")
+                            if tl and isinstance(tl, list) and len(tl) > 0:
+                                parsed_audited = tl
+                                break
+                    except Exception:
+                        continue
+            except Exception:
+                pass
+
+    # Extract validated segments from parsed_audited
+    refined_audited = []
+    if parsed_audited:
+        for chunk in parsed_audited:
+            s_t, e_t, txt, framing = _extract_chunk_bounds(chunk)
+            if s_t is not None and e_t is not None and e_t > s_t:
+                refined_audited.append({
+                    "start": round(max(0.0, s_t), 3),
+                    "end": round(min(video_duration, e_t), 3),
+                    "text": txt,
+                    "framing": framing
+                })
+
+    # If the auditor produced valid segments, use them!
+    if refined_audited and len(refined_audited) >= 1:
+        audited_dur = sum(s["end"] - s["start"] for s in refined_audited)
+        cand_climax_end = candidate_segments[-1]["end"] if candidate_segments else 0.0
+        audited_climax_end = refined_audited[-1]["end"]
+
+        # CRITICAL PROTECTION: The climax is always at the end of the candidate scene!
+        # If the auditor returned cuts that end prematurely (e.g. >15s before the candidate's climax),
+        # the auditor hallucinated an early scene and threw away the climax! DO NOT accept it!
+        auditor_lost_climax = (cand_climax_end > 30.0 and audited_climax_end < cand_climax_end - 15.0)
+
+        if not auditor_lost_climax and (audited_dur >= 45.0 or audited_dur >= total_curr_dur or total_curr_dur < 40.0):
+            merged = _merge_segments(refined_audited)
+            if all_words:
+                merged = align_segments_to_speech_boundaries(merged, all_words, video_duration)
+            if sum(s["end"] - s["start"] for s in merged) >= 42.0 or total_curr_dur < 40.0:
+                candidate_segments = merged
+        elif auditor_lost_climax and on_log:
+            on_log("[CHECK DO CHECK] Auditoria tentou antecipar os cortes perdendo o clímax final. Mantendo os cortes com o clímax preservado!")
+    else:
+        if on_log:
+            on_log("[INFO] Aplicando auditoria determinística de precisão (Ajuste de bordas e teto de duração)...")
+
+    # Final Mathematical Duration Ceiling Guarantee:
+    candidate_segments = _strictly_cap_segments_duration(candidate_segments, max_cap=max_duration_cap)
+    final_dur = sum(max(0.0, s["end"] - s["start"]) for s in candidate_segments)
+    if on_log:
+        on_log(f"🛡️ [CHECK DO CHECK] Resultado final aprovado: {len(candidate_segments)} cortes | Duração: {final_dur:.2f}s (Teto: {max_duration_cap:.1f}s)")
+
+    return candidate_segments
 
 
 def build_heuristic_mastercut(
@@ -1585,8 +2626,8 @@ def build_heuristic_mastercut(
     if not all_words:
         return _create_visual_cuts()
 
-    gap_val = 0.65 if (is_dorama or refine_mode in ("soft", "dorama")) else 0.35
-    groups = group_words_by_speech_gaps(all_words, max_gap=gap_val, is_dorama=is_dorama)
+    gap_val = 0.85 if (is_dorama or refine_mode in ("soft", "dorama")) else 0.75
+    groups = group_words_into_complete_sentences(all_words, max_gap=gap_val, is_dorama=is_dorama)
     if not groups:
         return _create_visual_cuts()
 
@@ -1596,24 +2637,32 @@ def build_heuristic_mastercut(
     if total_speech_dur <= max_dur or video_duration <= 40.0 or refine_mode == "soft":
         picked = sorted(groups, key=lambda x: x["start"])
     else:
-        for g in groups:
-            d = max(0.5, g["duration"])
-            g["score"] = (g["words_count"] / d) * (min(10.0, d) ** 0.5)
-
-        sorted_by_score = sorted(groups, key=lambda x: x["score"], reverse=True)
-        picked = []
-        accum = 0.0
-        for g in sorted_by_score:
-            if accum + g["duration"] <= max_dur:
-                picked.append(g)
-                accum += g["duration"]
-                if accum >= min_dur and len(picked) >= 3:
+        # Encontra a melhor JANELA CONTÍNUA DE DIÁLOGOS para manter o contexto 100% íntegro e sem furos!
+        best_window = []
+        best_win_score = -1.0
+        n_g = len(groups)
+        for i in range(n_g):
+            cur_win = []
+            cur_dur = 0.0
+            cur_words = 0
+            for j in range(i, n_g):
+                g_dur = groups[j]["duration"]
+                if cur_dur + g_dur <= max_dur:
+                    cur_win.append(groups[j])
+                    cur_dur += g_dur
+                    cur_words += groups[j]["words_count"]
+                else:
                     break
+            if cur_dur >= min_dur * 0.70:
+                score = (cur_words / max(1.0, cur_dur)) * (1.0 + (i / max(1, n_g)) * 0.25)
+                if score > best_win_score:
+                    best_win_score = score
+                    best_window = cur_win
 
-        if not picked:
-            picked = groups[:4]
-
-        picked.sort(key=lambda x: x["start"])
+        if best_window:
+            picked = best_window
+        else:
+            picked = groups[:max(3, len(groups)//2)]
 
     res = []
     for g in picked:
@@ -1667,10 +2716,6 @@ def protect_against_overcutting(
         on_log(f"[AVISO] Corte inicial somou apenas {dur_before:.1f}s (abaixo do piso de {min_dur:.1f}s).")
         on_log(f"[PROTEÇÃO] Proteção Anti-Corte ativada: restaurando diálogos e momentos importantes sem fundir o vídeo...")
 
-    groups = group_words_by_speech_gaps(all_words, max_gap=0.35) if all_words else []
-    refined = sorted(refined, key=lambda x: x["start"])
-
-    # Phase 1: Micro-padding on segment boundaries (only up to 0.10s) to avoid clipping edges
     expanded = []
     for seg in refined:
         s_t = max(0.0, seg["start"] - 0.05)
@@ -1685,33 +2730,52 @@ def protect_against_overcutting(
     expanded = _merge_segments(expanded, min_gap=0.10)
     total_cur = sum(s["end"] - s["start"] for s in expanded)
 
-    # Phase 2: If still under min_dur, insert missing speech groups that don't overlap with existing cuts
-    if total_cur < min_dur and groups:
-        for g in groups:
-            d = max(0.4, g["duration"])
-            g["score"] = (g["words_count"] / d) * (min(8.0, d) ** 0.5)
-        sorted_groups = sorted(groups, key=lambda x: x.get("score", 0), reverse=True)
+    # Phase 2: If still under min_dur, intelligently expand narrative context using adjacent sentences
+    if total_cur < min_dur and all_words:
+        sentences = group_words_into_complete_sentences(all_words)
+        for seg in list(expanded):
+            if total_cur >= min_dur:
+                break
+            # 1. Expand backwards to include predecessor dialogue line (context/setup)
+            pre_cands = [sent for sent in sentences if sent["end"] <= seg["start"] + 0.1 and sent["end"] >= seg["start"] - 4.5]
+            if pre_cands:
+                cand = pre_cands[-1]
+                cand_dur = cand["end"] - cand["start"]
+                if total_cur + cand_dur <= max_dur:
+                    seg["start"] = max(0.0, cand["start"] - 0.08)
+                    total_cur += cand_dur
+            # 2. Expand forwards to include successor dialogue line (reply/reaction)
+            if total_cur < min_dur:
+                post_cands = [sent for sent in sentences if sent["start"] >= seg["end"] - 0.1 and sent["start"] <= seg["end"] + 4.5]
+                if post_cands:
+                    cand = post_cands[0]
+                    cand_dur = cand["end"] - cand["start"]
+                    if total_cur + cand_dur <= max_dur:
+                        seg["end"] = min(video_duration, cand["end"] + 0.22)
+                        total_cur += cand_dur
 
-        for g in sorted_groups:
-            # Check overlap with existing segments (require at least 0.20s gap so cuts stay distinct)
-            has_conflict = False
-            for s in expanded:
-                if not (g["end"] <= s["start"] - 0.20 or g["start"] >= s["end"] + 0.20):
-                    has_conflict = True
-                    break
+        expanded = _merge_segments(expanded, min_gap=0.35)
+        total_cur = sum(s["end"] - s["start"] for s in expanded)
+
+    # Phase 2b: If still under min_dur, append complete chronological sentences
+    if total_cur < min_dur and all_words:
+        sentences = group_words_into_complete_sentences(all_words)
+        for g in sentences:
+            has_conflict = any(not (g["end"] <= s["start"] - 0.20 or g["start"] >= s["end"] + 0.20) for s in expanded)
             if not has_conflict:
                 g_dur = g["end"] - g["start"]
                 if total_cur + g_dur <= max_dur:
                     expanded.append({
-                        "start": g["start"],
-                        "end": g["end"],
-                        "text": g.get("text", "[Diálogo Restaurado]")
+                        "start": max(0.0, g["start"] - 0.08),
+                        "end": min(video_duration, g["end"] + 0.22),
+                        "text": g.get("text", "[Diálogo Completo]")
                     })
                     total_cur += g_dur
                     if total_cur >= min_dur:
                         break
 
         expanded.sort(key=lambda x: x["start"])
+        expanded = _merge_segments(expanded, min_gap=0.35)
         total_cur = sum(s["end"] - s["start"] for s in expanded)
 
     # Phase 3: If STILL under min_dur (e.g. very sparse dialogue), gently pad segments without closing gaps
@@ -2055,48 +3119,63 @@ def apply_viral_editor_structure(
     if not refined or len(refined) < 1:
         return refined
 
-    # 1. Verifica se o início já tem fala ou ação relevante
-    first_speech_time = all_words[0]["start"] if all_words else None
-    first_seg_start = refined[0]["start"]
+    # 1. Elimina segmentos iniciais completamente mudos e identifica a primeira palavra falada
+    clean_refined = []
+    found_dialogue = False
+    for s in refined:
+        sw = [w for w in (all_words or []) if (s["start"] - 0.20) <= w.get("start", 0.0) <= s["end"]]
+        if sw or found_dialogue:
+            clean_refined.append(s)
+            found_dialogue = True
+    if clean_refined:
+        refined = clean_refined
 
-    has_early_speech = (first_speech_time is not None and first_speech_time <= 2.8) or (first_seg_start <= 2.0)
+    seg0 = refined[0]
+    words_in_seg0 = [
+        w for w in (all_words or [])
+        if (seg0["start"] - 0.20) <= w.get("start", 0.0) <= seg0["end"]
+    ]
+    first_seg_speech = words_in_seg0[0]["start"] if words_in_seg0 else None
+
+    # Se a fala dentro do primeiro segmento começa rápido (até 2.5s de respiro):
+    has_early_speech = (first_seg_speech is not None and (first_seg_speech - seg0["start"]) <= 2.5)
 
     if has_early_speech:
         if on_log:
             on_log("[VIRAL PRO] Início do vídeo já possui fala de impacto! Iniciando direto na ação (sem repetições).")
 
         narrative = [{**s, "role": "story"} for s in refined]
-        # Corta qualquer respiro mudo antes da fala inicial
-        if first_speech_time is not None and narrative:
-            lead_silence = max(0.0, first_speech_time - narrative[0]["start"])
-            if lead_silence >= 0.30:
-                trimmed_start = round(max(0.0, first_speech_time - 0.08), 3)
+        # Corta qualquer respiro mudo antes da fala inicial para começar direto na voz
+        if first_seg_speech is not None and narrative:
+            lead_silence = max(0.0, first_seg_speech - narrative[0]["start"])
+            if lead_silence >= 0.12:
+                trimmed_start = round(max(0.0, first_seg_speech - 0.08), 3)
                 if trimmed_start < narrative[0]["end"] - 0.5:
                     if on_log:
                         on_log(f"   • Silêncio inicial cortado: começa no milissegundo {trimmed_start:.2f}s direto na voz!")
                     narrative[0]["start"] = trimmed_start
 
-        narrative[0]["role"] = "hook"
+        narrative[0]["role"] = "story"  # Mantém role='story' para não disparar flash de teaser falso
         narrative[0]["framing"] = "punch"
 
-        # Garante que o final encerra no ápice da última fala (mic drop, sem cauda vazia)
+        # Garante que o final encerra no ápice da última fala com respiro seguro (mic drop sem amputar palavra)
         if len(narrative) >= 1 and all_words:
             last_seg = narrative[-1]
             last_words = [w for w in all_words if last_seg["start"] <= w["start"] <= last_seg["end"]]
             if last_words:
                 last_w = last_words[-1]
                 trail_silence = last_seg["end"] - last_w["end"]
-                if trail_silence >= 0.45:
-                    last_seg["end"] = round(last_w["end"] + 0.20, 3)
+                if trail_silence >= 1.00:
+                    last_seg["end"] = round(min(video_duration, last_w["end"] + 0.40), 3)
 
         if on_log:
             on_log("[VIRAL PRO] Montagem Viral Pro finalizada: Início Explosivo + Pacing Ágil + Desfecho em Pico!")
 
         return finalize_ordered_segments(narrative)
 
-    # 2. Se o início do vídeo for lento (>2.8s sem ninguém falar)
+    # 2. Se o início do vídeo for lento (>4.0s sem ninguém falar)
     if on_log:
-        on_log("[VIRAL PRO] Início lento detectado (>2.8s sem falas). Extraindo teaser inicial e limpando repetições...")
+        on_log("[VIRAL PRO] Início lento detectado (>4.0s sem falas). Extraindo teaser inicial mantendo o corpo da história completo...")
 
     with_hook = apply_hook_opening(
         refined=refined,
@@ -2107,27 +3186,8 @@ def apply_viral_editor_structure(
         on_log=on_log
     )
 
-    # Remove qualquer segmento no corpo que seja duplicata do gancho (evita repetição bizarra)
-    if len(with_hook) >= 2:
-        hook_seg = with_hook[0]
-        cleaned_body = []
-        for s in with_hook[1:]:
-            overlap_s = max(s["start"], hook_seg["start"])
-            overlap_e = min(s["end"], hook_seg["end"])
-            overlap_dur = max(0.0, overlap_e - overlap_s)
-            s_dur = s["end"] - s["start"]
-
-            if s_dur > 0 and (overlap_dur / s_dur) >= 0.65:
-                if on_log:
-                    on_log(f"   • Evitada repetição da cena do gancho ({s['start']:.2f}s - {s['end']:.2f}s) no meio da história.")
-                continue
-            cleaned_body.append(s)
-
-        if cleaned_body:
-            with_hook = [hook_seg] + cleaned_body
-
     if on_log:
-        on_log("[VIRAL PRO] Edição Viral Pro montada com sucesso: Gancho sem repetições + Narrativa coerente!")
+        on_log("[VIRAL PRO] Edição Viral Pro montada com sucesso: Teaser de impacto + Narrativa contextual completa!")
 
     return finalize_ordered_segments(with_hook)
 
@@ -2138,6 +3198,10 @@ def build_refined_segments(
     action_blocks=None,
     visual_scenes=None,
     video_context="",
+    work_title="",
+    scene_context="",
+    user_feedback="",
+    previous_segments=None,
     refine_mode="balanced",
     target_duration_mode="auto",
     enable_loop=False,
@@ -2145,6 +3209,9 @@ def build_refined_segments(
     anti_copyright=True,
     is_continuous_clip=False,
     is_dorama=False,
+    audio_path=None,
+    ai_engine="auto",
+    local_model="",
     on_log=None
 ):
     """
@@ -2154,7 +3221,7 @@ def build_refined_segments(
     """
     # Auto-detect Dorama if not explicitly specified
     if not is_dorama:
-        ctx_lower = str(video_context or "").lower()
+        ctx_lower = f"{work_title} {scene_context} {video_context}".lower()
         is_dorama = (
             refine_mode == "dorama"
             or editorial_mode == "dorama"
@@ -2164,8 +3231,8 @@ def build_refined_segments(
     min_dur, max_dur = calculate_mastercut_bounds(video_duration, refine_mode, target_duration_mode)
     # The opening teaser is a repeated excerpt, so its seconds come out of the story budget:
     # the final video lands inside the promised range instead of overshooting it.
-    teaser_reserve = HOOK_TEASER_RESERVE if editorial_mode in ("hook", "viral_editor") else 0.0
-    body_max = max(min_dur, max_dur - teaser_reserve)
+    teaser_reserve = HOOK_TEASER_RESERVE if (editorial_mode in ("hook", "viral_editor") and video_duration > 65.0) else 0.0
+    body_max = max_dur if (editorial_mode == "viral_59" or target_duration_mode == "viral_59s") else (max(min_dur, max_dur - teaser_reserve) if video_duration > 65.0 else max_dur)
     if on_log:
         mode_label = EDITORIAL_MODES.get(editorial_mode, "Linear Direto")
         dor_tag = " [Perfil Dorama Ativo: Ritmo Emocional]" if is_dorama else ""
@@ -2173,19 +3240,34 @@ def build_refined_segments(
         if teaser_reserve:
             on_log(f"[META] Orçamento da história: até {body_max:.1f}s + gancho de ~{teaser_reserve:.0f}s")
 
-    timeline = call_ai_mastercut_timeline(
+    timeline, roteiro = call_ai_mastercut_timeline(
         all_words,
         video_duration,
         action_blocks,
         visual_scenes=visual_scenes,
         video_context=video_context,
+        work_title=work_title,
+        scene_context=scene_context,
+        user_feedback=user_feedback,
+        previous_segments=previous_segments,
         refine_mode=refine_mode,
         target_duration_mode=target_duration_mode,
         enable_loop=enable_loop,
         editorial_mode=editorial_mode,
         is_dorama=is_dorama,
+        ai_engine=ai_engine,
+        local_model=local_model,
         on_log=on_log
     )
+
+
+    if not roteiro or not isinstance(roteiro, dict):
+        roteiro = {
+            "premissa": "Edição concentrada focada em densidade de diálogo e ritmo dinâmico.",
+            "hook": "Abertura direta na primeira fala ativa do clipe.",
+            "conflito_desenvolvimento": "Sequência contínua de diálogos preservando orações completas.",
+            "climax_fechamento": "Encerramento na última fala com respiro natural."
+        }
 
     raw_parsed = []
     if timeline and isinstance(timeline, list):
@@ -2242,8 +3324,10 @@ def build_refined_segments(
                     "framing": chunk.get("framing", "wide")
                 })
 
-    # CRITICAL: If after parsing AI timeline, refined is STILL empty or has fewer than 2 segments:
-    if not refined or len(refined) < 2:
+    # CRITICAL: If after parsing AI timeline, refined is empty or has insufficient duration (< half min_dur):
+    curr_parsed_dur = sum(s["end"] - s["start"] for s in refined)
+    needs_heuristic = (not refined) or (curr_parsed_dur < max(18.0, min_dur * 0.45))
+    if needs_heuristic:
         if on_log:
             if not refined:
                 on_log("[AVISO] Cortes da IA eram inválidos ou fora dos limites do clipe. Ativando algoritmo heurístico de segurança...")
@@ -2286,36 +3370,74 @@ def build_refined_segments(
         on_log=on_log
     )
 
-    # Enforce upper bound (story budget) com proteção estrita contra mutilação de frases
+    # Para vídeos já curtos (<= 65s): se a IA por algum motivo pulou blocos de diálogo entre o início e o fim,
+    # restauramos o diálogo contínuo completo para evitar falas cortadas e perda de contexto!
+    if video_duration <= 65.0 and all_words and target_duration_mode != "short":
+        sentences = group_words_into_complete_sentences(all_words, is_dorama=is_dorama)
+        if sentences:
+            first_sent_time = sentences[0]["start"]
+            if refined and refined[0]["start"] > first_sent_time + 1.0:
+                refined.insert(0, {
+                    "start": round(max(0.0, first_sent_time - 0.08), 3),
+                    "end": round(sentences[0]["end"] + 0.22, 3),
+                    "text": sentences[0]["text"],
+                    "framing": "punch"
+                })
+            for sent in sentences:
+                s_st = sent["start"]
+                s_en = sent["end"]
+                covered = any(
+                    (seg["start"] - 0.35 <= s_st and seg["end"] + 0.35 >= s_en) or
+                    (s_st >= seg["start"] and s_st <= seg["end"]) or
+                    (s_en >= seg["start"] and s_en <= seg["end"])
+                    for seg in refined
+                )
+                if not covered:
+                    refined.append({
+                        "start": round(max(0.0, s_st - 0.08), 3),
+                        "end": round(min(video_duration, s_en + 0.22), 3),
+                        "text": sent["text"],
+                        "framing": "wide"
+                    })
+            refined = _merge_segments(refined, min_gap=0.35)
+            refined = sorted(refined, key=lambda x: x["start"])
+
+    # Enforce upper bound (story budget) com proteção estrita do desfecho/clímax e de frases completas
     total_dur = sum(s["end"] - s["start"] for s in refined)
-    if total_dur > body_max + 0.5:
-        trimmed = []
-        t_acc = 0.0
-        for s in refined:
-            seg_d = s["end"] - s["start"]
-            if t_acc + seg_d <= body_max:
-                trimmed.append(s)
-                t_acc += seg_d
-            else:
-                remaining = body_max - t_acc
-                if video_duration <= 40.0 or refine_mode == "soft" or is_dorama or target_duration_mode == "max_retention" or (t_acc + seg_d <= body_max + 4.0):
+    if video_duration > 65.0 and total_dur > body_max + 0.5:
+        if editorial_mode == "viral_59" or target_duration_mode == "viral_59s":
+            refined = _strictly_cap_segments_duration(refined, max_cap=body_max)
+        elif len(refined) >= 2 and (refined[-1]["end"] - refined[-1]["start"]) < body_max:
+            last_seg = refined[-1]
+            last_dur = last_seg["end"] - last_seg["start"]
+            remaining_budget = max(8.0, body_max - last_dur)
+            trimmed_prefix = []
+            t_acc = 0.0
+            for s in refined[:-1]:
+                seg_d = s["end"] - s["start"]
+                if t_acc + seg_d <= remaining_budget:
+                    trimmed_prefix.append(s)
+                    t_acc += seg_d
+                elif (t_acc + seg_d <= remaining_budget + 4.0) or len(trimmed_prefix) == 0:
+                    trimmed_prefix.append(s)
+                    t_acc += seg_d
+                else:
+                    # Pula blocos do meio que excederiam o orçamento, para garantir que o clímax final entre!
+                    continue
+            candidate = trimmed_prefix + [last_seg]
+            refined = _merge_segments(candidate, min_gap=0.35)
+        else:
+            trimmed = []
+            t_acc = 0.0
+            for s in refined:
+                seg_d = s["end"] - s["start"]
+                if t_acc + seg_d <= body_max or len(trimmed) < 2:
                     trimmed.append(s)
                     t_acc += seg_d
+                else:
                     break
-                elif remaining >= 2.0:
-                    safe_cut_end = None
-                    if all_words:
-                        target_t = s["start"] + remaining
-                        candidate_words = [w for w in all_words if s["start"] <= w["start"] and w["end"] <= target_t + 0.35]
-                        if candidate_words:
-                            last_w = candidate_words[-1]
-                            safe_cut_end = round(min(s["end"], last_w["end"] + 0.25), 3)
-                    if safe_cut_end is None or safe_cut_end <= s["start"] + 1.0:
-                        safe_cut_end = round(s["start"] + remaining, 3)
-                    trimmed.append({**s, "end": safe_cut_end})
-                break
-        if trimmed:
-            refined = trimmed
+            if trimmed:
+                refined = trimmed
 
     # Editorial structure runs on the clean chronological body BEFORE any splitting, so the
     # hook/loop sees whole phrases. From here on, order is intentional: never re-sort.
@@ -2336,7 +3458,7 @@ def build_refined_segments(
             video_duration=video_duration,
             on_log=on_log
         )
-    elif editorial_mode == "viral_editor":
+    elif editorial_mode in ("viral_editor", "viral_59"):
         refined = apply_viral_editor_structure(
             refined=refined,
             all_words=all_words,
@@ -2346,36 +3468,104 @@ def build_refined_segments(
             on_log=on_log
         )
 
-    # Anti-Copyright: split long continuous takes on real speech pauses (order-preserving)
-    # Para doramas, limite contínuo ampliado para 8.0s para não cortar reações humanas
-    if anti_copyright:
-        cont_sec = 8.0 if is_dorama else 3.8
-        refined = apply_anti_copyright_continuous_splits(
-            segments=refined,
+    # ── CHECK DO CHECK (DUPLO REFINO IA): Auditoria Crítica Especializada para Viral Flow 59s ──
+    if target_duration_mode == "viral_59s" or editorial_mode == "viral_59":
+        refined = audit_and_refine_cut_double_check(
+            candidate_segments=refined,
             all_words=all_words,
-            max_continuous_sec=cont_sec,
             video_duration=video_duration,
-            is_continuous_clip=is_continuous_clip,
-            is_dorama=is_dorama,
+            video_context=video_context,
+            work_title=work_title,
+            scene_context=scene_context,
+            user_feedback=user_feedback,
+            max_duration_cap=59.0,
+            local_model=local_model,
+            ai_engine=ai_engine,
             on_log=on_log
         )
 
-    # Validação Final: sem overlap nem micro-engasgos, preservando a ordem editorial
+
+    # Validação Final: sem overlap nem micro-engasgos, preservando a ordem editorial e blocos contínuos
     refined = finalize_ordered_segments(refined)
 
-    # Simulação de 2ª Câmera Multi-Cam (Smart Punch-In Anti-Copyright):
-    # Para doramas: limite de 6.0s (transições suaves), para animes: 3.8s
-    if anti_copyright:
-        shot_dur = 6.0 if is_dorama else 3.8
-        refined = split_long_segments_for_multicam(refined, max_shot_dur=shot_dur, is_dorama=is_dorama)
+    # ── ZERO SILÊNCIO NO FRAME 0 (Garantia Absoluta de Retenção Viral) ──
+    # Descarta segmentos iniciais sem fala e corta qualquer silêncio antes da primeira palavra falada (a menos que seja um momento solicitado pelo usuário)
+    if refined and all_words and not user_feedback:
+        while refined:
+            sw = [w for w in all_words if (refined[0]["start"] - 0.20) <= w.get("start", 0.0) <= refined[0]["end"]]
+            if sw:
+                break
+            if on_log:
+                on_log(f"[ANTI-SILÊNCIO] Descartando cena inicial sem fala: [{refined[0]['start']:.2f}s -> {refined[0]['end']:.2f}s]")
+            refined.pop(0)
+
+        if refined:
+            sw = [w for w in all_words if (refined[0]["start"] - 0.20) <= w.get("start", 0.0) <= refined[0]["end"]]
+            if sw:
+                first_w = sw[0]
+                w_start = float(first_w.get("start", 0.0))
+                w_end = float(first_w.get("end", w_start))
+                w_txt = (first_w.get("word") or first_w.get("text") or "").strip().lower()
+                # Se for monossílabo com duração inflada (>0.6s), o Whisper alucinou o início no silêncio prévio
+                if len(w_txt) <= 3 and (w_end - w_start) > 0.60:
+                    w_start = max(w_start, w_end - 0.25)
+
+                lead_gap = max(0.0, w_start - refined[0]["start"])
+                if lead_gap >= 0.12:
+                    new_s = round(max(0.0, w_start - 0.08), 3)
+                    if new_s < refined[0]["end"] - 0.5:
+                        if on_log:
+                            on_log(f"⚡ [RETENÇÃO VIRAL: ZERO SILÊNCIO] Começo mudo de {lead_gap:.2f}s cortado! O vídeo abre direto na fala no segundo 0.")
+                        refined[0]["start"] = new_s
+
+    # Alinhamento Acústico Fino (caso audio_path esteja disponível nesta fase)
+    if refined and audio_path and os.path.exists(str(audio_path)):
+        align_opening_segment_to_acoustic_speech(
+            opening_segment=refined[0],
+            audio_path_or_video=str(audio_path),
+            ffmpeg_bin=_get_ffmpeg_bin("ffmpeg"),
+            min_lead_silence=0.20,
+            on_log=on_log
+        )
+
+    # 1. Blindagem Anti-Copyright: Fatiamento de trechos longos contínuos em pausas de respiração
+    if anti_copyright and str(anti_copyright).lower() not in ("off", "false", "none", "0"):
+        # No Viral Flow 59s, preservamos o fluxo contínuo e a cadência natural da cena sem jump cuts artificiais.
+        # A blindagem é garantida pelo Multi-Câmera Inteligente (alternância de planos), Flip, Color Shift e DSP 1.04x.
+        if editorial_mode != "viral_59" and target_duration_mode != "viral_59s":
+            is_yt_max = (str(anti_copyright).lower() == "youtube_max")
+            max_cont = 10.0 if is_yt_max else 12.0
+            refined = apply_anti_copyright_continuous_splits(
+                segments=refined,
+                all_words=all_words,
+                max_continuous_sec=max_cont,
+                video_duration=video_duration,
+                is_continuous_clip=is_continuous_clip or is_yt_max,
+                is_dorama=is_dorama,
+                on_log=on_log
+            )
+
+    # 2. Direção Multi-Câmera Inteligente: Alternância dinâmica de planos (Punch +15%, Reaction +8%, Wide)
+    # No Viral Flow 59s, mantemos tomadas mais estáveis e cinematográficas (8.0s) para não deixar a cena picotada
+    shot_dur = 8.0 if (editorial_mode == "viral_59" or target_duration_mode == "viral_59s") else (6.0 if is_dorama else 3.8)
+    refined = split_long_segments_for_multicam(
+        segments=refined,
+        max_shot_dur=shot_dur,
+        is_dorama=is_dorama
+    )
+
+    # Trava Final Rígida de Duração para Perfil 59s (Garantia Matemática Absoluta <= 59.0s)
+    if target_duration_mode == "viral_59s" or editorial_mode == "viral_59":
+        refined = _strictly_cap_segments_duration(refined, max_cap=59.0)
+        final_total = sum(max(0.0, s["end"] - s["start"]) for s in refined)
         if on_log:
-            on_log(f"[MULTI-CAM] Cinematografia dinâmica aplicada ({'Dorama 6.0s' if is_dorama else 'Ágil 3.8s'}): {len(refined)} planos alternados (Wide / Punch / Reaction).")
+            on_log(f"⚡ [VIRAL FLOW 59s] Duração consolidada com rigor absoluto: {final_total:.2f}s (Teto Garantido ≤ 59.0s)")
 
     # Absolute ultimate failsafe: NEVER return empty!
     if not refined:
         refined = [{"start": 0.0, "end": round(video_duration, 3), "text": "[Mastercut Completo]", "framing": "wide"}]
 
-    return refined
+    return refined, roteiro
 
 
 # ─── FFmpeg Video Assembly ────────────────────────────────────────────────────
@@ -2389,6 +3579,7 @@ def render_mastercut_video(
     anti_copyright: bool = False,
     enable_loop: bool = False,
     editorial_mode: str = "linear",
+    roteiro: dict = None,
     on_progress=None,
     on_log=None,
     pre_isolated_audio_path: str = None
@@ -2405,6 +3596,28 @@ def render_mastercut_video(
     # If pre-isolated audio is provided (Demucs), the video HAS audio by definition
     has_audio = check_video_has_audio(source_path) or bool(pre_isolated_audio_path)
     video_duration = get_video_duration(source_path)
+
+    # ── ZERO SILÊNCIO ACÚSTICO NO FRAME 0 (Garantia Absoluta de Retenção Viral) ──
+    # Se houver áudio (seja o isolado por Demucs ou do vídeo), elimina qualquer vácuo de silêncio
+    audio_for_onset = pre_isolated_audio_path if (pre_isolated_audio_path and os.path.exists(pre_isolated_audio_path)) else source_path
+    if segments and has_audio and audio_for_onset:
+        while segments:
+            align_opening_segment_to_acoustic_speech(
+                opening_segment=segments[0],
+                audio_path_or_video=audio_for_onset,
+                ffmpeg_bin=ffmpeg_bin,
+                min_lead_silence=0.20,
+                on_log=on_log
+            )
+            if segments[0]["end"] - segments[0]["start"] >= 0.50:
+                break
+            if len(segments) > 1:
+                if on_log:
+                    on_log(f"⚡ [ANTI-SILÊNCIO] Descartando tomada inicial sem fala [{segments[0]['start']:.2f}s -> {segments[0]['end']:.2f}s] para iniciar direto no diálogo!")
+                segments.pop(0)
+            else:
+                break
+
 
     # Detect resolution
     video_width, video_height = 1920, 1080
@@ -2427,13 +3640,16 @@ def render_mastercut_video(
     filter_complex = []
     concat_inputs = []
 
-    # Flash sits exactly at the hook → story boundary, even when multi-cam split the hook into several takes
+    # Flash sits exactly at the hook → story boundary, e apenas quando há um salto temporal real (teaser de fato)
     hook_idxs = [idx for idx, sg in enumerate(segments) if sg.get("role") == "hook"]
     if hook_idxs:
         hook_last_idx = hook_idxs[-1]
     else:
         hook_last_idx = 0 if editorial_mode in ("hook", "viral_editor") else -1
-    has_hook_transition = 0 <= hook_last_idx < n - 1
+    has_hook_transition = (
+        0 <= hook_last_idx < n - 1
+        and abs(segments[hook_last_idx + 1]["start"] - segments[hook_last_idx]["end"]) >= 0.50
+    )
 
     for i, seg in enumerate(segments):
         s = seg["start"]
@@ -2441,18 +3657,18 @@ def render_mastercut_video(
         dur_i = e - s
         framing = seg.get("framing", "wide")
 
-        # Smart Multi-Camera Framing por Segmento:
-        # punch: close-up de impacto (+14% zoom em momentos de tensão/fala forte)
-        # reaction: enquadramento de resposta (+8% zoom)
-        # wide: plano aberto cinematográfico (+4% zoom)
-        # Mantém a resolução nativa exata do vídeo sem distorção
-        if anti_copyright:
-            if framing == "punch":
-                sc = 1.14
-            elif framing == "reaction":
-                sc = 1.08
-            else:
-                sc = 1.04
+        # Multi-Câmera Dinâmica & Zoom Anti-Copyright por Segmento Narrativo:
+        # punch: +15% close-up de impacto para revelações, falas marcantes e clímax.
+        # reaction: +8% zoom médio para réplicas e conversas.
+        # wide: +3% plano aberto para ação e contexto.
+        if framing == "punch":
+            sc = 1.15
+        elif framing == "reaction":
+            sc = 1.08
+        else:
+            sc = 1.03 if (anti_copyright and str(anti_copyright).lower() not in ("off", "false", "none", "0")) else 1.00
+
+        if sc > 1.005:
             cam_filter = (
                 f",scale=w=trunc(iw*{sc:.3f}/2)*2:h=trunc(ih*{sc:.3f}/2)*2"
                 f",crop=w={video_width}:h={video_height}"
@@ -2478,12 +3694,25 @@ def render_mastercut_video(
             filter_complex.append(f"[0:v]trim=start={s:.3f}:end={e:.3f},setpts=PTS-STARTPTS{cam_filter}[v{i}]")
 
         if has_audio:
-            # Micro-fade de áudio de 25ms para cortes 100% orgânicos, imperceptíveis e sem estalos
-            afade_dur = min(0.025, dur_i / 4.0)
-            afade_out_st = max(0.0, dur_i - afade_dur)
+            # Detecta se este segmento é contíguo no tempo com o anterior ou próximo (ex: corte de câmera multi-cam).
+            # Se for contíguo (<0.05s de gap na fonte), NÃO aplica fade na emenda para manter a voz 100% contínua e sem mergulhos de volume!
+            is_cont_from_prev = (i > 0 and abs(s - segments[i-1]["end"]) < 0.05)
+            is_cont_to_next = (i < n - 1 and abs(segments[i+1]["start"] - e) < 0.05)
+
+            fade_in_str = ""
+            if not is_cont_from_prev:
+                afade_in_dur = min(0.045, dur_i / 4.0)
+                fade_in_str = f",afade=t=in:st=0:d={afade_in_dur:.3f}:curve=iqsin"
+
+            fade_out_str = ""
+            if not is_cont_to_next:
+                afade_out_dur = min(0.045, dur_i / 4.0)
+                afade_out_st = max(0.0, dur_i - afade_out_dur)
+                fade_out_str = f",afade=t=out:st={afade_out_st:.3f}:d={afade_out_dur:.3f}:curve=qsin"
+
             audio_source_idx = "1" if pre_isolated_audio_path else "0"
             filter_complex.append(
-                f"[{audio_source_idx}:a]atrim=start={s:.3f}:end={e:.3f},asetpts=PTS-STARTPTS,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,afade=t=in:st=0:d={afade_dur:.3f},afade=t=out:st={afade_out_st:.3f}:d={afade_dur:.3f}[a{i}]"
+                f"[{audio_source_idx}:a]atrim=start={s:.3f}:end={e:.3f},asetpts=PTS-STARTPTS,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo{fade_in_str}{fade_out_str}[a{i}]"
             )
             concat_inputs.append(f"[v{i}][a{i}]")
         else:
@@ -2632,6 +3861,7 @@ def render_mastercut_video(
         "editorial_mode": editorial_mode,
         "editorial_mode_label": EDITORIAL_MODES.get(editorial_mode, "Linear Direto"),
         "loop_mode": "Contextual (Replay Infinito)" if enable_loop else "Sem Loop (Direto)",
+        "roteiro": roteiro,
         "segments": segments
     }
 
@@ -2761,6 +3991,12 @@ class MastercutPipeline:
     def __init__(self):
         self.is_running = False
         self._cancelled = False
+        self.cached_video_path = None
+        self.cached_all_words = None
+        self.cached_full_text = None
+        self.cached_duration = None
+        self.cached_action_blocks = None
+        self.cached_visual_scenes = None
 
     def cancel(self):
         self._cancelled = True
@@ -2770,6 +4006,10 @@ class MastercutPipeline:
         video_path: str,
         output_path: str,
         video_context: str = "",
+        work_title: str = "",
+        scene_context: str = "",
+        user_feedback: str = "",
+        previous_segments: list = None,
         vocal_isolation: bool = True,
         demucs_isolation: bool = False,
         anti_copyright: bool = False,
@@ -2780,6 +4020,8 @@ class MastercutPipeline:
         is_continuous_clip: bool = False,
         is_dorama: bool = False,
         profile_label: str = "",
+        ai_engine: str = "auto",
+        local_model: str = "",
         on_progress=None,
         on_log=None
     ) -> dict:
@@ -2789,13 +4031,19 @@ class MastercutPipeline:
         if editorial_mode in ("loop", "viral_editor"):
             enable_loop = True
 
+        clean_work_title = (work_title or "").strip()
+        clean_scene_context = (scene_context or "").strip()
+        if not clean_work_title and not clean_scene_context and video_context:
+            clean_work_title = video_context.strip()
+
         if not is_dorama:
-            ctx_lower = str(video_context or "").lower()
+            ctx_lower = f"{clean_work_title} {clean_scene_context} {video_context}".lower()
             is_dorama = (
                 refine_mode == "dorama"
                 or editorial_mode == "dorama"
                 or any(k in ctx_lower for k in ("dorama", "kdrama", "k-drama", "coreano", "c-drama", "j-drama", "doramas"))
             )
+
 
         try:
             # Pre-flight check: ensure FFmpeg and FFprobe are available
@@ -2816,67 +4064,105 @@ class MastercutPipeline:
                     on_log(f"[ERRO]: {err_msg}")
                 raise FileNotFoundError(err_msg)
 
-            # Step 1: Detect speech & words
-            audio_source_for_whisper = video_path
-            pre_isolated_audio = None
-            
-            if demucs_isolation:
-                if on_log:
-                    on_log("═══ ETAPA PRÉ-CORTE: Isolamento Vocal (IA Demucs) ═══")
-                import tempfile, time
-                from upscaler import run_demucs_vocal_isolation
-                temp_vocals = os.path.join(tempfile.gettempdir(), f"mastercut_demucs_pre_{os.getpid()}_{int(time.time())}.wav")
-                if on_progress:
-                    on_progress(0.10, "Isolando vocais puros com IA Demucs ANTES do corte...")
-                ok_d = run_demucs_vocal_isolation(video_path, temp_vocals, on_log=on_log)
-                if ok_d and os.path.exists(temp_vocals):
-                    audio_source_for_whisper = temp_vocals
-                    pre_isolated_audio = temp_vocals
-                    if on_log:
-                        on_log("[DEMUCS] Isolamento vocal concluído! O Whisper e o corte serão feitos na voz limpa, destruindo o Copyright da música original.")
-                else:
-                    if on_log:
-                        on_log("⚠️ [DEMUCS] Falha ao isolar voz. Continuando com áudio original do vídeo.")
-
-            if on_log:
-                on_log("═══ ETAPA 1/3: Mapeamento de Diálogos (Whisper) ═══")
-            all_words, full_text, duration = detect_speech_segments(audio_source_for_whisper, on_progress=on_progress, on_log=on_log)
-
-            if self._cancelled:
-                raise InterruptedError("Operação cancelada pelo usuário.")
-
-            # Step 2: Detect visual action
-            action_blocks = detect_visual_action_blocks(video_path, on_log=on_log)
-
-            if self._cancelled:
-                raise InterruptedError("Operação cancelada pelo usuário.")
-
-            # Step 2b: AI Vision - describe silent scenes (attacks, powers, romantic moments, etc.)
-            if on_log:
-                on_log("═══ ETAPA 2b/3: Análise Visual de Cenas Silenciosas (IA Vision) ═══")
-            visual_scenes = describe_silent_scenes_with_vision(
-                video_path=video_path,
-                all_words=all_words,
-                video_duration=duration,
-                video_context=video_context,
-                on_log=on_log
+            can_reuse_cache = (
+                bool(user_feedback and user_feedback.strip())
+                and self.cached_video_path == video_path
+                and self.cached_all_words is not None
             )
 
-            if self._cancelled:
-                raise InterruptedError("Operação cancelada pelo usuário.")
+            audio_source_for_whisper = video_path
+            pre_isolated_audio = None
+
+            if can_reuse_cache:
+                if on_log:
+                    on_log("⚡ [FEEDBACK REUTILIZAÇÃO] Reutilizando transcrição e análise visual em cache para reajuste cirúrgico instantâneo com a IA!")
+                all_words = self.cached_all_words
+                full_text = self.cached_full_text
+                duration = self.cached_duration
+                action_blocks = self.cached_action_blocks
+                visual_scenes = self.cached_visual_scenes
+            else:
+                # Step 1: Detect speech & words
+                if demucs_isolation:
+                    if on_log:
+                        on_log("═══ ETAPA PRÉ-CORTE: Isolamento Vocal (IA Demucs) ═══")
+                    import tempfile, time
+                    from upscaler import run_demucs_vocal_isolation
+                    temp_vocals = os.path.join(tempfile.gettempdir(), f"mastercut_demucs_pre_{os.getpid()}_{int(time.time())}.wav")
+                    if on_progress:
+                        on_progress(0.10, "Isolando vocais puros com IA Demucs ANTES do corte...")
+                    ok_d = run_demucs_vocal_isolation(video_path, temp_vocals, on_log=on_log)
+                    if ok_d and os.path.exists(temp_vocals):
+                        audio_source_for_whisper = temp_vocals
+                        pre_isolated_audio = temp_vocals
+                        if on_log:
+                            on_log("[DEMUCS] Isolamento vocal concluído! O Whisper e o corte serão feitos na voz limpa, destruindo o Copyright da música original.")
+                    else:
+                        if on_log:
+                            on_log("⚠️ [DEMUCS] Falha ao isolar voz. Continuando com áudio original do vídeo.")
+
+                if on_log:
+                    on_log("═══ ETAPA 1/3: Mapeamento de Diálogos (Whisper) ═══")
+                all_words, full_text, duration = detect_speech_segments(
+                    audio_source_for_whisper,
+                    on_progress=on_progress,
+                    on_log=on_log,
+                    ai_engine=ai_engine
+                )
+
+                if self._cancelled:
+                    raise InterruptedError("Operação cancelada pelo usuário.")
+
+                # Step 2: Detect visual action
+                action_blocks = detect_visual_action_blocks(video_path, on_log=on_log)
+
+                if self._cancelled:
+                    raise InterruptedError("Operação cancelada pelo usuário.")
+
+                # Step 2b: AI Vision - describe silent scenes (attacks, powers, romantic moments, etc.)
+                if on_log:
+                    on_log("═══ ETAPA 2b/3: Análise Visual de Cenas Silenciosas (IA Vision) ═══")
+                visual_scenes = describe_silent_scenes_with_vision(
+                    video_path=video_path,
+                    all_words=all_words,
+                    video_duration=duration,
+                    video_context=video_context,
+                    work_title=clean_work_title,
+                    scene_context=clean_scene_context,
+                    ai_engine=ai_engine,
+                    on_log=on_log
+                )
+
+                if self._cancelled:
+                    raise InterruptedError("Operação cancelada pelo usuário.")
+
+                # Cache analysis results on the pipeline instance for rapid correction loops
+                self.cached_video_path = video_path
+                self.cached_all_words = all_words
+                self.cached_full_text = full_text
+                self.cached_duration = duration
+                self.cached_action_blocks = action_blocks
+                self.cached_visual_scenes = visual_scenes
 
             # Step 3: AI Selection (Opção 4: Mastercut Concentrado)
             if on_log:
-                on_log("═══ ETAPA 3/3: Seleção Mastercut Concentrado (IA) ═══")
+                if user_feedback:
+                    on_log("═══ ETAPA 3/3: Reajuste Cirúrgico Mastercut com Feedback do Diretor (IA) ═══")
+                else:
+                    on_log("═══ ETAPA 3/3: Seleção Mastercut Concentrado (IA) ═══")
             if on_progress:
                 on_progress(0.50, "IA refinando corte sem mutilação de diálogos e momentos...")
 
-            segments = build_refined_segments(
+            segments, roteiro = build_refined_segments(
                 all_words=all_words,
                 video_duration=duration,
                 action_blocks=action_blocks,
                 visual_scenes=visual_scenes,
                 video_context=video_context,
+                work_title=clean_work_title,
+                scene_context=clean_scene_context,
+                user_feedback=user_feedback,
+                previous_segments=previous_segments,
                 refine_mode=refine_mode,
                 target_duration_mode=target_duration_mode,
                 enable_loop=enable_loop,
@@ -2884,8 +4170,12 @@ class MastercutPipeline:
                 anti_copyright=anti_copyright,
                 is_continuous_clip=is_continuous_clip,
                 is_dorama=is_dorama,
+                audio_path=audio_source_for_whisper,
+                ai_engine=ai_engine,
+                local_model=local_model,
                 on_log=on_log
             )
+
 
             if self._cancelled:
                 raise InterruptedError("Operação cancelada pelo usuário.")
@@ -2907,6 +4197,7 @@ class MastercutPipeline:
                 anti_copyright=anti_copyright,
                 enable_loop=enable_loop,
                 editorial_mode=editorial_mode,
+                roteiro=roteiro,
                 on_progress=on_progress,
                 on_log=on_log,
                 pre_isolated_audio_path=pre_isolated_audio

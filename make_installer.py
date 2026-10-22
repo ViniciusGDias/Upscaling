@@ -98,6 +98,16 @@ def main():
                 else:
                     shutil.copy2(item, dest)
 
+    # 1.5. Verificação de Segurança Estrita: Impedir vazamento de .env privado
+    leaked_env = dist_folder / ".env"
+    if leaked_env.exists():
+        leaked_env.unlink()
+        print("🔒 [SEGURANÇA] Arquivo .env privado removido de dist/Urahara antes de gerar o instalador.")
+    
+    # Garante que .env.example está presente
+    if (APP_DIR / ".env.example").exists():
+        shutil.copy2(APP_DIR / ".env.example", dist_folder / ".env.example")
+
     # 2. Compile Inno Setup for Setup.exe
     print("\n[2/3] Compilando instalador Setup.exe com Inno Setup...")
     iscc = find_inno_compiler()

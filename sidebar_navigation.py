@@ -10,22 +10,12 @@ from __future__ import annotations
 from typing import Dict, Optional, Callable
 import customtkinter as ctk
 import icon_manager
+import urahara_theme
 
-SIDEBAR_COLORS = {
-    "bg": "#09090b",
-    "sidebar_bg": "#0c0c0e",
-    "card_border": "#1f1f23",
-    "accent_primary": "#10b981",    # Verde Esmeralda Kisuke
-    "accent_hover": "#059669",
-    "btn_active_bg": "#18181f",
-    "btn_inactive_bg": "transparent",
-    "btn_hover": "#141418",
-    "text_active": "#fafafa",
-    "text_inactive": "#a1a1aa",
-    "text_muted": "#52525b",
-    "section_header": "#71717a",
-    "indicator": "#10b981",
-}
+SIDEBAR_COLORS = urahara_theme.COLORS
+THEME_COLORS = urahara_theme.COLORS
+THEME_FONTS = urahara_theme.FONTS
+THEME_LORE = urahara_theme.LORE
 
 # Categorização elegante dos itens de menu
 SECTIONS = [
@@ -105,58 +95,58 @@ class SidebarNavigation(ctk.CTkFrame):
         self._segmented_button = self
 
     def _build_sidebar_header(self):
-        """Cabeçalho da sidebar com logo, badge e indicador de energia."""
+        """Cabeçalho da sidebar com logo Urahara Studio e indicador."""
         header_frame = ctk.CTkFrame(self.sidebar_frame, fg_color="transparent")
         header_frame.pack(fill="x", padx=16, pady=(16, 12))
 
         brand_row = ctk.CTkFrame(header_frame, fg_color="transparent")
         brand_row.pack(fill="x")
 
-        # Ponto de energia verde Kisuke
+        # Emblema verde Kisuke
         ctk.CTkLabel(
             brand_row,
-            text="●",
-            font=ctk.CTkFont(size=12, weight="bold"),
-            text_color=SIDEBAR_COLORS["accent_primary"],
-        ).pack(side="left", padx=(0, 8))
+            text="❖",
+            font=ctk.CTkFont(size=14, weight="bold"),
+            text_color=THEME_COLORS["accent_primary"],
+        ).pack(side="left", padx=(0, 7))
 
         ctk.CTkLabel(
             brand_row,
             text="URAHARA",
-            font=ctk.CTkFont(family="Segoe UI", size=15, weight="bold"),
-            text_color="#ffffff",
+            font=ctk.CTkFont(family="Segoe UI", size=16, weight="bold"),
+            text_color=THEME_COLORS["text_primary"],
         ).pack(side="left")
 
         ctk.CTkLabel(
             brand_row,
             text="STUDIO",
             font=ctk.CTkFont(family="Segoe UI", size=9, weight="bold"),
-            text_color=SIDEBAR_COLORS["accent_primary"],
-            fg_color="#064e3b",
+            text_color=THEME_COLORS["accent_primary"],
+            fg_color=THEME_COLORS["accent_dark"],
             corner_radius=4,
-            padx=5, pady=1,
+            padx=6, pady=2,
         ).pack(side="left", padx=(8, 0))
 
         sub_lbl = ctk.CTkLabel(
             header_frame,
-            text="Anime & Video Intelligence Suite",
+            text=THEME_LORE["subtitle"],
             font=ctk.CTkFont(family="Segoe UI", size=10),
-            text_color=SIDEBAR_COLORS["text_muted"],
+            text_color=THEME_COLORS["text_muted"],
             anchor="w",
         )
         sub_lbl.pack(fill="x", pady=(4, 0))
 
         # Linha divisória sutil
-        ctk.CTkFrame(self.sidebar_frame, fg_color=SIDEBAR_COLORS["card_border"], height=1).pack(fill="x", padx=12, pady=(0, 8))
+        ctk.CTkFrame(self.sidebar_frame, fg_color=THEME_COLORS["card_border"], height=1).pack(fill="x", padx=12, pady=(0, 8))
 
     def _build_sidebar_footer(self):
         """Rodapé da sidebar com status do sistema."""
         footer_frame = ctk.CTkFrame(self.sidebar_frame, fg_color="transparent")
         footer_frame.pack(side="bottom", fill="x", padx=12, pady=(4, 12))
 
-        ctk.CTkFrame(footer_frame, fg_color=SIDEBAR_COLORS["card_border"], height=1).pack(fill="x", pady=(0, 10))
+        ctk.CTkFrame(footer_frame, fg_color=THEME_COLORS["card_border"], height=1).pack(fill="x", pady=(0, 10))
 
-        status_box = ctk.CTkFrame(footer_frame, fg_color="#101014", corner_radius=6, border_width=1, border_color=SIDEBAR_COLORS["card_border"])
+        status_box = ctk.CTkFrame(footer_frame, fg_color=THEME_COLORS["bg_card"], corner_radius=6, border_width=1, border_color=THEME_COLORS["card_border"])
         status_box.pack(fill="x")
 
         s_inner = ctk.CTkFrame(status_box, fg_color="transparent")
@@ -164,16 +154,16 @@ class SidebarNavigation(ctk.CTkFrame):
 
         ctk.CTkLabel(
             s_inner,
-            text="SISTEMA:",
+            text="STATUS:",
             font=ctk.CTkFont(family="Segoe UI", size=9, weight="bold"),
-            text_color=SIDEBAR_COLORS["text_muted"],
+            text_color=THEME_COLORS["text_muted"],
         ).pack(side="left")
 
         self.footer_status_label = ctk.CTkLabel(
             s_inner,
-            text="Online [Pronto]",
+            text=THEME_LORE["status_ready"],
             font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
-            text_color=SIDEBAR_COLORS["accent_primary"],
+            text_color=THEME_COLORS["accent_primary"],
         )
         self.footer_status_label.pack(side="right")
 
@@ -181,11 +171,12 @@ class SidebarNavigation(ctk.CTkFrame):
         self.update_btn = ctk.CTkButton(
             footer_frame,
             text="⚡ Atualização Disponível!",
-            image=icon_manager.get_icon("download", size=(12, 12), color="#09090b"),
+            image=icon_manager.get_icon("download", size=(12, 12), color="#090C0B"),
             compound="left",
             font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
-            fg_color="#10b981", hover_color="#059669",
-            text_color="#09090b",
+            fg_color=THEME_COLORS["accent_primary"],
+            hover_color=THEME_COLORS["accent_hover"],
+            text_color="#090C0B",
             height=28, corner_radius=6,
             command=self._on_update_clicked,
         )

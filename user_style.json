@@ -10,7 +10,7 @@
     "alignment": "center",
     "capitalization": "upper",
     "max_words_per_line": 3,
-    "style_preset": "dynamic_animax",
+    "style_preset": "anime_fx_pro",
     "pop_animation": true,
     "highlight_color": "#00FFFF"
   },

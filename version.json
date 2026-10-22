@@ -1,8 +1,13 @@
 {
-  "version": "1.1.0",
+  "version": "1.2.0",
   "name": "Urahara",
-  "release_date": "2026-10-08",
+  "release_date": "2026-10-22",
   "changelog": [
+    "Curadoria Interativa de Mangá FX Pro no Revisor de Legendas: Novo botão '✂ Recorte' para marcar frases manualmente diretamente na revisão. Duas falas consecutivas viram automaticamente Linha 1 e Linha 2 de um único card de clímax, com classificação de feeling dinâmica via IA Local (Ollama) ou heurística sem perda de tempo.",
+    "Motor Tipográfico Universal com Suporte a Emojis Coloridos Reais: Eliminação definitiva de 'quadrados cinza' (tofu) ao criar Thumbnails 9:16 para YouTube Shorts ou ao adicionar Título do Vídeo no Studio. Suporte nativo a sequências completas de emojis (🔥, 💀, 🍎, 🚀, etc.) com fontes de alto impacto (Impact, Arial Black e Lovely Scream Queens).",
+    "Integração Aprimorada de IA Local (Ollama) & Modelos: Suporte nativo a modelos qwen2.5 (7b, 14b, 27b) para curadoria de punchlines no Studio e roteirização no Diretor IA, com verificação de status e fallback inteligente.",
+    "Automação Segura do Gemini Web: Perfil de navegador isolado localmente para execução em segundo plano com tokens ilimitados do chat web, sem expor sessões ou cookies.",
+    "Blindagem Estrita de Dados Privados: O instalador e os pacotes de distribuição agora possuem sanitização automática de pré-voo, garantindo que credenciais e chaves de API pessoais jamais sejam empacotadas ou distribuídas para outros usuários.",
     "Blindagem Máxima Anti-Copyright YouTube (Anti-Toei Animation & Content ID): Novo motor de proteção com Espelhamento Horizontal (hflip para quebra do pHash 3D espacial), Aceleração Calibrada em 1.04x (com micro-pitch shift acústico e lip-sync preservado), Crop de 7% e Deslocamento Espectral Cinematográfico. Inclui novo botão '🛡️ Blindar Vídeo Pronto' no Refinador para blindar qualquer clipe pré-existente (ex: upscalado pré-Studio) em ~8 segundos com aceleração NVIDIA NVENC sem precisar re-editar do zero.",
     "Inteligência Dedicada para Doramas no Refinador e YouTube Shorts: Novo Perfil 'Dorama Dramático & Emocional' no Refinador com preservação de pausas naturais de atuação (até 0.8s) e multi-câmera suave (6.0s sem picotar rostos). Na aba YouTube Shorts, novo suporte nativo com 6 pílulas rápidas dedicadas a doramas (Romance/Química, Choro/Separação, Vingança/Poder, Revelação/Choque, Declaração, Traição), 5 fórmulas de títulos virais de alto CTR para dorameiras e formato padronizado de comentário fixado com Nome da Obra, Onde Assistir, Episódio e Pergunta de engajamento.",
     "12 Novos Presets de Legenda 'Kinetic Emotion' (Estilo CapCut Pro & Viral 2026): Dramático (Fade & Clímax), Emocional (Slow Breathe), Horror & Tensão (Glitch Sangue), Hype Impact (Super Pop), Cyber Glitch (Distorção Cromática), Lyric Beat (Bounce Rítmico de Palavras), Minimal Bold (Viral Clean MrBeast), Ouro Nobre (Elegante & Fade), Fluido (Ondulação Oceânica), Shonen Power (Golpe Sísmico & 💥⚡🔥), Seinen Dark (Psicológico Sombrio) e Kawaii Pop (Jelly Bounce & Sparkles ✨🌸).",

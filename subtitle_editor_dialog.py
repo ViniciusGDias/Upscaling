@@ -19,22 +19,18 @@ from subtitle_corrector import correct_phrase, load_dictionary, add_correction_t
 from censorship_manager import censor_text, mask_word, add_custom_profanity, load_custom_profanity
 
 
+import urahara_theme
+
 COLORS = {
-    "bg_dark": "#0B0E14",
-    "bg_card": "#151A23",
-    "bg_card_hover": "#1E2533",
-    "border": "#2A3447",
-    "accent": "#00D4FF",
-    "accent_hover": "#00AACC",
-    "accent_green": "#10B981",
-    "accent_green_hover": "#059669",
-    "text_primary": "#FFFFFF",
-    "text_secondary": "#A1A1AA",
-    "error": "#EF4444",
-    "warning": "#F59E0B",
+    **urahara_theme.COLORS,
+    "accent": urahara_theme.COLORS["accent_primary"],
+    "accent_hover": urahara_theme.COLORS["accent_hover"],
+    "accent_green": urahara_theme.COLORS["accent_primary"],
+    "accent_green_hover": urahara_theme.COLORS["accent_hover"],
 }
 
 STYLE_OPTIONS = [
+    "⚔️ Anime FX Pro (Anti-Colisão & Impact Frames)",
     # Presets Kinetic Emotion (CapCut Pro / Cinema)
     "🎬 Kinetic Dramático (Fade & Clímax)",
     "💔 Kinetic Emocional (Slow Breathe)",
@@ -70,6 +66,10 @@ STYLE_OPTIONS = [
 ]
 
 STYLE_KEY_MAP = {
+    "⚔️ Anime FX Pro (Anti-Colisão & Impact Frames)": "anime_fx_pro",
+    "⚔️ Anime FX Pro (Aura Luminous & Flashes de Impacto)": "anime_fx_pro",
+    "⚔️ Anime FX Pro & Cenas Mangá (Baki & Sukuna)": "anime_fx_pro",
+    "anime_fx_pro": "anime_fx_pro",
     # Presets Kinetic Emotion
     "🎬 Kinetic Dramático (Fade & Clímax)": "kinetic_dramatic",
     "💔 Kinetic Emocional (Slow Breathe)": "kinetic_emotional",
@@ -374,6 +374,46 @@ class SubtitleEditorDialog(ctk.CTkToplevel):
         )
         self.lbl_censor_status.pack(side="left", padx=8)
 
+        # Row 3: Seção de Curadoria / Seleção Manual de Recortes de Mangá Anime FX Pro
+        manga_toolbar_row = ctk.CTkFrame(toolbar, fg_color="#0b1713", corner_radius=6, border_width=1, border_color="#134e4a")
+        manga_toolbar_row.grid(row=3, column=0, columnspan=7, padx=14, pady=(0, 10), sticky="ew")
+
+        ctk.CTkLabel(
+            manga_toolbar_row,
+            text="✂ Anime FX Recortes:",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            text_color="#10b981"
+        ).pack(side="left", padx=(8, 6), pady=4)
+
+        self.lbl_manga_status = ctk.CTkLabel(
+            manga_toolbar_row,
+            text="Modo: Automático (IA Ollama curará os momentos ideais)",
+            font=ctk.CTkFont(size=11),
+            text_color=COLORS["text_secondary"]
+        )
+        self.lbl_manga_status.pack(side="left", padx=6, pady=4)
+
+        self.btn_clear_manga = ctk.CTkButton(
+            manga_toolbar_row,
+            text="↺ Resetar para Automático",
+            width=160,
+            height=26,
+            fg_color="#134e4a",
+            hover_color="#0f766e",
+            text_color="#5eead4",
+            font=ctk.CTkFont(size=10, weight="bold"),
+            state="disabled",
+            command=self._clear_manual_manga_selection
+        )
+        self.btn_clear_manga.pack(side="right", padx=(6, 8), pady=4)
+
+        ctk.CTkLabel(
+            manga_toolbar_row,
+            text="💡 Dica: 2 falas consecutivas viram Linha 1 e 2 do mesmo card!",
+            font=ctk.CTkFont(size=10, slant="italic"),
+            text_color="#94a3b8"
+        ).pack(side="right", padx=10, pady=4)
+
         # 3. Player de Vídeo Embutido (Opcional, quando disponível)
         current_row = 2
         if self.video_path and os.path.exists(self.video_path):
@@ -593,12 +633,14 @@ class SubtitleEditorDialog(ctk.CTkToplevel):
         for idx, it in enumerate(self.items):
             self._render_row(idx, it)
 
+        self._recompute_manga_cards()
+
     def _render_row(self, idx: int, it: Dict[str, Any]):
         r_frame = ctk.CTkFrame(self.scroll_frame, fg_color=COLORS["bg_dark"], corner_radius=8)
         r_frame.pack(fill="x", pady=4, padx=4)
         r_frame.grid_columnconfigure(1, weight=1)
 
-        # Top row: Timestamps + Text Entry + Palavras Button + Delete Button
+        # Top row: Timestamps + Text Entry + Manga Button + Palavras Button + Delete Button
         top_row = ctk.CTkFrame(r_frame, fg_color="transparent")
         top_row.pack(fill="x", padx=4, pady=4)
         top_row.grid_columnconfigure(1, weight=1)
@@ -642,6 +684,41 @@ class SubtitleEditorDialog(ctk.CTkToplevel):
                                 fg_color=COLORS["bg_card"], border_color=COLORS["border"])
         t_entry.grid(row=0, column=1, padx=6, pady=2, sticky="ew")
 
+        # Container expansível de chips de palavras da frase
+        words_panel = ctk.CTkFrame(r_frame, fg_color=COLORS["bg_card"], corner_radius=6)
+
+        row_data = {
+            "frame": r_frame,
+            "top_row": top_row,
+            "words_panel": words_panel,
+            "words_panel_open": False,
+            "btn_words": None,
+            "btn_manga": None,
+            "start_v": start_v,
+            "end_v": end_v,
+            "text_v": text_v,
+            "orig_item": it,
+            "word_buttons": [],
+            "is_manga_cutout": bool(it.get("is_manga_cutout", False)),
+            "manga_card_id": int(it.get("manga_card_id", 0)),
+            "manga_line": int(it.get("manga_line", 0)),
+        }
+
+        # Botão Recorte Mangá (Anime FX Pro)
+        btn_manga = ctk.CTkButton(
+            top_row,
+            text="✂ Recorte",
+            width=96,
+            height=30,
+            fg_color=COLORS["bg_card"],
+            hover_color=COLORS["bg_card_hover"],
+            text_color=COLORS["text_secondary"],
+            font=ctk.CTkFont(size=10, weight="bold"),
+            command=lambda rd=row_data: self._toggle_manga_cutout(rd)
+        )
+        btn_manga.grid(row=0, column=2, padx=4, pady=2)
+        row_data["btn_manga"] = btn_manga
+
         # Botão Palavras / Censurar
         btn_words = ctk.CTkButton(
             top_row,
@@ -652,9 +729,10 @@ class SubtitleEditorDialog(ctk.CTkToplevel):
             hover_color=COLORS["bg_card_hover"],
             text_color="#f59e0b",
             font=ctk.CTkFont(size=10, weight="bold"),
-            command=lambda: self._toggle_words_panel(row_data)
+            command=lambda rd=row_data: self._toggle_words_panel(rd)
         )
-        btn_words.grid(row=0, column=2, padx=4, pady=2)
+        btn_words.grid(row=0, column=3, padx=4, pady=2)
+        row_data["btn_words"] = btn_words
 
         # Delete button
         del_btn = ctk.CTkButton(
@@ -667,23 +745,8 @@ class SubtitleEditorDialog(ctk.CTkToplevel):
             text_color=COLORS["text_secondary"],
             command=lambda f=r_frame: self._delete_row(f)
         )
-        del_btn.grid(row=0, column=3, padx=(2, 6), pady=2)
+        del_btn.grid(row=0, column=4, padx=(2, 6), pady=2)
 
-        # Container expansível de chips de palavras da frase
-        words_panel = ctk.CTkFrame(r_frame, fg_color=COLORS["bg_card"], corner_radius=6)
-
-        row_data = {
-            "frame": r_frame,
-            "top_row": top_row,
-            "words_panel": words_panel,
-            "words_panel_open": False,
-            "btn_words": btn_words,
-            "start_v": start_v,
-            "end_v": end_v,
-            "text_v": text_v,
-            "orig_item": it,
-            "word_buttons": [],
-        }
         self.rows.append(row_data)
 
         # Se já tiver palavra censurada, abre automaticamente o painel de palavras
@@ -897,6 +960,7 @@ class SubtitleEditorDialog(ctk.CTkToplevel):
     def _delete_row(self, frame):
         self.rows = [r for r in self.rows if r["frame"] != frame]
         frame.destroy()
+        self._recompute_manga_cards()
 
     def _add_row(self):
         last_end = 0.0
@@ -910,6 +974,117 @@ class SubtitleEditorDialog(ctk.CTkToplevel):
         }
         self.items.append(new_item)
         self._render_row(len(self.items) - 1, new_item)
+        self._recompute_manga_cards()
+
+    def _toggle_manga_cutout(self, row_data: dict):
+        row_data["is_manga_cutout"] = not row_data.get("is_manga_cutout", False)
+        self._recompute_manga_cards()
+
+    def _clear_manual_manga_selection(self):
+        for r in self.rows:
+            r["is_manga_cutout"] = False
+            r["manga_card_id"] = 0
+            r["manga_line"] = 0
+        self._recompute_manga_cards()
+
+    def _recompute_manga_cards(self):
+        card_id = 0
+        i = 0
+        n = len(self.rows)
+        while i < n:
+            r = self.rows[i]
+            if not r.get("is_manga_cutout", False):
+                r["manga_card_id"] = 0
+                r["manga_line"] = 0
+                self._update_manga_btn_appearance(r)
+                i += 1
+                continue
+
+            # r is selected: check if next row is also selected (consecutive lines form L1 & L2 of 1 card)
+            if i + 1 < n and self.rows[i + 1].get("is_manga_cutout", False):
+                card_id += 1
+                r["manga_card_id"] = card_id
+                r["manga_line"] = 1
+                self._update_manga_btn_appearance(r)
+
+                r_next = self.rows[i + 1]
+                r_next["manga_card_id"] = card_id
+                r_next["manga_line"] = 2
+                self._update_manga_btn_appearance(r_next)
+                i += 2
+            else:
+                card_id += 1
+                r["manga_card_id"] = card_id
+                r["manga_line"] = 0  # Single line card
+                self._update_manga_btn_appearance(r)
+                i += 1
+
+        self._update_manga_toolbar_status(card_id)
+
+    def _update_manga_btn_appearance(self, r: dict):
+        btn = r.get("btn_manga")
+        if not btn:
+            return
+        is_selected = r.get("is_manga_cutout", False)
+        card_id = r.get("manga_card_id", 0)
+        line = r.get("manga_line", 0)
+
+        if not is_selected:
+            btn.configure(
+                text="✂ Recorte",
+                fg_color=COLORS["bg_card"],
+                hover_color=COLORS["bg_card_hover"],
+                text_color=COLORS["text_secondary"]
+            )
+            try:
+                r["frame"].configure(border_width=0, border_color="transparent")
+            except Exception:
+                pass
+        else:
+            if line == 1:
+                lbl = f"✂ Card {card_id} (L1)"
+                fg = "#064e3b"
+                hov = "#065f46"
+                txt_c = "#6ee7b7"
+            elif line == 2:
+                lbl = f"✂ Card {card_id} (L2)"
+                fg = "#065f46"
+                hov = "#047857"
+                txt_c = "#a7f3d0"
+            else:
+                lbl = f"✂ Card {card_id}"
+                fg = "#064e3b"
+                hov = "#065f46"
+                txt_c = "#6ee7b7"
+
+            btn.configure(
+                text=lbl,
+                fg_color=fg,
+                hover_color=hov,
+                text_color=txt_c
+            )
+            try:
+                r["frame"].configure(border_width=1, border_color="#10b981")
+            except Exception:
+                pass
+
+    def _update_manga_toolbar_status(self, total_cards: int):
+        if not hasattr(self, "lbl_manga_status") or not self.lbl_manga_status:
+            return
+        if total_cards > 0:
+            self.lbl_manga_status.configure(
+                text=f"Modo: Manual Ativo ({total_cards} card{'s' if total_cards > 1 else ''} marcado{'s' if total_cards > 1 else ''} — IA definirá os feelings)",
+                text_color="#10b981"
+            )
+            if hasattr(self, "btn_clear_manga") and self.btn_clear_manga:
+                self.btn_clear_manga.configure(state="normal")
+        else:
+            self.lbl_manga_status.configure(
+                text="Modo: Automático (IA Ollama curará os momentos ideais)",
+                text_color=COLORS["text_secondary"]
+            )
+            if hasattr(self, "btn_clear_manga") and self.btn_clear_manga:
+                self.btn_clear_manga.configure(state="disabled")
 
     def _replace_all(self):
         find_w = self.find_entry.get().strip()
@@ -981,7 +1156,10 @@ class SubtitleEditorDialog(ctk.CTkToplevel):
                     "start": s,
                     "end": e,
                     "text": txt,
-                    "words": updated_words
+                    "words": updated_words,
+                    "is_manga_cutout": bool(r.get("is_manga_cutout", False)),
+                    "manga_card_id": int(r.get("manga_card_id", 0)),
+                    "manga_line": int(r.get("manga_line", 0))
                 })
             else:
                 interp = _interpolate_words(txt, s, e)
@@ -993,7 +1171,10 @@ class SubtitleEditorDialog(ctk.CTkToplevel):
                     "start": s,
                     "end": e,
                     "text": txt,
-                    "words": interp
+                    "words": interp,
+                    "is_manga_cutout": bool(r.get("is_manga_cutout", False)),
+                    "manga_card_id": int(r.get("manga_card_id", 0)),
+                    "manga_line": int(r.get("manga_line", 0))
                 })
 
         selected_style_label = self.style_var.get()

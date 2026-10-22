@@ -2,7 +2,7 @@
 ; Generates a professional single-file Setup.exe with instant-launch installed files
 
 #define MyAppName "Urahara"
-#define MyAppVersion "1.1.0"
+#define MyAppVersion "1.2.0"
 #define MyAppPublisher "Vinicius Dias"
 #define MyAppURL "https://github.com/ViniciusGDias/Upscaling"
 #define MyAppExeName "Urahara.exe"
@@ -33,7 +33,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
 
 [Files]
-Source: "dist\Urahara\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "dist\Urahara\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: ".env"
 Source: "bin\*"; DestDir: "{app}\bin"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "bin\*"; DestDir: "{app}\_internal\bin"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "app_icon.ico"; DestDir: "{app}"; Flags: ignoreversion

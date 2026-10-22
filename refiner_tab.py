@@ -27,26 +27,14 @@ from upscaler import (
 )
 import icon_manager
 
+import urahara_theme
+
 COLORS = {
-    "bg_dark": "#09090b",
-    "bg_card": "#121216",
-    "bg_card_hover": "#18181e",
-    "accent_primary": "#10b981",
-    "accent_secondary": "#059669",
-    "accent_refiner": "#10b981",
-    "accent_refiner_hover": "#059669",
-    "accent_studio": "#7c3aed",
-    "accent_studio_hover": "#6d28d9",
-    "success": "#10b981",
-    "warning": "#f59e0b",
-    "error": "#ef4444",
-    "text_primary": "#fafafa",
-    "text_secondary": "#a1a1aa",
-    "text_muted": "#a1a1aa",
-    "border": "#222228",
-    "border_active": "#10b981",
-    "console_bg": "#050505",
-    "console_text": "#a1a1aa",
+    **urahara_theme.COLORS,
+    "accent_refiner": urahara_theme.COLORS["accent_primary"],
+    "accent_refiner_hover": urahara_theme.COLORS["accent_hover"],
+    "accent_studio": urahara_theme.COLORS["accent_benihime"],
+    "accent_studio_hover": urahara_theme.COLORS["accent_benihime_hover"],
 }
 
 
@@ -85,6 +73,8 @@ class RefinerMastercutTab(ctk.CTkFrame):
         self._build_action_section()
         self._build_progress_section()
         self._build_result_section()
+        self.after(600, self._check_ollama_status_async)
+
 
     # ── Header ────────────────────────────────────────────────────────────
 
@@ -288,25 +278,234 @@ class RefinerMastercutTab(ctk.CTkFrame):
             text_color=COLORS["text_primary"], anchor="w",
         ).pack(fill="x", pady=(0, 12))
 
-        # Context (Anime / Series name)
-        ctx_row = ctk.CTkFrame(inner, fg_color="transparent")
-        ctx_row.pack(fill="x", pady=(0, 12))
+        # ─── CAMPO 1: NOME DA OBRA / TÍTULO (Busca de Metadados / Lore na API) ───
+        title_row = ctk.CTkFrame(inner, fg_color="transparent")
+        title_row.pack(fill="x", pady=(0, 10))
+
+        title_header = ctk.CTkFrame(title_row, fg_color="transparent")
+        title_header.pack(fill="x", pady=(0, 3))
 
         ctk.CTkLabel(
-            ctx_row, text="Contexto / Nome da Obra (Opcional):",
-            font=ctk.CTkFont(family="Segoe UI", size=12),
-            text_color=COLORS["text_secondary"], anchor="w",
-        ).pack(fill="x", pady=(0, 4))
+            title_header, text="🎬 Nome da Obra / Título:",
+            font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
+            text_color=COLORS["text_primary"], anchor="w",
+        ).pack(side="left")
 
-        self.context_entry = ctk.CTkEntry(
-            ctx_row,
-            placeholder_text="Ex: Pousando no Amor Ep 10, Vincenzo Ep 4, Jujutsu Kaisen 2 Ep 17...",
+        ctk.CTkLabel(
+            title_header, text="(Busca Personagens e Lore na API)",
+            font=ctk.CTkFont(family="Segoe UI", size=10),
+            text_color=COLORS["text_secondary"], anchor="w",
+        ).pack(side="left", padx=(6, 0))
+
+        self.work_title_entry = ctk.CTkEntry(
+            title_row,
+            placeholder_text="Ex: Mashle, Jujutsu Kaisen, Pousando no Amor, Vincenzo, Bleach...",
             font=ctk.CTkFont(family="Segoe UI", size=12),
             fg_color=COLORS["bg_dark"], border_color=COLORS["border"],
             text_color=COLORS["text_primary"],
             height=34, corner_radius=8,
         )
-        self.context_entry.pack(fill="x")
+        self.work_title_entry.pack(fill="x")
+
+        # ─── CAMPO 2: ESTILO DE CLÍMAX & FOCO RÁPIDO (Enviado Somente à IA) ───
+        climax_row = ctk.CTkFrame(inner, fg_color="transparent")
+        climax_row.pack(fill="x", pady=(0, 10))
+
+        climax_header = ctk.CTkFrame(climax_row, fg_color="transparent")
+        climax_header.pack(fill="x", pady=(0, 3))
+
+        ctk.CTkLabel(
+            climax_header, text="🎯 Tipo de Clímax / Foco da Cena:",
+            font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
+            text_color=COLORS["text_primary"], anchor="w",
+        ).pack(side="left")
+
+        ctk.CTkLabel(
+            climax_header, text="(Enviado SOMENTE à IA • Zero busca na API)",
+            font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
+            text_color="#10b981", anchor="w",
+        ).pack(side="left", padx=(6, 0))
+
+        self.climax_values_map = {
+            "auto": "🤖 Automático (A IA identifica o momento de maior clímax da cena)",
+            "action": "💥 Ação Épica & Golpe Final (Confronto, poder máximo e vitória)",
+            "comedy": "😂 Comédia & Trapalhada (Reações hilárias e quebra cômica)",
+            "shock": "😱 Choque & 'É o quê?!' (Feito impossível / revelação inacreditável)",
+            "taunt": "🔥 Provocação & Resposta Ácida (Aura de superioridade e deboche)",
+            "drama": "😭 Emoção & Drama Profundo (Tensão dramática, lágrimas ou despedida)",
+            "romance": "💕 Romance & Tensão (Quase-beijo, declaração ou troca de olhares)",
+            "threat": "⚔️ Tensão / Ameaça Iminente (Encarada séria, perigo e contagem)",
+            "custom": "✍️ Personalizado (Definir apenas pelo texto abaixo)",
+        }
+        self.climax_keys_by_label = {v: k for k, v in self.climax_values_map.items()}
+
+        self.climax_type_var = ctk.StringVar(value=self.climax_values_map["auto"])
+        self.climax_type_menu = ctk.CTkOptionMenu(
+            climax_row,
+            variable=self.climax_type_var,
+            values=list(self.climax_values_map.values()),
+            font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
+            height=32, corner_radius=8,
+            fg_color=COLORS["bg_dark"],
+            button_color=COLORS["border"],
+            button_hover_color=COLORS["accent_primary"],
+            text_color=COLORS["text_primary"],
+            dropdown_fg_color=COLORS["bg_card"],
+            dropdown_hover_color=COLORS["bg_card_hover"],
+            dropdown_text_color=COLORS["text_primary"],
+            command=self._on_climax_type_change,
+        )
+        self.climax_type_menu.pack(fill="x")
+
+        # ─── CAMPO 3: DETALHES ADICIONAIS DA CENA (Opcional) ───
+        scene_row = ctk.CTkFrame(inner, fg_color="transparent")
+        scene_row.pack(fill="x", pady=(0, 12))
+
+        scene_header = ctk.CTkFrame(scene_row, fg_color="transparent")
+        scene_header.pack(fill="x", pady=(0, 3))
+
+        ctk.CTkLabel(
+            scene_header, text="💡 Detalhes Específicos da Cena (Opcional):",
+            font=ctk.CTkFont(family="Segoe UI", size=11),
+            text_color=COLORS["text_secondary"], anchor="w",
+        ).pack(side="left")
+
+        self.scene_context_entry = ctk.CTkEntry(
+            scene_row,
+            placeholder_text="Opcional: Ex: foco na cena da varinha no chão, choque dos magos com 'É o quê?!'...",
+            font=ctk.CTkFont(family="Segoe UI", size=12),
+            fg_color=COLORS["bg_dark"], border_color=COLORS["border"],
+            text_color=COLORS["text_primary"],
+            height=34, corner_radius=8,
+        )
+        self.scene_context_entry.pack(fill="x")
+
+        # Alias de compatibilidade
+        self.context_entry = self.scene_context_entry
+
+
+
+        # ─── MOTOR DE IA (100% LOCAL VS NUVEM HÍBRIDA) ───
+        ai_engine_row = ctk.CTkFrame(inner, fg_color="transparent")
+        ai_engine_row.pack(fill="x", pady=(0, 10))
+
+        ai_header_row = ctk.CTkFrame(ai_engine_row, fg_color="transparent")
+        ai_header_row.pack(fill="x", pady=(0, 4))
+
+        ctk.CTkLabel(
+            ai_header_row, text="Motor de Inteligência Artificial:",
+            font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
+            text_color=COLORS["text_primary"], anchor="w",
+        ).pack(side="left")
+
+        self.ollama_status_badge = ctk.CTkLabel(
+            ai_header_row, text="Verificando Ollama...",
+            font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
+            text_color=COLORS["text_secondary"],
+            fg_color=COLORS["bg_dark"],
+            corner_radius=4, padx=6, pady=1,
+        )
+        self.ollama_status_badge.pack(side="right")
+
+        self.ai_engine_values_map = {
+            "gemini_web": "🌐 Gemini Web (Navegador Pro / Tokens Ilimitados do Web Chat)",
+            "ollama_local": "🖥️ 100% IA Local (Ollama Qwen 2.5 7B + RTX 5060 / Zero Custos)",
+            "cloud": "☁️ Nuvem Híbrida (Google Gemini 2.5 Flash + Groq Whisper)",
+            "auto": "🤖 Automático (Ollama Local se Ativo, senão Nuvem)",
+        }
+        self.ai_engine_keys_by_label = {v: k for k, v in self.ai_engine_values_map.items()}
+
+        from settings_manager import load_app_settings
+        saved_settings = load_app_settings()
+        default_engine = saved_settings.get("refiner_ai_engine", "auto")
+        if default_engine not in self.ai_engine_values_map:
+            default_engine = "auto"
+
+        self.ai_engine_var = ctk.StringVar(value=self.ai_engine_values_map[default_engine])
+        self.ai_engine_menu = ctk.CTkOptionMenu(
+            ai_engine_row,
+            variable=self.ai_engine_var,
+            values=list(self.ai_engine_values_map.values()),
+            font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
+            height=32, corner_radius=8,
+            fg_color=COLORS["bg_dark"],
+            button_color=COLORS["border"],
+            button_hover_color=COLORS["accent_primary"],
+            text_color=COLORS["text_primary"],
+            dropdown_fg_color=COLORS["bg_card"],
+            dropdown_hover_color=COLORS["bg_card_hover"],
+            dropdown_text_color=COLORS["text_primary"],
+            command=self._on_ai_engine_change,
+        )
+        self.ai_engine_menu.pack(fill="x")
+
+        # ─── SELETOR DE MODELO LOCAL OLLAMA (Dinâmico / Modelos de Elite) ───
+        from settings_manager import get_all_selectable_ollama_models, get_installed_ollama_models
+        self.local_models_list = get_all_selectable_ollama_models()
+        self.local_model_keys_by_label = {label: code for code, label in self.local_models_list}
+        self.local_model_labels_by_code = {code: label for code, label in self.local_models_list}
+
+        self.local_model_row = ctk.CTkFrame(inner, fg_color="transparent")
+        if default_engine not in ("cloud", "gemini_web"):
+            self.local_model_row.pack(fill="x", pady=(4, 10))
+
+        lm_header = ctk.CTkFrame(self.local_model_row, fg_color="transparent")
+        lm_header.pack(fill="x", pady=(0, 2))
+
+        ctk.CTkLabel(
+            lm_header, text="🧠 Modelo de IA Local (Ollama na GPU RTX 5060):",
+            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+            text_color="#10b981", anchor="w"
+        ).pack(side="left")
+
+        # Seleciona o melhor modelo instalado disponível (prioriza qwen3.8:27b, depois qwen2.5:7b)
+        installed_now = get_installed_ollama_models()
+        def_code = "qwen2.5:7b"
+        if any("qwen3.8" in m for m in installed_now):
+            def_code = "qwen3.8:27b"
+        elif any("qwen2.5:7b" in m for m in installed_now):
+            def_code = "qwen2.5:7b"
+        elif installed_now:
+            def_code = installed_now[0]
+
+        cur_saved_model = saved_settings.get("director_local_model", def_code)
+        def_label = self.local_model_labels_by_code.get(cur_saved_model, self.local_models_list[0][1])
+
+        self.local_model_var = ctk.StringVar(value=def_label)
+        self.local_model_menu = ctk.CTkOptionMenu(
+            self.local_model_row,
+            variable=self.local_model_var,
+            values=[label for _, label in self.local_models_list],
+            font=ctk.CTkFont(family="Segoe UI", size=11),
+            height=30, corner_radius=8,
+            fg_color=COLORS["bg_dark"],
+            button_color=COLORS["border"],
+            button_hover_color=COLORS["accent_primary"],
+            text_color=COLORS["text_primary"],
+            dropdown_fg_color=COLORS["bg_card"],
+            dropdown_hover_color=COLORS["bg_card_hover"],
+            dropdown_text_color=COLORS["text_primary"],
+        )
+        self.local_model_menu.pack(fill="x")
+
+        # Linha para Automação do Gemini Web (Login no Gemini Pro)
+        self.row_gemini_web = ctk.CTkFrame(inner, fg_color="transparent")
+        ctk.CTkButton(
+            self.row_gemini_web,
+            text="🔑 Conectar Conta Google (Login no Gemini Pro)",
+            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+            fg_color="#1e1b4b",
+            hover_color="#312e81",
+            text_color="#a5b4fc",
+            border_width=1,
+            border_color="#4338ca",
+            height=28,
+            corner_radius=8,
+            command=self._on_connect_gemini_web
+        ).pack(fill="x", pady=(2, 6))
+
+        if default_engine == "gemini_web":
+            self.row_gemini_web.pack(fill="x", pady=(2, 6))
 
         # ─── DOMINANT UNIFIED EDIT PROFILE ───
         profile_row = ctk.CTkFrame(inner, fg_color="transparent")
@@ -319,6 +518,7 @@ class RefinerMastercutTab(ctk.CTkFrame):
         ).pack(fill="x", pady=(0, 4))
 
         self.profile_values_map = {
+            "viral_59": "⚡ Viral Flow 59s (Duplo Refino IA + J-Cut Suave: Máx 59s)",
             "viral": "⚡ Edição Viral Pro (TikTok / Reels / Shorts: Alta Retenção)",
             "dorama": "🎭 Dorama Dramático (K-Drama: Diálogos Íntegros + Tensão Emocional)",
             "narrative": "🎬 Mastercut Narrativo (100% Cronológico, Sem Repetições)",
@@ -650,11 +850,102 @@ class RefinerMastercutTab(ctk.CTkFrame):
             font=ctk.CTkFont(family="Segoe UI", size=12),
             text_color=COLORS["text_secondary"], anchor="w",
         )
-        self.stats_label.pack(fill="x", pady=(4, 12))
+        self.stats_label.pack(fill="x", pady=(4, 8))
+
+        # Script Storyboard Card (Roteiro Narrativo da Cena)
+        self.script_card = ctk.CTkFrame(
+            r_inner,
+            fg_color=COLORS["bg_dark"],
+            border_width=1,
+            border_color=COLORS["border"],
+            corner_radius=8
+        )
+        s_header = ctk.CTkFrame(self.script_card, fg_color="transparent")
+        s_header.pack(fill="x", padx=12, pady=(8, 4))
+        ctk.CTkLabel(
+            s_header,
+            text="🎬 Roteiro Narrativo da Cena (Roteirista IA)",
+            font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
+            text_color="#38bdf8",
+            anchor="w"
+        ).pack(side="left")
+
+        self.script_body_label = ctk.CTkLabel(
+            self.script_card,
+            text="",
+            font=ctk.CTkFont(family="Segoe UI", size=11),
+            text_color=COLORS["text_secondary"],
+            justify="left",
+            anchor="w",
+            wraplength=640
+        )
+        self.script_body_label.pack(fill="x", padx=12, pady=(0, 10))
+        self.script_card.pack_forget()
+
+        # Feedback & Direction Correction Card (Ajustar corte / Adicionar momentos faltantes)
+        self.correction_card = ctk.CTkFrame(
+            r_inner,
+            fg_color=COLORS["bg_dark"],
+            border_width=1,
+            border_color="#f59e0b",
+            corner_radius=10
+        )
+        self.correction_card.pack(fill="x", pady=(0, 12))
+
+        c_header = ctk.CTkFrame(self.correction_card, fg_color="transparent")
+        c_header.pack(fill="x", padx=14, pady=(10, 4))
+
+        ctk.CTkLabel(
+            c_header,
+            text="🎬 Direção da Cena: Ajustar ou Adicionar Momento com a IA",
+            font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
+            text_color="#f59e0b",
+            anchor="w"
+        ).pack(side="left")
+
+        ctk.CTkLabel(
+            self.correction_card,
+            text="Faltou algum momento ou ficou fora de contexto (ex: 'faltou mostrar ele pegando a espada')? Fale para a IA e ela reajustará o corte em segundos reaproveitando a análise:",
+            font=ctk.CTkFont(family="Segoe UI", size=11),
+            text_color=COLORS["text_secondary"],
+            justify="left",
+            anchor="w",
+            wraplength=640
+        ).pack(fill="x", padx=14, pady=(0, 8))
+
+        c_input_row = ctk.CTkFrame(self.correction_card, fg_color="transparent")
+        c_input_row.pack(fill="x", padx=14, pady=(0, 10))
+
+        self.correction_entry = ctk.CTkEntry(
+            c_input_row,
+            placeholder_text="Ex: Faltou mostrar ele pegando a espada aos ~45s antes do ataque, traga isso pro corte...",
+            font=ctk.CTkFont(family="Segoe UI", size=12),
+            fg_color=COLORS["bg_card"],
+            border_color=COLORS["border"],
+            text_color=COLORS["text_primary"],
+            height=38,
+            corner_radius=8
+        )
+        self.correction_entry.pack(side="left", fill="x", expand=True, padx=(0, 8))
+        self.correction_entry.bind("<Return>", lambda e: self._start_feedback_correction())
+
+        self.apply_correction_btn = ctk.CTkButton(
+            c_input_row,
+            text="⚡ Corrigir Corte com IA",
+            font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
+            fg_color="#f59e0b",
+            hover_color="#d97706",
+            text_color="#09090b",
+            height=38,
+            corner_radius=8,
+            command=self._start_feedback_correction
+        )
+        self.apply_correction_btn.pack(side="right")
 
         # Action buttons row: Preview + Send to Studio + Send to Upscaler + Folder
-        btn_row = ctk.CTkFrame(r_inner, fg_color="transparent")
-        btn_row.pack(fill="x")
+        self.result_btn_row = ctk.CTkFrame(r_inner, fg_color="transparent")
+        self.result_btn_row.pack(fill="x")
+        btn_row = self.result_btn_row
 
         self.preview_btn = ctk.CTkButton(
             btn_row, text="Pré-visualizar",
@@ -770,8 +1061,12 @@ class RefinerMastercutTab(ctk.CTkFrame):
             if origin and origin.get("is_continuous"):
                 dur = origin.get("continuous_duration", 0.0) or (self.current_video_info.duration if self.current_video_info else 0.0)
                 ep = origin.get("source_episode", "Episódio")
-                title = origin.get("title", "")
+                title = origin.get("title", "") or origin.get("anime", "") or origin.get("source_title", "")
                 title_str = f" ('{title}')" if title else ""
+
+                if title and hasattr(self, "work_title_entry") and not self.work_title_entry.get().strip():
+                    self.work_title_entry.delete(0, "end")
+                    self.work_title_entry.insert(0, title)
 
                 msg = (
                     f"Origem Identificada: Trecho contínuo de {dur:.1f}s extraído de '{ep}'{title_str}.\n"
@@ -871,6 +1166,113 @@ class RefinerMastercutTab(ctk.CTkFrame):
         resolved_key, profile = self._get_resolved_profile()
         return profile.get("editorial_mode", "viral_editor")
 
+    def _on_ai_engine_change(self, val):
+        key = self.ai_engine_keys_by_label.get(val, "auto")
+        from settings_manager import save_app_settings
+        save_app_settings(refiner_ai_engine=key)
+        self._check_ollama_status_async()
+
+    def _on_climax_type_change(self, val):
+        """Atualiza a dica do campo de texto caso o usuário troque o tipo de clímax."""
+        key = getattr(self, "climax_keys_by_label", {}).get(val, "auto")
+        hints = {
+            "auto": "Opcional: Ex: foco na cena da varinha no chão, choque dos magos...",
+            "action": "Opcional: Ex: clímax no momento do ataque especial ou soco final...",
+            "comedy": "Opcional: Ex: clímax na punchline cômica ou expressão do personagem...",
+            "shock": "Opcional: Ex: clímax no momento em que ele puxa a varinha e todos gritam 'É o quê?!'...",
+            "taunt": "Opcional: Ex: focar na fala debochada e cara de desdém...",
+            "drama": "Opcional: Ex: clímax na revelação triste ou despedida...",
+            "romance": "Opcional: Ex: clímax na aproximação dos rostos ou confissão...",
+            "threat": "Opcional: Ex: clímax no momento em que o vilão se aproxima...",
+            "custom": "Digite as instruções do foco da cena aqui...",
+        }
+        if hasattr(self, "scene_context_entry"):
+            hint = hints.get(key, "Opcional: detalhe o foco do corte...")
+            self.scene_context_entry.configure(placeholder_text=hint)
+
+    def _check_ollama_status_async(self):
+        def _checker():
+            text = "⚪ Ollama Offline"
+            text_color = "#a1a1aa"
+            fg_color = "#1f2937"
+            models = []
+            try:
+                import requests
+                r = requests.get("http://localhost:11434/api/tags", timeout=1.5)
+                if r.status_code == 200:
+                    models = [m.get("name", "") for m in r.json().get("models", [])]
+                    preferred = "qwen3.8:27b" if any("qwen3.8" in m for m in models) else ("qwen2.5:7b" if any("qwen2.5:7b" in m for m in models) else (models[0] if models else "Ativo"))
+                    text = f"🟢 Ollama Ativo ({preferred} na GPU)"
+                    text_color = "#10b981"
+                    fg_color = "#064e3b"
+            except Exception:
+                pass
+
+            try:
+                if hasattr(self, "ollama_status_badge") and self.winfo_exists():
+                    self.after(0, lambda: self._apply_ollama_status(text, text_color, fg_color, models))
+            except Exception:
+                pass
+
+        threading.Thread(target=_checker, daemon=True).start()
+
+    def _apply_ollama_status(self, text, text_color, fg_color, installed_models=None):
+        try:
+            if hasattr(self, "ollama_status_badge") and self.winfo_exists():
+                self.ollama_status_badge.configure(
+                    text=text,
+                    text_color=text_color,
+                    fg_color=fg_color
+                )
+            if installed_models and hasattr(self, "local_model_menu"):
+                from settings_manager import get_all_selectable_ollama_models
+                self.local_models_list = get_all_selectable_ollama_models()
+                self.local_model_keys_by_label = {label: code for code, label in self.local_models_list}
+                self.local_model_labels_by_code = {code: label for code, label in self.local_models_list}
+                all_labels = [label for _, label in self.local_models_list]
+                self.local_model_menu.configure(values=all_labels)
+        except Exception:
+            pass
+
+    def _on_ai_engine_change(self, value=None):
+        """Shows or dims local model selector depending on engine choice."""
+        if not hasattr(self, "ai_engine_var"):
+            return
+        selected_label = self.ai_engine_var.get()
+        engine_key = self.ai_engine_keys_by_label.get(selected_label, "auto")
+        try:
+            from settings_manager import save_app_settings
+            save_app_settings(refiner_ai_engine=engine_key)
+        except Exception:
+            pass
+
+        if hasattr(self, "local_model_row"):
+            if engine_key in ("cloud", "gemini_web"):
+                if self.local_model_row.winfo_ismapped():
+                    self.local_model_row.pack_forget()
+            else:
+                if not self.local_model_row.winfo_ismapped():
+                    target_before = getattr(self, "row_gemini_web", getattr(self, "edit_profile_menu", None))
+                    before_w = target_before.master if hasattr(target_before, "master") else None
+                    self.local_model_row.pack(fill="x", pady=(4, 10))
+
+        if hasattr(self, "row_gemini_web"):
+            if engine_key == "gemini_web":
+                if not self.row_gemini_web.winfo_ismapped():
+                    self.row_gemini_web.pack(fill="x", pady=(2, 6))
+            else:
+                if self.row_gemini_web.winfo_ismapped():
+                    self.row_gemini_web.pack_forget()
+
+    def _on_connect_gemini_web(self):
+        try:
+            from gemini_web_automator import open_login_window
+            self._log("🌐 Abrindo Google Chrome para login da sua conta Google no Gemini Pro...")
+            open_login_window(on_log=self._log)
+        except Exception as e:
+            self._log(f"⚠️ Erro ao abrir janela de login: {e}")
+
+
     def _on_setting_changed(self, *args):
         # Support external scripts or tabs setting target_duration_var directly
         if hasattr(self, "target_duration_var"):
@@ -919,7 +1321,12 @@ class RefinerMastercutTab(ctk.CTkFrame):
         reduction_min = round((1.0 - (max_d / dur)) * 100.0) if dur > 0 else 0
         reduction_max = round((1.0 - (min_d / dur)) * 100.0) if dur > 0 else 0
 
-        if resolved_key == "dorama":
+        if resolved_key == "viral_59":
+            hint_msg = (
+                f"⚡ Previsão Viral Flow 59s: {min_d:.1f}s a {max_d:.1f}s (Teto Rígido: 59.0s). "
+                f"Vídeo original: {format_time(dur)}. 🔍 Duplo Refino Ativo: IA Geradora + IA Auditora e transições de áudio ultra-suaves."
+            )
+        elif resolved_key == "dorama":
             hint_msg = (
                 f"⏱️ Previsão Dorama: {min_d:.1f}s a {max_d:.1f}s (~{100 - reduction_max}% a {100 - reduction_min}% preservado). "
                 f"Vídeo original: {format_time(dur)}. 🎭 Proteção de Pausas Ativa: respiração, diálogos completos e olhares de reação preservados."
@@ -996,7 +1403,36 @@ class RefinerMastercutTab(ctk.CTkFrame):
         self.output_path = out_val
         self._run_refine()
 
-    def _run_refine(self):
+    def _start_feedback_correction(self):
+        if self.is_processing:
+            messagebox.showinfo("Em Processamento", "Aguarde o processamento atual terminar antes de solicitar correções.")
+            return
+
+        if not self.input_path or not os.path.exists(self.input_path):
+            messagebox.showwarning("Aviso", "Vídeo de entrada não encontrado.")
+            return
+
+        feedback = self.correction_entry.get().strip() if hasattr(self, "correction_entry") else ""
+        if not feedback:
+            messagebox.showwarning(
+                "Feedback Vazio",
+                "Por favor, descreva o que faltou ou o que precisa ser ajustado na cena.\n\n"
+                "Exemplo: 'Faltou mostrar ele pegando a espada aos ~45s antes de atacar'."
+            )
+            return
+
+        prev_segments = self.last_result.get("segments") if (hasattr(self, "last_result") and self.last_result) else None
+
+        # Gerar novo nome de arquivo de saída para preservar o corte anterior
+        in_p = Path(self.input_path)
+        corr_out = str(in_p.parent / f"{in_p.stem}_corrigido_{int(time.time())}.mp4")
+        self.output_entry.delete(0, "end")
+        self.output_entry.insert(0, corr_out)
+        self.output_path = corr_out
+
+        self._run_refine(user_feedback=feedback, previous_segments=prev_segments)
+
+    def _run_refine(self, user_feedback="", previous_segments=None):
         self.is_processing = True
         self._start_time = time.time()
         self.generate_btn.configure(state="disabled", text="Processando Mastercut...")
@@ -1036,13 +1472,38 @@ class RefinerMastercutTab(ctk.CTkFrame):
             else:
                 anti_copy = "youtube_max"
         is_continuous_clip = bool(self._current_cut_origin and self._current_cut_origin.get("is_continuous"))
-        video_ctx = self.context_entry.get().strip() if hasattr(self, 'context_entry') else ""
+        work_title = self.work_title_entry.get().strip() if hasattr(self, 'work_title_entry') else ""
+        raw_scene_text = self.scene_context_entry.get().strip() if hasattr(self, 'scene_context_entry') else (
+            self.context_entry.get().strip() if hasattr(self, 'context_entry') else ""
+        )
 
+        # Resolução do Foco do Clímax (Dropdown + Texto opcional)
+        climax_val = self.climax_type_var.get() if hasattr(self, 'climax_type_var') else ""
+        climax_key = getattr(self, "climax_keys_by_label", {}).get(climax_val, "auto")
+        climax_hints = {
+            "action": "Foco prioritário em Ação Épica, combate dinâmico e clímax no golpe/ataque decisivo",
+            "comedy": "Foco prioritário em Comédia, trapalhadas, quebra cômica e clímax na punchline/reação hilária",
+            "shock": "Foco prioritário em Choque e revelação inacreditável, feito impossível e clímax na reação de espanto e 'É o quê?!'",
+            "taunt": "Foco prioritário em Provocação e superioridade absoluta, intimidando o oponente com resposta ácida e deboche",
+            "drama": "Foco prioritário em Emoção Intensa, drama comovente, lágrimas, reencontro ou despedida marcante",
+            "romance": "Foco prioritário em Romance e Química entre personagens, declaração, quase-beijo ou troca de olhares",
+            "threat": "Foco prioritário em Tensão e Ameaça Iminente, encarada tensa, perigo iminente e contagem regressiva",
+        }
+        chosen_hint = climax_hints.get(climax_key, "")
+        if chosen_hint:
+            if raw_scene_text:
+                scene_ctx = f"{chosen_hint}. Detalhes adicionais: {raw_scene_text}"
+            else:
+                scene_ctx = chosen_hint
+        else:
+            scene_ctx = raw_scene_text
+
+        combined_context = f"{work_title} {scene_ctx}".strip()
         is_dorama = (
             resolved_key == "dorama"
             or refine_mode == "dorama"
             or editorial_mode == "dorama"
-            or any(k in video_ctx.lower() for k in ("dorama", "kdrama", "k-drama", "coreano", "c-drama", "j-drama", "doramas"))
+            or any(k in combined_context.lower() for k in ("dorama", "kdrama", "k-drama", "coreano", "c-drama", "j-drama", "doramas"))
         )
 
         if is_dorama:
@@ -1061,8 +1522,28 @@ class RefinerMastercutTab(ctk.CTkFrame):
         else:
             self._log("[AVISO] Proteção Anti-Copyright: DESATIVADA")
 
-        if video_ctx:
-            self._log(f"Contexto: {video_ctx}")
+        ai_engine_key = self.ai_engine_keys_by_label.get(self.ai_engine_var.get(), "auto") if hasattr(self, "ai_engine_var") else "auto"
+        ai_engine_label = self.ai_engine_var.get() if hasattr(self, "ai_engine_var") else "Automático"
+        self._log(f"Motor IA:   {ai_engine_label}")
+
+        chosen_local_model = ""
+        if hasattr(self, "local_model_var") and hasattr(self, "local_model_keys_by_label"):
+            lbl = self.local_model_var.get()
+            chosen_local_model = self.local_model_keys_by_label.get(lbl, "")
+        if ai_engine_key in ("ollama_local", "auto") and chosen_local_model:
+            self._log(f"Modelo Local: {chosen_local_model} (na RTX 5060)")
+
+        if work_title:
+            self._log(f"Obra/Título:  {work_title} (Busca de Lore/Personagens na API)")
+        if climax_key != "auto" and climax_key != "custom":
+            self._log(f"Clímax Foco:  {climax_val}")
+        if scene_ctx:
+            self._log(f"Foco da Cena: {scene_ctx} (Instrução direta para a IA)")
+        if user_feedback:
+            self._log(f"🛠️ [DIREÇÃO & CORREÇÃO IA] Aplicando feedback do diretor: \"{user_feedback}\"")
+            if previous_segments:
+                self._log(f"📋 [PROPOSTA ANTERIOR] Base de {len(previous_segments)} cortes anteriores enviada para reconstrução cirúrgica.")
+
         if demucs_iso:
             self._log("[AI] Isolamento com IA Demucs: ATIVADO (Removerá 100% do instrumental)")
 
@@ -1071,7 +1552,11 @@ class RefinerMastercutTab(ctk.CTkFrame):
                 stats = self.pipeline.process(
                     video_path=self.input_path,
                     output_path=self.output_path,
-                    video_context=video_ctx,
+                    video_context=scene_ctx or work_title,
+                    work_title=work_title,
+                    scene_context=scene_ctx,
+                    user_feedback=user_feedback,
+                    previous_segments=previous_segments,
                     vocal_isolation=vocal_iso,
                     demucs_isolation=demucs_iso,
                     anti_copyright=anti_copy,
@@ -1082,6 +1567,8 @@ class RefinerMastercutTab(ctk.CTkFrame):
                     is_continuous_clip=is_continuous_clip,
                     is_dorama=is_dorama,
                     profile_label=f"{profile_label} ({flow_label})" if flow_label else profile_label,
+                    ai_engine=ai_engine_key,
+                    local_model=chosen_local_model,
                     on_progress=lambda p, msg: self.after(0, self._on_progress_update, p, msg),
                     on_log=lambda msg: self.after(0, self._log, msg),
                 )
@@ -1114,6 +1601,24 @@ class RefinerMastercutTab(ctk.CTkFrame):
         self.stats_label.configure(
             text=f"Duração: {dur_before} -> {dur_after} ({pct}% economizado) | {segs} cortes | Tamanho: {size} MB{ed_badge}"
         )
+
+        roteiro = stats.get("roteiro")
+        if roteiro and isinstance(roteiro, dict):
+            lines = []
+            if roteiro.get("premissa"):
+                lines.append(f"• Premissa: {roteiro['premissa']}")
+            if roteiro.get("hook"):
+                lines.append(f"• Hook (Abertura): {roteiro['hook']}")
+            if roteiro.get("conflito_desenvolvimento"):
+                lines.append(f"• Desenvolvimento: {roteiro['conflito_desenvolvimento']}")
+            if roteiro.get("climax_fechamento"):
+                lines.append(f"• Clímax/Fechamento: {roteiro['climax_fechamento']}")
+            script_text = "\n".join(lines) if lines else "Roteiro narrativo gerado com sucesso."
+            self.script_body_label.configure(text=script_text)
+            self.script_card.pack(fill="x", pady=(0, 12), before=self.result_btn_row)
+        else:
+            self.script_card.pack_forget()
+
         self.result_card.pack(fill="x", pady=(0, 10))
         self.after(150, lambda: self.scroll._parent_canvas.yview_moveto(0.55))
         self._log(f"[OK] Concluído com sucesso em {time.time() - self._start_time:.1f}s!")
@@ -1232,7 +1737,10 @@ class RefinerMastercutTab(ctk.CTkFrame):
         ac_mode = "tiktok" if ("tiktok" in mode_str or "padrão" in mode_str or "padrao" in mode_str) else "youtube_max"
 
         self.generate_btn.configure(state="disabled")
-        self.shield_standalone_btn.configure(state="disabled")
+        if hasattr(self, "shield_standalone_btn"):
+            self.shield_standalone_btn.configure(state="disabled")
+        if hasattr(self, "shield_standalone_quick_btn"):
+            self.shield_standalone_quick_btn.configure(state="disabled")
         self.cancel_btn.configure(state="disabled")
         self.progress_bar.set(0.0)
         self.status_label.configure(text="Iniciando blindagem ultra-rápida via FFmpeg NVENC...")
@@ -1268,7 +1776,10 @@ class RefinerMastercutTab(ctk.CTkFrame):
             finally:
                 def _reset_ui():
                     self.generate_btn.configure(state="normal")
-                    self.shield_standalone_btn.configure(state="normal")
+                    if hasattr(self, "shield_standalone_btn"):
+                        self.shield_standalone_btn.configure(state="normal")
+                    if hasattr(self, "shield_standalone_quick_btn"):
+                        self.shield_standalone_quick_btn.configure(state="normal")
                     self.progress_bar.set(0.0)
                     self.status_label.configure(text="Pronto.")
                 self.after(0, _reset_ui)

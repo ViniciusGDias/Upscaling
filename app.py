@@ -82,25 +82,9 @@ if os.path.exists(_theme_path):
 else:
     ctk.set_default_color_theme("green")
 
-# Color palette — Urahara Studio Dark Obsidian & Emerald
-COLORS = {
-    "bg_dark": "#09090b",          # true deep obsidian background
-    "bg_card": "#121216",          # sleek card background
-    "bg_card_hover": "#18181e",    # card hover state
-    "accent_primary": "#10b981",   # Kisuke Emerald Green
-    "accent_secondary": "#059669", # Kisuke Deep Emerald
-    "accent_dark": "#064e3b",      # Deep Forest
-    "success": "#10b981",
-    "warning": "#f59e0b",
-    "error": "#ef4444",
-    "text_primary": "#fafafa",     # pure off-white
-    "text_secondary": "#a1a1aa",   # zinc-400 — clearly visible secondary labels
-    "text_muted": "#a1a1aa",       # zinc-400 — high-readability dark mode text
-    "border": "#222228",           # zinc-800 — ultra-thin borders
-    "border_active": "#10b981",    # Emerald green focus/hover border
-    "console_bg": "#050505",
-    "console_text": "#a1a1aa",     # subtle console grey
-}
+# Color palette — Urahara Shōten Design System (UI/UX Pro Max)
+import urahara_theme
+COLORS = urahara_theme.COLORS
 
 VIDEO_EXTENSIONS = (
     ".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv",
@@ -114,8 +98,8 @@ class VideoUpscalerApp(ctk.CTk):
     def __init__(self):
         super().__init__()
 
-        # Window setup
-        self.title("Urahara")
+        # Window setup — Urahara Studio
+        self.title("Urahara Studio")
         self.geometry("1280x850")
         self.minsize(1050, 700)
         self.configure(fg_color=COLORS["bg_dark"])

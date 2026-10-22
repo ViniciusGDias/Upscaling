@@ -17,7 +17,18 @@ import subprocess
 from pathlib import Path
 from typing import Dict, Any, Optional, Callable, Tuple
 
-CURRENT_VERSION = "1.0.3"
+def _read_local_version() -> str:
+    try:
+        base_dir = Path(__file__).parent.resolve()
+        v_file = base_dir / "version.json"
+        if v_file.exists():
+            with open(v_file, "r", encoding="utf-8") as f:
+                return json.load(f).get("version", "1.2.0")
+    except Exception:
+        pass
+    return "1.2.0"
+
+CURRENT_VERSION = _read_local_version()
 APP_NAME = "Urahara"
 GITHUB_REPO = "ViniciusGDias/Upscaling"
 GITHUB_RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"

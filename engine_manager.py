@@ -201,7 +201,7 @@ def check_all_engines() -> Dict[str, Dict[str, Any]]:
     except Exception:
         pass
 
-    return {
+    res = {
         "ffmpeg": {
             "installed": ffmpeg_ok,
             "path": ffmpeg_exe or "",
@@ -227,8 +227,40 @@ def check_all_engines() -> Dict[str, Dict[str, Any]]:
         },
         "demucs": {
             "available": demucs_ok
+        },
+        "ollama": {
+            "installed": bool(shutil.which("ollama")),
+            "running": False,
+            "models": [],
+            "has_qwen": False
+        },
+        "gemini_web": {
+            "chrome_installed": False,
+            "logged_in": False
         }
     }
+
+    # Ollama Local status check
+    try:
+        import requests
+        r_ol = requests.get("http://127.0.0.1:11434/api/tags", timeout=1.5)
+        if r_ol.status_code == 200:
+            res["ollama"]["running"] = True
+            m_list = [m.get("name", "") for m in r_ol.json().get("models", []) if m.get("name")]
+            res["ollama"]["models"] = m_list
+            res["ollama"]["has_qwen"] = any("qwen2.5" in m for m in m_list)
+    except Exception:
+        pass
+
+    # Gemini Web status check
+    try:
+        import gemini_web_automator
+        res["gemini_web"]["chrome_installed"] = bool(gemini_web_automator.get_chrome_path())
+        res["gemini_web"]["logged_in"] = bool(gemini_web_automator.is_logged_in())
+    except Exception:
+        pass
+
+    return res
 
 
 def download_and_install_ffmpeg(

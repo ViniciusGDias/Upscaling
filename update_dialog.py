@@ -21,18 +21,20 @@ from updater import (
 )
 import icon_manager
 
+import urahara_theme
+
 DIALOG_COLORS = {
-    "bg": "#09090b",
-    "card": "#121216",
-    "card_border": "#222228",
-    "accent_primary": "#10b981",
-    "accent_hover": "#059669",
-    "text_primary": "#fafafa",
-    "text_secondary": "#a1a1aa",
-    "text_muted": "#71717a",
-    "success": "#10b981",
-    "warning": "#f59e0b",
-    "error": "#ef4444",
+    "bg": urahara_theme.COLORS["bg_dark"],
+    "card": urahara_theme.COLORS["bg_card"],
+    "card_border": urahara_theme.COLORS["border"],
+    "accent_primary": urahara_theme.COLORS["accent_primary"],
+    "accent_hover": urahara_theme.COLORS["accent_hover"],
+    "text_primary": urahara_theme.COLORS["text_primary"],
+    "text_secondary": urahara_theme.COLORS["text_secondary"],
+    "text_muted": urahara_theme.COLORS["text_muted"],
+    "success": urahara_theme.COLORS["success"],
+    "warning": urahara_theme.COLORS["warning"],
+    "error": urahara_theme.COLORS["error"],
 }
 
 

@@ -44,15 +44,99 @@ AVAILABLE_GEMINI_MODELS = [
     ("gemini-2.5-flash", "Gemini 2.5 Flash (Legado)"),
 ]
 
+AVAILABLE_DIRECTOR_ENGINES = [
+    ("gemini", "Google Gemini (Padrão Cloud / Grátis & Rápido)"),
+    ("gemini_web", "Gemini Web (Navegador Pro / Tokens Ilimitados do Web Chat)"),
+    ("ollama_local", "Ollama Local (Offline / RTX 5060 / Sem Custos)"),
+    ("qwen_max", "Qwen 2.5 Max (Alibaba / Máximo Raciocínio & Lore)"),
+    ("kimi", "Kimi Moonshot (Janela Longa / Maratona de Episódios)"),
+]
 
-def load_app_settings() -> Dict[str, Any]:
+AVAILABLE_OLLAMA_MODELS = [
+    ("qwen3.8:27b", "Qwen 3.8 27B (Máximo Raciocínio, Narrativa & Lore - 17GB)"),
+    ("qwen2.5:7b", "Qwen 2.5 7B (Ultra Rápido & Slicing Cirúrgico / Recomendado)"),
+    ("qwen2.5:14b", "Qwen 2.5 14B (Equilíbrio Perfeito Velocidade/Inteligência)"),
+    ("qwen2.5vl:7b", "Qwen 2.5 VL 7B (Multimodal Texto & Visão de Cenas)"),
+    ("qwen2.5vl:3b", "Qwen 2.5 VL 3B (Ultra Leve / Economiza VRAM)"),
+    ("deepseek-r1:8b", "DeepSeek R1 8B (Raciocínio Profundo & Clímax)"),
+    ("deepseek-r1:14b", "DeepSeek R1 14B (Raciocínio Avançado)"),
+    ("llama3.1:8b", "Llama 3.1 8B (Ganchos Virais & Copywriting Meta)"),
+    ("llama3.2-vision:latest", "Llama 3.2 Vision (Análise Visual Multimodal)"),
+    ("llama3:latest", "Llama 3 8B (Meta Clássico)"),
+    ("mistral:7b", "Mistral 7B (Direto & Sem Enrolação)"),
+]
+
+def get_installed_ollama_models(timeout: float = 2.0) -> List[str]:
+    """Queries Ollama local instance for currently downloaded models."""
+    try:
+        resp = requests.get("http://localhost:11434/api/tags", timeout=timeout)
+        if resp.status_code == 200:
+            return [m.get("name", "") for m in resp.json().get("models", []) if m.get("name")]
+    except Exception:
+        pass
+    return []
+
+def get_all_selectable_ollama_models() -> List[Tuple[str, str]]:
+    """
+    Returns an enriched list of (code, label) for Ollama models.
+    Marks models that are currently installed with '🟢 [Instalado]'!
+    Also includes any locally installed model not in the predefined list.
+    """
+    installed = get_installed_ollama_models()
+    result = []
+    seen = set()
+
+    for code, label in AVAILABLE_OLLAMA_MODELS:
+        is_inst = any(code == m or code.split(":")[0] == m.split(":")[0] for m in installed)
+        badge = "🟢 " if is_inst else "📥 "
+        inst_note = " [Instalado]" if is_inst else ""
+        result.append((code, f"{badge}{label}{inst_note}"))
+        seen.add(code)
+        seen.add(code.split(":")[0])
+
+    for m in installed:
+        base = m.split(":")[0]
+        if m not in seen and base not in seen:
+            result.append((m, f"🟢 {m} (Modelo Local Detectado) [Instalado]"))
+            seen.add(m)
+
+    return result
+
+AVAILABLE_REFINER_AI_ENGINES = [
+    ("auto", "🤖 Automático (Ollama Local se Ativo, senão Nuvem)"),
+    ("ollama_local", "🖥️ 100% IA Local (Ollama RTX 5060 / Zero Custos)"),
+    ("cloud", "☁️ Nuvem Híbrida (Google Gemini 3.8 Flash + Groq Whisper)"),
+]
+
+
+
+
+def load_app_settings(env_file_path: Optional[Path] = None) -> Dict[str, Any]:
     """Load settings from .env file."""
     global ENV_PATH
-    ENV_PATH = get_env_path()
-    if ENV_PATH.exists():
-        load_dotenv(ENV_PATH, override=True)
+    target_path = env_file_path or ENV_PATH
+    if target_path is None:
+        target_path = get_env_path()
+        ENV_PATH = target_path
+    if target_path and target_path.exists():
+        load_dotenv(target_path, override=True)
     else:
-        load_dotenv(override=False)
+        # Primeiro uso seguro para novos usuários: cria .env a partir do .env.example
+        try:
+            if target_path:
+                example_p = target_path.parent / ".env.example"
+                if not example_p.exists():
+                    example_p = Path(__file__).parent / ".env.example"
+                if example_p.exists():
+                    import shutil
+                    shutil.copy2(example_p, target_path)
+                    load_dotenv(target_path, override=True)
+                else:
+                    load_dotenv(override=False)
+            else:
+                load_dotenv(override=False)
+        except Exception:
+            load_dotenv(override=False)
 
     gemini_raw = os.getenv("GEMINI_API_KEY", "")
     # Format gemini keys as one per line for the UI textarea
@@ -64,6 +148,9 @@ def load_app_settings() -> Dict[str, Any]:
 
     gemini_keys_text = "\n".join(gemini_keys)
     gemini_model = os.getenv("GEMINI_MODEL", "gemini-3.8-flash").strip()
+    director_engine = os.getenv("DIRECTOR_ENGINE", "gemini").strip().lower()
+    director_local_model = os.getenv("DIRECTOR_LOCAL_MODEL", "qwen2.5:7b").strip()
+    refiner_ai_engine = os.getenv("REFINER_AI_ENGINE", "auto").strip().lower()
     groq_key = os.getenv("GROQ_API_KEY", "").strip()
     openrouter_key = os.getenv("OPENROUTER_API_KEY", "").strip()
     felo_key = os.getenv("FELO_API_KEY", "").strip()
@@ -73,6 +160,9 @@ def load_app_settings() -> Dict[str, Any]:
         "gemini_keys": gemini_keys,
         "gemini_keys_text": gemini_keys_text,
         "gemini_model": gemini_model,
+        "director_engine": director_engine,
+        "director_local_model": director_local_model,
+        "refiner_ai_engine": refiner_ai_engine,
         "groq_key": groq_key,
         "openrouter_key": openrouter_key,
         "felo_key": felo_key,
@@ -95,50 +185,83 @@ def parse_keys_from_text(raw_text: str) -> List[str]:
 
 
 def save_app_settings(
-    gemini_keys_text: str,
-    gemini_model: str,
-    groq_key: str = "",
-    openrouter_key: str = "",
-    felo_key: str = "",
-    check_updates: bool = True
+    gemini_keys_text: Optional[str] = None,
+    gemini_model: Optional[str] = None,
+    groq_key: Optional[str] = None,
+    openrouter_key: Optional[str] = None,
+    felo_key: Optional[str] = None,
+    check_updates: Optional[bool] = None,
+    director_engine: Optional[str] = None,
+    director_local_model: Optional[str] = None,
+    refiner_ai_engine: Optional[str] = None,
+    env_file_path: Optional[Path] = None,
 ) -> Tuple[bool, str]:
     """
     Save configuration to .env and synchronize runtime os.environ immediately.
+    Only parameters that are explicitly passed (not None) will be updated.
+    Existing keys in .env will remain intact.
     """
     try:
-        keys_list = parse_keys_from_text(gemini_keys_text)
-        joined_gemini = ",".join(keys_list)
-        clean_groq = groq_key.strip().strip('"\'').splitlines()[0].strip() if groq_key.strip() else ""
-        if clean_groq.startswith("AQ.") or clean_groq.startswith("AIzaSy"):
-            clean_groq = ""  # User mistakenly pasted a Gemini key into Groq
-        clean_or = openrouter_key.strip().strip('"\'').splitlines()[0].strip() if openrouter_key.strip() else ""
-        clean_felo = felo_key.strip().strip('"\'').splitlines()[0].strip() if felo_key.strip() else ""
-        clean_model = gemini_model.strip() or "gemini-3.6-flash"
+        keys_to_update: Dict[str, str] = {}
+        msg_gemini_info = ""
 
-        # Update running os.environ in memory instantly
-        os.environ["GEMINI_API_KEY"] = joined_gemini
-        os.environ["GEMINI_MODEL"] = clean_model
-        os.environ["GROQ_API_KEY"] = clean_groq
-        os.environ["OPENROUTER_API_KEY"] = clean_or
-        os.environ["FELO_API_KEY"] = clean_felo
-        os.environ["CHECK_UPDATES_ON_STARTUP"] = "true" if check_updates else "false"
+        if gemini_keys_text is not None:
+            keys_list = parse_keys_from_text(gemini_keys_text)
+            joined_gemini = ",".join(keys_list)
+            os.environ["GEMINI_API_KEY"] = joined_gemini
+            keys_to_update["GEMINI_API_KEY"] = joined_gemini
+            msg_gemini_info = f" ({len(keys_list)} chave(s) Gemini carregada(s))"
 
-        # Read existing .env if present to preserve other keys
-        global ENV_PATH
-        ENV_PATH = get_env_path()
+        if gemini_model is not None:
+            clean_model = gemini_model.strip() or "gemini-3.8-flash"
+            os.environ["GEMINI_MODEL"] = clean_model
+            keys_to_update["GEMINI_MODEL"] = clean_model
+
+        if director_engine is not None:
+            clean_engine = director_engine.strip().lower() or "gemini"
+            os.environ["DIRECTOR_ENGINE"] = clean_engine
+            keys_to_update["DIRECTOR_ENGINE"] = clean_engine
+
+        if director_local_model is not None:
+            clean_local_model = director_local_model.strip() or "qwen2.5:7b"
+            os.environ["DIRECTOR_LOCAL_MODEL"] = clean_local_model
+            keys_to_update["DIRECTOR_LOCAL_MODEL"] = clean_local_model
+
+        if refiner_ai_engine is not None:
+            clean_ref_engine = refiner_ai_engine.strip().lower() or "auto"
+            os.environ["REFINER_AI_ENGINE"] = clean_ref_engine
+            keys_to_update["REFINER_AI_ENGINE"] = clean_ref_engine
+
+        if groq_key is not None:
+            clean_groq = groq_key.strip().strip('"\'').splitlines()[0].strip() if groq_key.strip() else ""
+            if clean_groq.startswith("AQ.") or clean_groq.startswith("AIzaSy"):
+                clean_groq = ""  # User mistakenly pasted a Gemini key into Groq
+            os.environ["GROQ_API_KEY"] = clean_groq
+            keys_to_update["GROQ_API_KEY"] = clean_groq
+
+        if openrouter_key is not None:
+            clean_or = openrouter_key.strip().strip('"\'').splitlines()[0].strip() if openrouter_key.strip() else ""
+            os.environ["OPENROUTER_API_KEY"] = clean_or
+            keys_to_update["OPENROUTER_API_KEY"] = clean_or
+
+        if felo_key is not None:
+            clean_felo = felo_key.strip().strip('"\'').splitlines()[0].strip() if felo_key.strip() else ""
+            os.environ["FELO_API_KEY"] = clean_felo
+            keys_to_update["FELO_API_KEY"] = clean_felo
+
+        if check_updates is not None:
+            upd_val = "true" if check_updates else "false"
+            os.environ["CHECK_UPDATES_ON_STARTUP"] = upd_val
+            keys_to_update["CHECK_UPDATES_ON_STARTUP"] = upd_val
+
+        target_path = env_file_path or ENV_PATH
+        if target_path is None:
+            target_path = get_env_path()
+
         env_lines = []
-        if ENV_PATH.exists():
-            with open(ENV_PATH, "r", encoding="utf-8") as f:
+        if target_path.exists():
+            with open(target_path, "r", encoding="utf-8") as f:
                 env_lines = f.readlines()
-
-        keys_to_update = {
-            "GEMINI_API_KEY": joined_gemini,
-            "GEMINI_MODEL": clean_model,
-            "GROQ_API_KEY": clean_groq,
-            "OPENROUTER_API_KEY": clean_or,
-            "FELO_API_KEY": clean_felo,
-            "CHECK_UPDATES_ON_STARTUP": "true" if check_updates else "false",
-        }
 
         updated_keys = set()
         new_lines = []
@@ -163,10 +286,10 @@ def save_app_settings(
             if k not in updated_keys:
                 new_lines.append(f"{k}={v}\n")
 
-        with open(ENV_PATH, "w", encoding="utf-8") as f:
+        with open(target_path, "w", encoding="utf-8") as f:
             f.writelines(new_lines)
 
-        return True, f"Configurações salvas com sucesso! ({len(keys_list)} chave(s) Gemini carregada(s))"
+        return True, f"Configurações salvas com sucesso!{msg_gemini_info}"
     except Exception as e:
         return False, f"Erro ao salvar configurações: {e}"
 
@@ -249,6 +372,23 @@ def test_openrouter_connection(api_key: str) -> Tuple[bool, str]:
         return False, f"OpenRouter retornou HTTP {resp.status_code}"
     except Exception as e:
         return False, f"Falha ao conectar com OpenRouter: {e}"
+
+
+def test_ollama_connection(model: str = "qwen2.5:7b") -> Tuple[bool, str]:
+    """Test local Ollama connection and check if requested model is available."""
+    try:
+        resp = requests.get("http://localhost:11434/api/tags", timeout=5)
+        if resp.status_code == 200:
+            models_data = resp.json().get("models", [])
+            installed_names = [m.get("name", "") for m in models_data]
+            matched = any(model in name or name in model for name in installed_names)
+            if matched:
+                return True, f"Ollama Local Ativo! Modelo '{model}' pronto na GPU."
+            inst_str = ", ".join(installed_names[:3]) if installed_names else "nenhum"
+            return True, f"Ollama Ativo! (Modelos detectados: {inst_str})"
+        return False, f"Ollama respondeu com HTTP {resp.status_code}"
+    except Exception:
+        return False, "Ollama não está em execução (localhost:11434 offline)."
 
 
 # Auto-load on import so os.environ is ready across all modules

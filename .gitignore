@@ -2,6 +2,7 @@
 # SEGURANÇA MÁXIMA - Chaves Pessoais e Segredos (NUNCA COMMITTAR NO GIT)
 # ==============================================================================
 .env
+.env.backup
 .env.local
 .env.*.local
 *.key

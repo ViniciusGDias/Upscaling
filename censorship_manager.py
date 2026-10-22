@@ -456,16 +456,53 @@ def apply_soft_blur_to_box(
     return frame
 
 
+def apply_zoom_focus_to_frame(
+    frame: np.ndarray,
+    box: tuple[int, int, int, int],
+    zoom_factor: float = 1.8
+) -> np.ndarray:
+    """
+    Aplica reenquadramento cinematográfico (Punch Zoom / Close-up) centrado na região indicada
+    (por exemplo, no rosto ou expressão do personagem), cortando para fora da tela o restante
+    do corpo ou áreas sensíveis. Preserva 100% da resolução e aspect ratio originais.
+    """
+    h_f, w_f = frame.shape[:2]
+    x1, y1, x2, y2 = box
+    cx = (x1 + x2) // 2
+    cy = (y1 + y2) // 2
+
+    # Limite seguro de fator de zoom (1.15x a 3.5x)
+    zf = max(1.15, min(3.5, float(zoom_factor)))
+
+    crop_w = int(w_f / zf)
+    crop_h = int(h_f / zf)
+
+    # Centraliza o crop em (cx, cy) respeitando rigorosamente as bordas do frame
+    crop_x1 = max(0, min(w_f - crop_w, cx - crop_w // 2))
+    crop_y1 = max(0, min(h_f - crop_h, cy - crop_h // 2))
+    crop_x2 = crop_x1 + crop_w
+    crop_y2 = crop_y1 + crop_h
+
+    roi = frame[crop_y1:crop_y2, crop_x1:crop_x2]
+    if roi.size == 0 or roi.shape[0] < 5 or roi.shape[1] < 5:
+        return frame
+
+    # Interpolação de alta fidelidade (Lanczos4) para manter traços nítidos de anime
+    zoomed = cv2.resize(roi, (w_f, h_f), interpolation=cv2.INTER_LANCZOS4)
+    return zoomed
+
+
 def process_video_visual_censorship(
     input_path: str,
     output_path: str,
     detections: list[dict],
     blur_strength: str = "medium",
+    censor_method: str = "blur",
     persistence_seconds: float = 0.45,
     on_progress: Optional[Callable[[float, str], None]] = None
 ) -> bool:
     """
-    Renderiza o vídeo aplicando o blur suave com persistência temporal e suporte a intervalos manuais.
+    Renderiza o vídeo aplicando a censura visual com suporte a Blur Suave ou Zoom de Foco (Reenquadramento no Rosto).
     """
     if not detections:
         return False
@@ -479,16 +516,29 @@ def process_video_visual_censorship(
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
-    # Agrupa detecções por intervalos de tempo ou usa intervalos prontos
+    # Agrupa detecções por intervalos de tempo ou usa intervalos prontos com metadados de ação
     time_windows = []
     for d in detections:
+        action = d.get("action") or ("zoom" if "zoom" in str(censor_method).lower() else "blur")
+        zf = float(d.get("zoom_factor", 1.8))
         if "start" in d and "end" in d:
-            time_windows.append((float(d["start"]), float(d["end"]), tuple(d["box"])))
+            time_windows.append({
+                "start": float(d["start"]),
+                "end": float(d["end"]),
+                "box": tuple(d["box"]),
+                "action": action,
+                "zoom_factor": zf
+            })
         else:
             t = float(d["time"])
             box = tuple(d["box"])
-            time_windows.append((max(0.0, t - 0.10), t + persistence_seconds, box))
-
+            time_windows.append({
+                "start": max(0.0, t - 0.10),
+                "end": t + persistence_seconds,
+                "box": box,
+                "action": action,
+                "zoom_factor": zf
+            })
 
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
     tmp_out = str(Path(output_path).with_suffix(".tmp.mp4"))
@@ -502,19 +552,29 @@ def process_video_visual_censorship(
 
         current_time = frame_num / fps
 
-        # Localiza boxes ativas neste segundo
-        active_boxes = [box for s, e, box in time_windows if s <= current_time <= e]
-        if active_boxes:
-            # Agrupa boxes muito próximas ou aplica em cada uma
-            for box in active_boxes:
-                frame = apply_soft_blur_to_box(frame, box, blur_strength=blur_strength)
+        # Localiza janelas ativas neste segundo
+        active_windows = [w for w in time_windows if w["start"] <= current_time <= w["end"]]
+        if active_windows:
+            # 1. Aplica Zoom primeiro se houver região com ação de zoom
+            zoom_wins = [w for w in active_windows if w["action"] == "zoom"]
+            blur_wins = [w for w in active_windows if w["action"] == "blur"]
+
+            if zoom_wins:
+                # Usa a primeira região de zoom ativa
+                z_win = zoom_wins[0]
+                frame = apply_zoom_focus_to_frame(frame, z_win["box"], zoom_factor=z_win["zoom_factor"])
+
+            # 2. Se houver regiões com desfoque (blur)
+            for b_win in blur_wins:
+                frame = apply_soft_blur_to_box(frame, b_win["box"], blur_strength=blur_strength)
 
         writer.write(frame)
         frame_num += 1
 
         if on_progress and frame_num % 30 == 0:
             pct = min(1.0, frame_num / max(1, total_frames))
-            on_progress(pct, f"Aplicando Censura Visual Suave... {int(pct*100)}%")
+            desc = "Zoom de Foco no Rosto" if "zoom" in str(censor_method).lower() else "Blur Suave"
+            on_progress(pct, f"Aplicando Censura Visual ({desc})... {int(pct*100)}%")
 
     cap.release()
     writer.release()

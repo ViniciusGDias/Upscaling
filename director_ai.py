@@ -10,6 +10,7 @@ import json
 import time
 import re
 import tempfile
+import threading
 import subprocess
 from pathlib import Path
 from typing import Callable, Optional, Dict, Any, List
@@ -324,6 +325,145 @@ def _safe_log(logger: Optional[Callable[[str], None]], msg: str) -> None:
 # Module-level rotation state and cooldown tracker
 _current_gemini_key_idx: int = 0
 _gemini_key_cooldowns: Dict[str, float] = {}
+# Thread-local record of which provider/model answered the last call_ai_text() in this thread
+_ai_call_state = threading.local()
+
+
+def get_last_ai_provider() -> Dict[str, str]:
+    return dict(getattr(_ai_call_state, "last", {}) or {})
+
+
+def _transcript_fingerprint(transcript: str) -> str:
+    try:
+        from dataset_logger import text_fingerprint
+        return text_fingerprint(transcript)
+    except Exception:
+        return ""
+
+
+def _log_director_sample(prompt: str, raw_response: str, candidates: list, params: Dict[str, Any]) -> None:
+    """Persist the teacher sample for future local-LLM distillation. Never raises."""
+    try:
+        from dataset_logger import log_director_sample
+        log_director_sample(prompt, raw_response or "", get_last_ai_provider(), params, len(candidates or []))
+    except Exception:
+        pass
+
+
+def _call_ollama_local(
+    prompt: str,
+    logger: Optional[Callable[[str], None]] = None,
+    temperature: float = 0.3,
+    local_model: str = ""
+) -> Optional[str]:
+    """Execute inference via local Ollama instance on RTX 5060 GPU with multi-model fallback."""
+    from settings_manager import get_installed_ollama_models
+    installed = get_installed_ollama_models()
+    req = (local_model or os.getenv("DIRECTOR_LOCAL_MODEL", "qwen2.5:7b")).strip()
+
+    priority_order = [
+        "qwen2.5:7b",
+        "qwen3.8:27b",
+        "qwen2.5:14b",
+        "llama3.1:8b",
+        "qwen2.5vl:7b",
+        "deepseek-r1:8b",
+        "deepseek-r1:14b",
+        "llama3:latest",
+    ]
+    models_to_try = [req] if req else []
+    for p in priority_order:
+        for inst in installed:
+            if (p == inst or p in inst) and inst not in models_to_try:
+                models_to_try.append(inst)
+    for inst in installed:
+        if inst not in models_to_try:
+            models_to_try.append(inst)
+    if not models_to_try:
+        models_to_try = ["qwen2.5:7b"]
+
+    url = "http://localhost:11434/api/chat"
+    for idx, target_model in enumerate(models_to_try):
+        is_reasoning = any(k in target_model.lower() for k in ("r1", "reason", "deepseek-r1"))
+        prefix = "🤖 [OLLAMA LOCAL]" if idx == 0 else f"🔄 [CONTINGÊNCIA LOCAL {idx}/{len(models_to_try)-1}]"
+        _safe_log(logger, f"{prefix} Executando análise com {target_model} na GPU...")
+        payload = {
+            "model": target_model,
+            "messages": [{"role": "user", "content": prompt}],
+            "stream": False,
+            "keep_alive": "5m",
+            "options": {"temperature": temperature}
+        }
+        if not is_reasoning:
+            payload["format"] = "json"
+
+        try:
+            resp = requests.post(url, json=payload, timeout=300)
+            if resp.status_code == 200:
+                data = resp.json()
+                content = data.get("message", {}).get("content", "")
+                if content:
+                    if is_reasoning and "<think>" in content:
+                        import re
+                        m = re.search(r'\{.*\}', content, re.DOTALL)
+                        if m:
+                            content = m.group(0)
+                    _ai_call_state.last = {"provider": "ollama_local", "model": target_model}
+                    _safe_log(logger, f"✅ [OLLAMA LOCAL] Análise concluída com sucesso ({target_model})!")
+                    return content
+            _safe_log(logger, f"⚠ Ollama local ({target_model}) retornou HTTP {resp.status_code}.")
+        except Exception as e:
+            err_msg = "tempo limite de 300s esgotado" if "timed out" in str(e).lower() else str(e)
+            _safe_log(logger, f"⚠ Falha no modelo local {target_model}: {err_msg}.")
+
+        if idx + 1 < len(models_to_try):
+            next_m = models_to_try[idx + 1]
+            _safe_log(logger, f"🔄 Alternando automaticamente para outro modelo local instalado: '{next_m}'...")
+
+    return None
+
+
+def _call_openrouter_custom(
+    prompt: str,
+    models: List[str],
+    provider_name: str,
+    logger: Optional[Callable[[str], None]] = None,
+    max_tokens: int = 8192,
+    temperature: float = 0.3
+) -> Optional[str]:
+    """Execute inference via OpenRouter for specialized frontier models (Qwen-Max, Kimi, etc)."""
+    openrouter_key = _get_api_key("OPENROUTER_API_KEY")
+    if not openrouter_key:
+        _safe_log(logger, f"⚠ Chave OpenRouter não configurada para rodar {provider_name}. Alternando para Gemini...")
+        return None
+
+    url = "https://openrouter.ai/api/v1/chat/completions"
+    headers = {"Authorization": f"Bearer {openrouter_key}", "Content-Type": "application/json"}
+    for model in models:
+        try:
+            _safe_log(logger, f"🌐 [{provider_name.upper()}] Consultando modelo {model} via OpenRouter...")
+            payload = {
+                "model": model,
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+                "response_format": {"type": "json_object"}
+            }
+            resp = requests.post(url, headers=headers, json=payload, timeout=90)
+            if resp.status_code == 200:
+                content = resp.json()["choices"][0]["message"]["content"]
+                if content:
+                    _ai_call_state.last = {"provider": "openrouter", "model": model}
+                    _safe_log(logger, f"✅ [{provider_name.upper()}] Resposta recebida de {model}!")
+                    return content
+            elif resp.status_code == 402:
+                _safe_log(logger, f"⚠ [{provider_name.upper()}] Créditos insuficientes no OpenRouter para {model} (HTTP 402).")
+            else:
+                _safe_log(logger, f"ℹ [{provider_name.upper()}] {model} retornou HTTP {resp.status_code}. Tentando próximo...")
+        except Exception:
+            continue
+    _safe_log(logger, f"⚠ Falha em todos os modelos de {provider_name}. Alternando para Gemini...")
+    return None
 
 
 def call_ai_text(
@@ -342,8 +482,48 @@ def call_ai_text(
     """
     global _current_gemini_key_idx, _gemini_key_cooldowns
     _logger = on_log or log_cb
+    _ai_call_state.last = {}
     gemini_keys = _get_gemini_keys()
     gem_max = max(max_tokens or 8192, 4096)
+    req_temp = float(kwargs.get("temperature", 0.3))
+    engine = str(kwargs.get("engine") or os.getenv("DIRECTOR_ENGINE", "gemini")).strip().lower()
+
+    # 0. ENGINE ROUTING: OLLAMA LOCAL OR FRONTIER SPECIALISTS
+    local_model_target = str(kwargs.get("local_model") or os.getenv("DIRECTOR_LOCAL_MODEL", "")).strip()
+    if engine in ("ollama_local", "local", "auto"):
+        local_res = _call_ollama_local(prompt, logger=_logger, temperature=req_temp, local_model=local_model_target)
+        if local_res:
+            return local_res
+        if engine in ("ollama_local", "local"):
+            _safe_log(_logger, "🔒 [100% LOCAL GARANTIDO] Todos os modelos locais instalados falharam. Como 'Ollama Local' foi selecionado, a nuvem (Gemini) NÃO será acionada.")
+            return ""
+
+    elif engine == "qwen_max":
+        qwen_models = ["qwen/qwen-2.5-72b-instruct", "qwen/qwen-max", "qwen/qwen-plus"]
+        qwen_tokens = min(gem_max, 4096)
+        qwen_res = _call_openrouter_custom(prompt, qwen_models, "Qwen-Max", logger=_logger, max_tokens=qwen_tokens, temperature=req_temp)
+        if qwen_res:
+            return qwen_res
+
+    elif engine == "kimi":
+        kimi_models = ["moonshotai/kimi-k3", "moonshotai/kimi-latest", "moonshotai/kimi-k2.6", "moonshotai/kimi-k2.5"]
+        # Limita max_tokens em 2500 para evitar que o OpenRouter exija saldo prévio para 131k tokens
+        kimi_tokens = min(gem_max, 2500)
+        kimi_res = _call_openrouter_custom(prompt, kimi_models, "Kimi", logger=_logger, max_tokens=kimi_tokens, temperature=req_temp)
+        if kimi_res:
+            return kimi_res
+
+    elif engine in ("gemini_web", "web", "gemini_navegador", "navegador"):
+        try:
+            from gemini_web_automator import ask_gemini_web
+            web_res = ask_gemini_web(prompt, timeout=180, on_log=_logger, headless=True)
+            if web_res:
+                return web_res
+            _safe_log(_logger, "⚠️ [GEMINI WEB] Nenhuma resposta obtida. Certifique-se de que sua conta Google está conectada.")
+            return ""
+        except Exception as e:
+            _safe_log(_logger, f"❌ [GEMINI WEB] Erro na automação: {e}")
+            return ""
 
     # 1. TIER 1: GEMINI WITH STATEFUL ROUND-ROBIN & COOLDOWN
     if gemini_keys:
@@ -390,7 +570,7 @@ def call_ai_text(
                     payload = {
                         "contents": [{"parts": [{"text": prompt}]}],
                         "generationConfig": {
-                            "temperature": 0.3,
+                            "temperature": req_temp,
                             "maxOutputTokens": gem_max,
                             "responseMimeType": "application/json"
                         }
@@ -406,6 +586,7 @@ def call_ai_text(
                                 # Advance round-robin index so next query uses next key
                                 _current_gemini_key_idx = (idx + 1) % total_keys
                                 _gemini_key_cooldowns.pop(key, None)
+                                _ai_call_state.last = {"provider": "gemini", "model": model}
                                 return parts[0].get("text", "")
 
                     elif resp.status_code == 404:
@@ -445,7 +626,7 @@ def call_ai_text(
                 payload = {
                     "model": model,
                     "messages": [{"role": "user", "content": prompt}],
-                    "temperature": 0.3,
+                    "temperature": req_temp,
                     "max_tokens": g_tokens,
                     "response_format": {"type": "json_object"}
                 }
@@ -453,6 +634,7 @@ def call_ai_text(
                 if resp.status_code == 200:
                     content = resp.json()["choices"][0]["message"]["content"]
                     if content:
+                        _ai_call_state.last = {"provider": "groq", "model": model}
                         return content
             except Exception:
                 continue
@@ -469,7 +651,7 @@ def call_ai_text(
                 payload = {
                     "model": model,
                     "messages": [{"role": "user", "content": prompt}],
-                    "temperature": 0.3,
+                    "temperature": req_temp,
                     "max_tokens": o_tokens,
                     "response_format": {"type": "json_object"}
                 }
@@ -477,6 +659,7 @@ def call_ai_text(
                 if resp.status_code == 200:
                     content = resp.json()["choices"][0]["message"]["content"]
                     if content:
+                        _ai_call_state.last = {"provider": "openrouter", "model": model}
                         return content
             except Exception:
                 continue
@@ -775,15 +958,14 @@ ATENÇÃO CRÍTICA SOBRE OS TIMESTAMPS:
         fmt_excl = "\n".join(f"  - {r}" for r in excluded_ranges)
         excluded_section = f"""
 [TRECHOS JÁ GERADOS — PROIBIDO REPETIR EM HIPÓTESE ALGUMA]
-⛔ O usuário JÁ VIU os seguintes trechos e quer cortes COMPLETAMENTE DIFERENTES.
-⛔ PROIBIDO repetir, reformular, renomear ou sugerir qualquer trecho que se SOBREPONHA com os abaixo.
-⛔ Um corte que começa apenas 1 minuto antes ou depois de um trecho já gerado E cobre a mesma cena É UMA REPETIÇÃO.
-⛔ Se você repetir um trecho já gerado, o resultado inteiro será descartado.
-
-TRECHOS JÁ GERADOS (TODOS PROIBIDOS):
+⛔ O usuário JÁ VIU os seguintes trechos e clicou em 'Novos Cortes' para ver partes TOTALMENTE DIFERENTES do episódio.
+⛔ PROIBIDO sugerir, repetir, reformular ou incluir qualquer cena ou intervalo de tempo que se sobreponha aos abaixo:
 {fmt_excl}
 
-✅ Explore partes do vídeo que ainda NÃO foram mostradas. Vá para outros momentos, outras cenas, outras emoções.
+🚨 ATENÇÃO MÁXIMA PARA DIVERSIFICAÇÃO:
+- Não comece nem termine cenas perto desses intervalos já extraídos!
+- Explore outras partes da minutagem (início, meio ou clímax alternativo, conversas marcantes de outros personagens, revelações de enredo, confrontos secundários).
+- Se você sugerir um corte que coincida com os trechos acima, o resultado será completamente rejeitado!
 """
     else:
         excluded_section = ""
@@ -1303,7 +1485,9 @@ def analyze_episode(
     on_progress: Optional[Callable[[float, str], None]] = None,
     on_log: Optional[Callable[[str], None]] = None,
     excluded_ranges: Optional[List[str]] = None,
-    content_type: str = "general"
+    content_type: str = "general",
+    engine: Optional[str] = None,
+    local_model: Optional[str] = None
 ) -> tuple:
     """
     Main Director AI pipeline:
@@ -1450,10 +1634,16 @@ def analyze_episode(
         genre=content_type
     )
 
-    raw_response = call_ai_text(prompt, on_log=_log, max_tokens=8192)
+    raw_response = call_ai_text(prompt, on_log=_log, max_tokens=8192, engine=engine, local_model=local_model)
 
     _prog(90, "Formatando candidatos...")
     candidates = _parse_ai_candidates_json(raw_response, on_log=_log)
+    _log_director_sample(prompt, raw_response, candidates, {
+        "call": "analyze", "mode": mode, "cut_mode": cut_mode, "genre": content_type,
+        "video_duration": video_duration, "temperature": 0.3,
+        "has_context": bool(context), "has_lore": bool(lore), "n_excluded": len(excluded_ranges or []),
+        "episode": os.path.basename(video_path), "transcript_sha1": _transcript_fingerprint(transcript),
+    })
 
     # Enforce strict cut_mode bounds (e.g. 2-5m for narrative_arc)
     candidates = enforce_cut_mode_durations(candidates, cut_mode=cut_mode, video_duration=video_duration, on_log=_log)
@@ -1477,7 +1667,10 @@ def analyze_episode_reroll(
     excluded_ranges: Optional[List[str]] = None,
     on_progress: Optional[Callable[[float, str], None]] = None,
     on_log: Optional[Callable[[str], None]] = None,
-    content_type: str = "general"
+    content_type: str = "general",
+    video_path: str = "",
+    engine: Optional[str] = None,
+    local_model: Optional[str] = None
 ) -> List[Dict[str, Any]]:
     """
     Fast re-roll: reuses cached transcript and lore to ask the AI for NEW cuts,
@@ -1509,6 +1702,46 @@ def analyze_episode_reroll(
         "verbal_duel": "Duelo Verbal & Revelação",
     }.get(cut_mode, cut_mode)
 
+    # Parse numeric exclusions for strict overlap checking
+    numeric_exclusions = []
+    for r in (excluded_ranges or []):
+        if isinstance(r, (tuple, list)) and len(r) >= 2:
+            try:
+                s_sec = float(r[0])
+                e_sec = float(r[1])
+                if e_sec > s_sec:
+                    numeric_exclusions.append((s_sec, e_sec))
+            except Exception:
+                pass
+        elif isinstance(r, str):
+            parts = re.split(r"->|-", r)
+            if len(parts) >= 2:
+                s_sec = _time_str_to_seconds(parts[0].strip())
+                e_sec = _time_str_to_seconds(parts[1].strip())
+                if e_sec > s_sec:
+                    numeric_exclusions.append((s_sec, e_sec))
+
+    def _is_overlapping_excluded(cand: dict) -> bool:
+        st = _time_str_to_seconds(cand.get("start_time", 0))
+        et = _time_str_to_seconds(cand.get("end_time", 0))
+        if et <= st:
+            return True
+        for ex_st, ex_et in numeric_exclusions:
+            if ranges_overlap(st, et, ex_st, ex_et, tolerance=15.0):
+                return True
+        return False
+
+    def _deduplicate_candidates(cands: list) -> list:
+        unique = []
+        for c in cands:
+            st = _time_str_to_seconds(c.get("start_time", 0))
+            et = _time_str_to_seconds(c.get("end_time", 0))
+            if et <= st:
+                continue
+            if not any(ranges_overlap(st, et, _time_str_to_seconds(u.get("start_time", 0)), _time_str_to_seconds(u.get("end_time", 0)), tolerance=15.0) for u in unique):
+                unique.append(c)
+        return unique
+
     excl_display = ", ".join(excluded_ranges) if excluded_ranges else "nenhum"
     _log(f"[NOVOS CORTES] Gerando novos cortes (Modo: {cut_mode_label} | Foco: {content_type_label} | Excluídos: {excl_display})...")
     _prog(30, "Construindo novo prompt com trechos excluídos...")
@@ -1525,14 +1758,42 @@ def analyze_episode_reroll(
         genre=content_type
     )
 
-    _prog(60, "IA buscando novos trechos alternativos...")
-    raw_response = call_ai_text(prompt, on_log=_log, max_tokens=8192)
+    _prog(60, "IA buscando novos trechos alternativos (temperatura dinâmica 0.8)...")
+    raw_response = call_ai_text(prompt, on_log=_log, max_tokens=8192, temperature=0.8, engine=engine, local_model=local_model)
 
-    _prog(90, "Formatando novos candidatos...")
+    _prog(85, "Formatando e filtrando novos candidatos contra repetições...")
     candidates = _parse_ai_candidates_json(raw_response, on_log=_log)
-
-    # Enforce strict cut_mode bounds (e.g. 2-5m for narrative_arc)
+    sample_params = {
+        "call": "reroll", "mode": mode, "cut_mode": cut_mode, "genre": content_type,
+        "video_duration": video_duration, "temperature": 0.8,
+        "has_context": bool(context), "has_lore": bool(lore), "n_excluded": len(excluded_ranges or []),
+        "episode": os.path.basename(video_path), "transcript_sha1": _transcript_fingerprint(transcript),
+    }
+    _log_director_sample(prompt, raw_response, candidates, sample_params)
     candidates = enforce_cut_mode_durations(candidates, cut_mode=cut_mode, video_duration=video_duration, on_log=_log)
+
+    valid_candidates = [c for c in candidates if not _is_overlapping_excluded(c)]
+    valid_candidates = _deduplicate_candidates(valid_candidates)
+
+    if len(valid_candidates) < len(candidates):
+        discarded_count = len(candidates) - len(valid_candidates)
+        _log(f"[FILTRO EXCLUSÃO] {discarded_count} cortes repetidos foram descartados automaticamente.")
+
+    # Se a IA ignorou a instrução e retornou apenas trechos já excluídos, faz uma segunda tentativa com prompt enfatizado e temperatura mais alta
+    if not valid_candidates and numeric_exclusions:
+        _log("⚠ Todos os cortes sugeridos colidiram com cenas já vistas. Tentando segunda passagem com variação forçada...")
+        retry_prompt = prompt + "\n\n🚨 ATENÇÃO CRÍTICA: Os trechos sugeridos foram rejeitados por colidirem com os trechos proibidos. VOCÊ DEVE OBRIGATORIAMENTE escolher cenas em OUTROS MINUTOS do vídeo! Busque momentos que acontecem bem antes ou bem depois dos trechos já listados!"
+        raw_retry = call_ai_text(retry_prompt, on_log=_log, max_tokens=8192, temperature=0.92, engine=engine, local_model=local_model)
+        retry_cands = _parse_ai_candidates_json(raw_retry, on_log=_log)
+        _log_director_sample(retry_prompt, raw_retry, retry_cands, {**sample_params, "call": "reroll_retry", "temperature": 0.92})
+        retry_cands = enforce_cut_mode_durations(retry_cands, cut_mode=cut_mode, video_duration=video_duration, on_log=_log)
+        retry_valid = [c for c in retry_cands if not _is_overlapping_excluded(c)]
+        retry_valid = _deduplicate_candidates(retry_valid)
+        if retry_valid:
+            valid_candidates = retry_valid
+            _log(f"[OK] Segunda passagem encontrou {len(valid_candidates)} cortes inéditos!")
+
+    candidates = valid_candidates if valid_candidates else candidates
 
     _prog(100, "Novos cortes gerados!")
     _log(f"[CONCLUÍDO] {len(candidates)} novos cortes alternativos identificados.")

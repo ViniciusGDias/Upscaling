@@ -19,24 +19,12 @@ from audio_separator import (
 )
 from upscaler import format_time, format_file_size
 
+import urahara_theme
+
 COLORS = {
-    "bg_dark": "#09090b",
-    "bg_card": "#111113",
-    "bg_card_hover": "#18181b",
-    "accent_primary": "#e2e8f0",
-    "accent_secondary": "#94a3b8",
-    "accent_audio": "#e2e8f0",
-    "accent_audio_hover": "#a1a1aa",
-    "success": "#22c55e",
-    "warning": "#f59e0b",
-    "error": "#ef4444",
-    "text_primary": "#fafafa",
-    "text_secondary": "#a1a1aa",
-    "text_muted": "#a1a1aa",
-    "border": "#27272a",
-    "border_active": "#52525b",
-    "console_bg": "#050505",
-    "console_text": "#a1a1aa",
+    **urahara_theme.COLORS,
+    "accent_audio": urahara_theme.COLORS["accent_primary"],
+    "accent_audio_hover": urahara_theme.COLORS["accent_hover"],
 }
 
 ALL_EXTENSIONS = AUDIO_EXTENSIONS + VIDEO_EXTENSIONS

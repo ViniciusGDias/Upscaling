@@ -357,15 +357,17 @@ def create_static_overlay(
     draw.text((width - 88, ty_name - 3), "···", fill=(0, 0, 0, 200), font=font_dots)
     draw.text((width - 90, ty_name - 5), "···", fill=(220, 220, 220, 255), font=font_dots)
 
+    from emoji_text_renderer import get_emoji_font, measure_mixed_text, render_mixed_text
+
     def draw_stroked_text(pos, text, font, fill_color, stroke_color, stroke_width):
         draw.text(pos, text, font=font, fill=fill_color, stroke_width=stroke_width, stroke_fill=stroke_color)
 
-    def _balance_wrap_title(text: str, font: ImageFont.ImageFont, max_line_w: int = 940) -> list[str]:
+    def _balance_wrap_title(text: str, font: ImageFont.ImageFont, emoji_font: Optional[ImageFont.ImageFont] = None, max_line_w: int = 940) -> list[str]:
         words = text.split()
         if not words:
             return []
-        b_full = draw.textbbox((0, 0), text, font=font)
-        if (b_full[2] - b_full[0]) <= max_line_w:
+        w_full, _ = measure_mixed_text(draw, text, font, emoji_font)
+        if w_full <= max_line_w:
             return [text]
 
         # Encontra melhor divisao balanceada para 2 linhas
@@ -374,10 +376,8 @@ def create_static_overlay(
         for i in range(1, len(words)):
             l1 = " ".join(words[:i])
             l2 = " ".join(words[i:])
-            b1 = draw.textbbox((0, 0), l1, font=font)
-            b2 = draw.textbbox((0, 0), l2, font=font)
-            w1 = b1[2] - b1[0]
-            w2 = b2[2] - b2[0]
+            w1, _ = measure_mixed_text(draw, l1, font, emoji_font)
+            w2, _ = measure_mixed_text(draw, l2, font, emoji_font)
             if w1 <= max_line_w and w2 <= max_line_w:
                 diff = abs(w1 - w2)
                 if diff < min_diff:
@@ -390,8 +390,8 @@ def create_static_overlay(
         lines, curr = [], []
         for w in words:
             cand = " ".join(curr + [w])
-            cb = draw.textbbox((0, 0), cand, font=font)
-            if (cb[2] - cb[0]) <= max_line_w:
+            cw, _ = measure_mixed_text(draw, cand, font, emoji_font)
+            if cw <= max_line_w:
                 curr.append(w)
             else:
                 if curr:
@@ -404,7 +404,7 @@ def create_static_overlay(
             lines.append(" ".join(curr))
         return lines
 
-    # 3. Titulo do video (calibrado com referencia do video 3: letra maior, 1 linha quando cabe, 2 linhas no topo desfocado)
+    # 3. Titulo do video (calibrado com referencia do video 3: letra maior, 1 linha quando cabe, 2 linhas no topo desfocado, emojis nativos)
     t_lines = []
     line_h = 66
     y_start = 350
@@ -423,18 +423,22 @@ def create_static_overlay(
         sz_multi = max(48, int(round(52 * scale)))
         sz_three = max(42, int(round(46 * scale)))
 
+        emoji_single = get_emoji_font(int(sz_single * 0.88))
+        emoji_multi = get_emoji_font(int(sz_multi * 0.88))
+        emoji_three = get_emoji_font(int(sz_three * 0.88))
+
         try:
             font_single = ImageFont.truetype(font_path, sz_single)
         except Exception:
             font_single = font_name
 
-        single_bbox = draw.textbbox((0, 0), title_upper, font=font_single)
-        single_w = single_bbox[2] - single_bbox[0]
+        single_w, single_h = measure_mixed_text(draw, title_upper, font_single, emoji_single)
 
         max_line_w = 960
         if single_w <= max_line_w:
             t_lines = [title_upper]
             title_font = font_single
+            emoji_title_font = emoji_single
             line_h = max(60, int(round(66 * scale)))
             y_start = 350
         else:
@@ -442,9 +446,10 @@ def create_static_overlay(
                 font_multi = ImageFont.truetype(font_path, sz_multi)
             except Exception:
                 font_multi = font_name
-            t_lines = _balance_wrap_title(title_upper, font_multi, max_line_w=940)
+            t_lines = _balance_wrap_title(title_upper, font_multi, emoji_multi, max_line_w=940)
             if len(t_lines) <= 2:
                 title_font = font_multi
+                emoji_title_font = emoji_multi
                 line_h = max(54, int(round(58 * scale)))
                 y_start = 325
             else:
@@ -452,16 +457,26 @@ def create_static_overlay(
                     font_three = ImageFont.truetype(font_path, sz_three)
                 except Exception:
                     font_three = font_name
-                t_lines = _balance_wrap_title(title_upper, font_three, max_line_w=940)
+                t_lines = _balance_wrap_title(title_upper, font_three, emoji_three, max_line_w=940)
                 title_font = font_three
+                emoji_title_font = emoji_three
                 line_h = max(48, int(round(52 * scale)))
                 y_start = 310
 
         for idx, line in enumerate(t_lines):
-            t_bbox = draw.textbbox((0, 0), line, font=title_font)
-            t_w = t_bbox[2] - t_bbox[0]
+            t_w, _ = measure_mixed_text(draw, line, title_font, emoji_title_font)
             curr_y = y_start + (idx * line_h)
-            draw_stroked_text(((width - t_w) / 2, curr_y), line, title_font, (255, 255, 255, 255), (0, 0, 0, 255), 6)
+            lx = (width - t_w) // 2
+            render_mixed_text(
+                draw,
+                (lx, curr_y),
+                line,
+                main_font=title_font,
+                emoji_font=emoji_title_font,
+                fill_color=(255, 255, 255, 255),
+                stroke_color=(0, 0, 0, 255),
+                stroke_width=6
+            )
 
     # 4. Watermark @ANIMAX_97 - Ampliada para 62px conforme calibracao do video 3
     wm_text = style.get("watermark_text", {}).get("text", "@ANIMAX_97")
@@ -479,7 +494,7 @@ def create_static_overlay(
         wm_y = max(460, last_title_bottom + 25)
     draw_stroked_text(((width - wm_w) / 2, wm_y), wm_text, wm_font, (255, 255, 255, 105), (0, 0, 0, 70), 3)
 
-    # 5. CTA Inferior em 2 linhas com emoji de foguete
+    # 5. CTA Inferior em 2 linhas com suporte universal a emojis
     cta_style = style.get("cta_bar", {})
     cta_l1 = cta_style.get("line1", "FINALMENTE O ALGORITIMO TE TROUXE")
     cta_l2 = cta_style.get("line2", "PRO CANAL CERTO! 🚀 SE INSCREVE")
@@ -489,35 +504,31 @@ def create_static_overlay(
     except Exception:
         cta_font = font_name
 
-    c1_bbox = draw.textbbox((0, 0), cta_l1, font=cta_font)
-    c1_w = c1_bbox[2] - c1_bbox[0]
-    draw_stroked_text(((width - c1_w) / 2, 1590), cta_l1, cta_font, (255, 255, 255, 255), (0, 0, 0, 255), 6)
+    cta_emoji_font = get_emoji_font(38)
 
-    # Renderiza linha 2 com emoji se disponivel
-    emoji_font = None
-    if os.path.exists("C:/Windows/Fonts/seguiemj.ttf"):
-        try:
-            emoji_font = ImageFont.truetype("C:/Windows/Fonts/seguiemj.ttf", 38)
-        except Exception:
-            emoji_font = None
+    c1_w, _ = measure_mixed_text(draw, cta_l1, cta_font, cta_emoji_font)
+    render_mixed_text(
+        draw,
+        ((width - c1_w) // 2, 1590),
+        cta_l1,
+        main_font=cta_font,
+        emoji_font=cta_emoji_font,
+        fill_color=(255, 255, 255, 255),
+        stroke_color=(0, 0, 0, 255),
+        stroke_width=6
+    )
 
-    if "🚀" in cta_l2 and emoji_font:
-        p1, p2 = cta_l2.split("🚀", 1)
-        b1 = draw.textbbox((0, 0), p1, font=cta_font)
-        w1 = b1[2] - b1[0]
-        w_emoji = 44
-        b2 = draw.textbbox((0, 0), p2, font=cta_font)
-        w2 = b2[2] - b2[0]
-        tot_w = w1 + w_emoji + w2
-        sx = (width - tot_w) / 2
-        draw_stroked_text((sx, 1655), p1, cta_font, (255, 255, 255, 255), (0, 0, 0, 255), 6)
-        draw.text((sx + w1, 1658), "🚀", font=emoji_font, embedded_color=True)
-        draw_stroked_text((sx + w1 + w_emoji, 1655), p2, cta_font, (255, 255, 255, 255), (0, 0, 0, 255), 6)
-    else:
-        c2_clean = cta_l2.replace("🚀", " ")
-        c2_bbox = draw.textbbox((0, 0), c2_clean, font=cta_font)
-        c2_w = c2_bbox[2] - c2_bbox[0]
-        draw_stroked_text(((width - c2_w) / 2, 1655), c2_clean, cta_font, (255, 255, 255, 255), (0, 0, 0, 255), 6)
+    c2_w, _ = measure_mixed_text(draw, cta_l2, cta_font, cta_emoji_font)
+    render_mixed_text(
+        draw,
+        ((width - c2_w) // 2, 1655),
+        cta_l2,
+        main_font=cta_font,
+        emoji_font=cta_emoji_font,
+        fill_color=(255, 255, 255, 255),
+        stroke_color=(0, 0, 0, 255),
+        stroke_width=6
+    )
 
     img.save(output_png_path, "PNG")
     return output_png_path
@@ -538,7 +549,7 @@ def clean_and_repair_whisper_words(words: List[Dict[str, Any]], max_duration: Op
     last_end = 0.0
 
     for w in words:
-        w_text = w.get("word", "").strip()
+        w_text = (w.get("word") or w.get("text") or "").strip()
         if not w_text:
             continue
         s = float(w.get("start", 0.0))
@@ -565,66 +576,83 @@ def clean_and_repair_whisper_words(words: List[Dict[str, Any]], max_duration: Op
             else:
                 e = s + 0.12
 
+        # Se for palavra monossílaba curta (ex: 'O', 'A', 'É', 'Que', 'De') com duração inflada (>0.65s),
+        # o Whisper alucinou o início no silêncio/música anterior. Corrige para a emissão real da sílaba.
+        if len(w_text) <= 3 and (e - s) > 0.65:
+            s = max(s, round(e - 0.25, 3))
+
         cleaned.append({"word": w_text, "start": round(s, 3), "end": round(e, 3)})
         last_end = max(last_end, e)
 
     return cleaned
 
 
-def group_whisper_words(words: List[Dict[str, Any]], max_duration: Optional[float] = None) -> List[Dict[str, Any]]:
-    """Agrupa palavras transcritas do Whisper em falas curtas, naturais e cronologicas."""
+
+_WEAK_TAIL_WORDS = {
+    "o", "a", "os", "as", "um", "uma", "de", "da", "do", "das", "dos", "e", "que",
+    "para", "pra", "com", "no", "na", "nos", "nas", "em", "se", "eu", "meu", "minha",
+    "meus", "minhas", "seu", "sua", "te", "me", "por", "pelo", "pela", "ao", "mas", "nem",
+}
+
+
+def group_whisper_words(
+    words: List[Dict[str, Any]],
+    max_duration: Optional[float] = None,
+    max_words_per_line: int = 3,
+    max_chunk_sec: float = 1.9
+) -> List[Dict[str, Any]]:
+    """Agrupa palavras do Whisper em falas dinâmicas e curtas (2-3 palavras), respeitando pontuação e sem terminar em palavra fraca."""
     if not words:
         return []
 
-    # Aplica reparo e higienizacao inicial
     words = clean_and_repair_whisper_words(words, max_duration=max_duration)
 
-    chunks = []
-    current_chunk = []
-
-    for w in words:
-        word_text = w.get("word", "").strip()
-        if not word_text:
-            continue
-
-        start = float(w.get("start", 0.0))
-        end = float(w.get("end", 0.0))
-
-        if not current_chunk:
-            current_chunk.append({"word": word_text, "start": start, "end": end})
-            continue
-
-        prev = current_chunk[-1]
-        gap = start - prev["end"]
-        prev_has_punct = prev["word"].endswith((".", "!", "?", ","))
-        chunk_dur = end - current_chunk[0]["start"]
-
-        if gap >= 0.35 or prev_has_punct or len(current_chunk) >= 4 or chunk_dur >= 1.8:
-            c_start = current_chunk[0]["start"]
-            c_end = current_chunk[-1]["end"]
-            if max_duration and max_duration > 0:
-                c_end = min(c_end, max_duration)
-            chunks.append({
-                "start": c_start,
-                "end": c_end,
-                "text": " ".join(item["word"] for item in current_chunk),
-                "words": list(current_chunk)
-            })
-            current_chunk = [{"word": word_text, "start": start, "end": end}]
-        else:
-            current_chunk.append({"word": word_text, "start": start, "end": end})
-
-    if current_chunk:
-        c_start = current_chunk[0]["start"]
-        c_end = current_chunk[-1]["end"]
+    def _flush(chunk: List[Dict[str, Any]]) -> Dict[str, Any]:
+        c_end = chunk[-1]["end"]
         if max_duration and max_duration > 0:
             c_end = min(c_end, max_duration)
-        chunks.append({
-            "start": c_start,
+        return {
+            "start": chunk[0]["start"],
             "end": c_end,
-            "text": " ".join(item["word"] for item in current_chunk),
-            "words": list(current_chunk)
-        })
+            "text": " ".join(item["word"] for item in chunk),
+            "words": list(chunk),
+        }
+
+    chunks: List[Dict[str, Any]] = []
+    current: List[Dict[str, Any]] = []
+
+    for w in words:
+        word_text = (w.get("word") or w.get("text") or "").strip()
+        if not word_text:
+            continue
+        entry = {"word": word_text, "start": float(w.get("start", 0.0)), "end": float(w.get("end", 0.0))}
+
+        if current:
+            prev = current[-1]
+            gap = entry["start"] - prev["end"]
+            sentence_end = prev["word"].endswith((".", "!", "?", "...", ";"))
+            soft_break = prev["word"].endswith(",")
+            chunk_chars = sum(len(c["word"]) for c in current) + len(current) - 1
+            too_long = len(current) >= max_words_per_line or (entry["end"] - current[0]["start"]) >= max_chunk_sec or chunk_chars >= 18
+            weak_tail = re.sub(r"[^\wà-ú]", "", prev["word"].lower()) in _WEAK_TAIL_WORDS
+
+            should_break = sentence_end or gap >= 0.5 or (soft_break and len(current) >= 2)
+            if too_long and not weak_tail:
+                should_break = True
+            # Hard ceiling: nunca deixa acumular 4 palavras ou 22 caracteres na horizontal mesmo com weak_tail
+            if len(current) >= 4 or chunk_chars >= 22 or (too_long and gap >= 0.3):
+                should_break = True
+            elif weak_tail and not sentence_end and gap < 0.9:
+                should_break = False
+
+            if should_break:
+                chunks.append(_flush(current))
+                current = []
+
+        current.append(entry)
+
+    if current:
+        chunks.append(_flush(current))
 
     return chunks
 
@@ -667,7 +695,11 @@ TAG_GLITCH_SHAKE   = r"\fad(30,30)\t(0,25,\fscx108\frz2\blur3)\t(25,55,\fscx96\f
 TAG_NEON_PULSE     = r"\fad(80,80)\t(0,90,\fscx106\fscy106\blur6)\t(90,180,\fscx100\fscy100\blur2)"
 TAG_3D_SLAM        = r"\fad(45,45)\t(0,55,\fscx135\fscy135\frx15)\t(55,120,\fscx100\fscy100\frx0)"
 TAG_KINETIC_WAVE   = r"\fad(90,90)\t(0,75,\fscy112\frz1)\t(75,150,\fscy100\frz-1)\t(150,210,\frz0)"
-TAG_CENTER_POS     = r"\an5\pos(540,980)"
+TAG_CENTER_POS     = r"\an5\pos(540,1380)"
+
+def get_pos_tag(pos_y: int = 1380) -> str:
+    """Retorna tag de posicionamento ASS centralizada horizontalmente no Y dinâmico calculado."""
+    return rf"\an5\pos(540,{pos_y})"
 
 # Micro-Animações de Alta Precisão para Palavra por Palavra (Kinetic Reels)
 TAG_WORD_POP_PUNCH = r"\t(0,50,\fscx122\fscy122)\t(50,120,\fscx112\fscy112)"
@@ -769,6 +801,131 @@ STRONG_NOUNS = {
     "CANAL", "INSCREVE", "PESSOA", "PAI", "IRMÃOS", "REI"
 }
 
+# ==============================================================================
+# VOCABULÁRIO SEMÂNTICO EMOCIONAL MULTI-CORES (IA EMOTION SENTIMENT ENGINE)
+# ==============================================================================
+TAG_EMOTION_PURPLE  = r"\c&H00D020A0&"  # Roxo Místico / Melancolia / Tristeza profunda
+TAG_EMOTION_BLUE    = r"\c&H00F06020&"  # Azul Índigo / Solidão / Frio / Luto
+TAG_EMOTION_RED     = r"\c&H001810EA&"  # Vermelho Carmesim Fogo / Ódio / Desapontamento / Fúria
+TAG_EMOTION_ORANGE  = r"\c&H00008CFF&"  # Laranja Alerta / Tensão / Chamas / Perigo
+TAG_EMOTION_MAGENTA = r"\c&H00C020FF&"  # Rosa Choque / Amor / Afeto / Segredo / Mistério
+TAG_EMOTION_GREEN   = r"\c&H0030FF60&"  # Verde Esmeralda / Vida / Esperança / Proteção
+TAG_EMOTION_CYAN    = r"\c&H00FFFF00&"  # Ciano Elétrico / Magia / Gelo / Técnicas / Shinigami
+TAG_EMOTION_GOLD    = r"\c&H0000D4FF&"  # Ouro Imperial / Glória / Heróis / Reis / Honra
+
+SEMANTIC_SADNESS_WORDS = {
+    "TRISTE", "TRISTEZA", "CHORAR", "CHORO", "CHORANDO", "LÁGRIMAS", "LAGRIMAS",
+    "SOZINHO", "SOLIDÃO", "SOLIDAO", "ABANDONADO", "ABANDONO", "CULPA", "CULPADO",
+    "PERDÃO", "PERDAO", "ADEUS", "LEMBRANÇAS", "LEMBRANCAS", "ESQUECER", "SAUDADE",
+    "LUTO", "PESAR", "ESCURIDÃO", "ESCURIDAO", "VAZIO", "PERDIDO", "DESESPERO",
+    "DESESPERADO", "SILÊNCIO", "SILENCIO", "DOR", "SOFRIMENTO", "LAMENTAÇÃO",
+    "LAMENTACAO", "ARREPENDIMENTO", "RUÍNA", "RUINA", "ANGÚSTIA", "ANGUSTIA",
+    "DESTRUÍDO", "DESTRUIDO", "ACABADO", "MELANCOLIA", "PESADELO"
+}
+
+SEMANTIC_WRATH_CRITIC_WORDS = {
+    "ÓDIO", "ODIO", "DESAPONTAMENTO", "DECEPÇÃO", "DECEPCAO", "CRÍTICA", "CRITICA",
+    "VERGONHA", "COVARDE", "TRAIDOR", "TRAIÇÃO", "TRAICAO", "MENTIRA", "MENTIROSO",
+    "DESGRAÇADO", "DESGRACADO", "VERME", "LIXO", "INÚTIL", "INUTIL", "NOJO",
+    "REVOLTA", "RAIVA", "FÚRIA", "FURIA", "VINGANÇA", "VINGANCA", "MORTE", "MORTES",
+    "MORTO", "MORTOS", "MORRA", "MORRAM", "MORRER", "MORREU", "MATAR", "MATOU",
+    "MATARAM", "ASSASSINO", "SANGUE", "CRUEL", "MONSTRO", "AMEAÇA", "AMEACA",
+    "PERIGO", "VILÃO", "VILAO", "DESTRUIÇÃO", "DESTRUICAO", "DESTRUIR", "CADÁVER",
+    "CADAVER", "INFERNO", "TORTURA", "INIMIGO", "INIMIGOS", "FERIDO", "FERIMENTOS",
+    "HUMILHAÇÃO", "HUMILHACAO", "RIDÍCULO", "RIDICULO", "PENA", "MISERÁVEL", "MISERAVEL"
+}
+
+SEMANTIC_ALERT_FIRE_WORDS = {
+    "CUIDADO", "ATENÇÃO", "ATENCAO", "FOGO", "CHAMAS", "EXPLOSÃO", "EXPLOSAO",
+    "QUEIMAR", "RÁPIDO", "RAPIDO", "CORRA", "CORRE", "FUJA", "FUGIR", "ALERTA",
+    "SURPRESA", "INACREDITÁVEL", "INACREDITAVEL", "IMPOSSÍVEL", "IMPOSSIVEL",
+    "PRESSA", "SOCORRO", "EMERGÊNCIA", "EMERGENCIA", "TENSÃO", "TENSAO", "IMPACTO",
+    "TEMPESTADE", "RELÂMPAGO", "RELAMPAGO", "RAIO", "FAÍSCA", "FAISCA", "QUEIMANDO"
+}
+
+SEMANTIC_LOVE_MYSTERY_WORDS = {
+    "CORAÇÃO", "CORACAO", "AMOR", "SENTIMENTO", "DESTINO", "ALMA", "SONHO",
+    "DESEJO", "PROMESSA", "LAÇOS", "LACOS", "SEGREDO", "MISTÉRIO", "MISTERIO",
+    "MILAGRE", "FOFO", "QUERIDO", "QUERIDA", "AMIGO", "AMIGOS", "AMIZADE",
+    "LINDO", "LINDA", "BELEZA", "CARINHO", "PAIXÃO", "PAIXAO", "ESPECIAL", "JUNTOS"
+}
+
+SEMANTIC_LIFE_HOPE_WORDS = {
+    "VIVO", "VIVOS", "VIDA", "VIDAS", "SALVAR", "SALVOU", "SALVOS", "CURA",
+    "CURAR", "PROTEGER", "PROTEÇÃO", "PROTECAO", "BEM", "PAZ", "ESPERANÇA",
+    "ESPERANCA", "SOBREVIVER", "RENASCER", "LUZ", "PURO", "CURADO", "HARMONIA"
+}
+
+SEMANTIC_POWER_TECH_WORDS = {
+    "CAPITÃO", "CAPITAO", "CAPITÃES", "CAPITAES", "TENENTE", "DIVISÃO", "DIVISAO",
+    "DIVISÕES", "DIVISOES", "ESQUADRÃO", "ESQUADRAO", "COMANDANTE", "SEREITEI",
+    "SOUL", "SOCIETY", "SHINIGAMI", "BANKAI", "SHIKAI", "HAKI", "CHAKRA", "KI",
+    "REIATSU", "PODER", "PODERES", "FORÇA", "FORCA", "MAGIA", "ENCANTO", "FEITIÇO",
+    "FEITICO", "HURRICANE", "GELO", "COLOSSAL", "SUPREMO", "ABSOLUTO", "ABSORÇÃO",
+    "ABSORCAO", "EVASÃO", "EVASAO", "DESPERTAR", "BATALHA", "COMBATE", "GUERRA",
+    "ESPADA", "ZANPAKUTO", "ZANPAKUTOU"
+}
+
+SEMANTIC_GLORY_HERO_WORDS = {
+    "SASAKIBE", "YAMAMOTO", "ICHIGO", "RUKIA", "RÚQUIA", "RENJI", "AIZEN", "SUKUNA",
+    "GOJO", "LUFFY", "ZORO", "SANJI", "SHANKS", "ACE", "NARUTO", "SASUKE", "GOKU",
+    "VEGETA", "HUMANO", "HUMANOS", "MESTRE", "SENHOR", "LÍDER", "LIDER", "REI",
+    "DEUS", "HONRA", "ORGULHO", "VITÓRIA", "VITORIA", "CAMPEÃO", "CAMPEAO", "HERÓI",
+    "HEROI", "LENDÁRIO", "LENDARIO", "ÉPICO", "EPICO", "TRIUNFO"
+}
+
+
+def get_semantic_color_tags(word_clean: str, pop_animation: bool = True) -> Tuple[str, str]:
+    """
+    Classifica a emoção de uma palavra e retorna:
+    (active_tag, base_color_tag)
+    Cores emocionais variadas:
+    - Roxo / Azul: Tristeza, melancolia, dor, solidão, luto, lágrimas
+    - Vermelho: Ódio, desapontamento, crítica, decepção, ofensas, fúria, perigo
+    - Laranja: Alerta, urgência, surpresa, fogo, impacto
+    - Rosa / Magenta: Amor, laços, segredo, mistério, destino, sentimento
+    - Verde: Vida, cura, proteção, paz, esperança
+    - Ciano: Poderes, técnicas, shinigami, bankai, gelo
+    - Dourado / Amarelo: Glória, heróis, reis, honra, vitória
+    - Branco: Neutro / diálogo padrão
+    """
+    w = word_clean.upper().strip()
+
+    if w in SEMANTIC_SADNESS_WORDS:
+        base = TAG_EMOTION_PURPLE
+        anim = r"\t(0,35,\fscx114\fscy114)\t(35,80,\fscx100\fscy100)" if pop_animation else ""
+        active = f"{TAG_EMOTION_BLUE}{anim}"
+    elif w in SEMANTIC_WRATH_CRITIC_WORDS:
+        base = TAG_EMOTION_RED
+        shake = r"\t(0,25,\frz2\fscx122\fscy122)\t(25,50,\frz-2\fscx105\fscy105)\t(50,80,\frz0\fscx100\fscy100)" if pop_animation else ""
+        active = rf"\c&H002010FF&{shake}"
+    elif w in SEMANTIC_ALERT_FIRE_WORDS:
+        base = TAG_EMOTION_ORANGE
+        pop = r"\t(0,35,\fscx120\fscy120)\t(35,80,\fscx100\fscy100)" if pop_animation else ""
+        active = rf"\c&H0000B5FF&{pop}"
+    elif w in SEMANTIC_LOVE_MYSTERY_WORDS:
+        base = TAG_EMOTION_MAGENTA
+        pop = r"\t(0,35,\fscx118\fscy118)\t(35,80,\fscx100\fscy100)" if pop_animation else ""
+        active = rf"\c&H00E040FF&{pop}"
+    elif w in SEMANTIC_LIFE_HOPE_WORDS:
+        base = TAG_EMOTION_GREEN
+        pop = r"\t(0,35,\fscx118\fscy118)\t(35,80,\fscx100\fscy100)" if pop_animation else ""
+        active = rf"\c&H0080FF20&{pop}"
+    elif w in SEMANTIC_POWER_TECH_WORDS:
+        base = TAG_EMOTION_CYAN
+        pop = r"\t(0,35,\fscx120\fscy120)\t(35,80,\fscx100\fscy100)" if pop_animation else ""
+        active = rf"\c&H00FFFF30&{pop}"
+    elif w in SEMANTIC_GLORY_HERO_WORDS:
+        base = TAG_EMOTION_GOLD
+        pop = r"\t(0,35,\fscx120\fscy120)\t(35,80,\fscx100\fscy100)" if pop_animation else ""
+        active = rf"\c&H0000E6FF&{pop}"
+    else:
+        base = TAG_WHITE
+        pop = r"\t(0,35,\fscx118\fscy118)\t(35,80,\fscx100\fscy100)" if pop_animation else ""
+        active = rf"{TAG_YELLOW}{pop}"
+
+    return active, base
+
 
 def ass_block(*tags: str) -> str:
     """Combina tags ASS dentro de um UNICO par limpo de chaves {...} evitando vazamento de codigo."""
@@ -799,49 +956,93 @@ def sanitize_timeline(events: List[Dict[str, Any]], safety_gap: float = 0.01, ma
     """
     Garante matematicamente que nenhum evento sobreponha outro no tempo
     e nenhum evento ultrapasse a duracao real do video.
+    Suporta multi-camadas (Layer 0 e Layer 1 para efeitos de Aura/Bloom perfeitamente sincronizados).
     """
     if not events:
         return []
 
-    events = sorted(events, key=lambda x: x["start"])
-    clean_events = []
-
+    from collections import defaultdict
+    by_layer = defaultdict(list)
     for ev in events:
-        s = max(0.0, float(ev["start"]))
-        e = max(s + 0.05, float(ev["end"]))
+        by_layer[ev.get("layer", 0)].append(ev)
 
-        if max_duration and max_duration > 0:
-            if s >= max_duration - 0.05:
-                continue
-            if e > max_duration:
-                e = max_duration
+    result = []
+    for layer, layer_events in by_layer.items():
+        layer_events = sorted(layer_events, key=lambda x: x["start"])
+        clean_events = []
 
-        if clean_events:
-            prev = clean_events[-1]
-            if prev["end"] > s:
-                if s > prev["start"] + 0.05:
-                    prev["end"] = max(prev["start"] + 0.05, s - safety_gap)
-                else:
-                    s = prev["end"] + safety_gap
-                    e = max(e, s + 0.05)
-                    if max_duration and max_duration > 0 and e > max_duration:
-                        e = max_duration
+        for ev in layer_events:
+            s = max(0.0, float(ev["start"]))
+            e = max(s + 0.05, float(ev["end"]))
 
-        if e > s:
-            clean_events.append({
-                "start": s,
-                "end": e,
-                "text": ev["text"]
-            })
+            if max_duration and max_duration > 0:
+                if s >= max_duration - 0.05:
+                    continue
+                if e > max_duration:
+                    e = max_duration
 
-    return clean_events
+            if clean_events:
+                prev = clean_events[-1]
+                if prev["end"] > s:
+                    if s > prev["start"] + 0.05:
+                        prev["end"] = max(prev["start"] + 0.05, s - safety_gap)
+                    else:
+                        s = prev["end"] + safety_gap
+                        e = max(e, s + 0.05)
+                        if max_duration and max_duration > 0 and e > max_duration:
+                            e = max_duration
+
+            if e > s:
+                ev_copy = dict(ev)
+                ev_copy["start"] = s
+                ev_copy["end"] = e
+                ev_copy["layer"] = layer
+                clean_events.append(ev_copy)
+
+        result.extend(clean_events)
+
+    return sorted(result, key=lambda x: (x["start"], x.get("layer", 0)))
 
 
-def wrap_words_to_lines(words: List[str], max_per_line: int = 3) -> str:
-    """Quebra palavras em no maximo 2 linhas equilibradas e harmoniosas."""
-    if len(words) <= max_per_line:
+def split_words_balanced(words: List[str], max_chars_per_line: int = 18) -> int:
+    """
+    Calcula o índice de quebra ideal para equilibrar 2 linhas com comprimentos visuais similares
+    (justificação visual perfeita, evitando frases gigantescas em uma única linha horizontal).
+    """
+    if len(words) <= 1:
+        return len(words)
+
+    total_chars = sum(len(w) for w in words) + len(words) - 1
+    # Se a frase for bem curta (<= max_chars_per_line) e com até 2 palavras, mantém em 1 linha
+    if total_chars <= max_chars_per_line and len(words) <= 2:
+        return len(words)
+
+    best_idx = 1
+    best_score = 999999
+    for k in range(1, len(words)):
+        l1_len = sum(len(w) for w in words[:k]) + k - 1
+        l2_len = sum(len(w) for w in words[k:]) + (len(words) - k) - 1
+        diff = abs(l1_len - l2_len)
+        penalty = 0
+        if l1_len > max_chars_per_line:
+            penalty += (l1_len - max_chars_per_line) * 2
+        if l2_len > max_chars_per_line:
+            penalty += (l2_len - max_chars_per_line) * 2
+        score = diff + penalty
+        if score < best_score:
+            best_score = score
+            best_idx = k
+
+    return best_idx
+
+
+def wrap_words_to_lines(words: List[str], max_chars_per_line: int = 18) -> str:
+    """Quebra palavras em no máximo 2 linhas equilibradas, proporcionais e justificadas visualmente."""
+    if len(words) <= 1:
         return " ".join(words)
-    mid = (len(words) + 1) // 2
+    mid = split_words_balanced(words, max_chars_per_line=max_chars_per_line)
+    if mid >= len(words):
+        return " ".join(words)
     return " ".join(words[:mid]) + r"\N" + " ".join(words[mid:])
 
 
@@ -898,7 +1099,7 @@ def build_karaoke_dialogues(item: Dict[str, Any], pop_animation: bool = True) ->
         w_list = _interpolate_words(raw_text, start, end)
 
     events = []
-    mid = (len(words) + 1) // 2 if len(words) > 3 else len(words)
+    mid = split_words_balanced(words, max_chars_per_line=18)
 
     for i, w_obj in enumerate(w_list):
         w_s = float(w_obj.get("start", start))
@@ -906,14 +1107,17 @@ def build_karaoke_dialogues(item: Dict[str, Any], pop_animation: bool = True) ->
 
         formatted_words = []
         for j, w in enumerate(words):
+            w_clean = re.sub(r'[^A-Za-z0-9ÁÉÍÓÚÂÊÎÔÛÃÕÇáéíóúâêîôûãõç]', '', w).upper()
+            active_tag, base_col = get_semantic_color_tags(w_clean, pop_animation=pop_animation)
             if j == i:
-                anim = resolve_animation_tag(pop_animation)
-                col = TAG_GREEN if j == len(words) - 1 else TAG_YELLOW
-                formatted_words.append(f"{ass_block(col, anim)}{w}{ass_block(TAG_WHITE)}")
+                formatted_words.append(f"{ass_block(active_tag)}{w}{ass_block(TAG_WHITE)}")
             else:
-                formatted_words.append(w)
+                if base_col != TAG_WHITE:
+                    formatted_words.append(f"{ass_block(base_col)}{w}{ass_block(TAG_WHITE)}")
+                else:
+                    formatted_words.append(w)
 
-        if len(words) > 3:
+        if mid < len(words):
             line1 = " ".join(formatted_words[:mid])
             line2 = " ".join(formatted_words[mid:])
             content = f"{line1}\\N{line2}"
@@ -990,26 +1194,47 @@ def classify_cluster_word_by_word(
         return col, anim, r"\bord6", False
 
     # =========================================================================
+    # =========================================================================
     # Modo Padrão de Elite: CONTEXTUAL DINÂMICO INTELIGENTE (IA & EMOÇÃO)
     # =========================================================================
-    
-    # 1. AÇÃO / IMPACTO / CLÍMAX / GRITO / PERIGO (Carmesim Fogo + Super Punch)
+
+    # 1. TRISTEZA / DOR / LUTO / MELANCOLIA (Roxo Místico / Púrpura)
+    if any(w in SEMANTIC_SADNESS_WORDS for w in [clean_txt, first_w]):
+        anim = (r"\fad(30,30)\t(0,40,\fscx112\fscy112)\t(40,90,\fscx100\fscy100)") if anim_enabled else ""
+        return TAG_EMOTION_PURPLE, anim, r"\bord6\fscx112\fscy112\blur2", False
+
+    # 2. ÓDIO / DESAPONTAMENTO / CRÍTICA / OFENSA / FÚRIA (Vermelho Carmesim Fogo)
+    if any(w in SEMANTIC_WRATH_CRITIC_WORDS for w in [clean_txt, first_w]):
+        anim = TAG_WORD_POP_PUNCH if anim_enabled else ""
+        return TAG_EMOTION_RED, anim, r"\bord8\fscx124\fscy124", False
+
+    # 3. ALERTA / TENSÃO / URGÊNCIA / FOGO (Laranja Âmbar)
+    if any(w in SEMANTIC_ALERT_FIRE_WORDS for w in [clean_txt, first_w]):
+        anim = TAG_WORD_POP_PUNCH if anim_enabled else ""
+        return TAG_EMOTION_ORANGE, anim, r"\bord7\fscx120\fscy120", False
+
+    # 4. AMOR / AFETO / LAÇOS / DESTINO (Rosa Choque / Magenta)
+    if any(w in SEMANTIC_LOVE_MYSTERY_WORDS for w in [clean_txt, first_w]):
+        anim = TAG_WORD_POP_FOCUS if anim_enabled else ""
+        return TAG_EMOTION_MAGENTA, anim, r"\bord6\fscx114\fscy114", False
+
+    # 5. VIDA / CURA / PAZ / ESPERANÇA (Verde Esmeralda)
+    if any(w in SEMANTIC_LIFE_HOPE_WORDS for w in [clean_txt, first_w]):
+        anim = TAG_WORD_POP_FOCUS if anim_enabled else ""
+        return TAG_EMOTION_GREEN, anim, r"\bord6\fscx114\fscy114", False
+
+    # 6. AÇÃO / IMPACTO / CLÍMAX / GRITO / PERIGO (Carmesim Fogo + Super Punch)
     if "!" in cluster_text or any(w in ACTION_IMPACT_WORDS for w in [clean_txt, first_w]):
         anim = TAG_WORD_POP_PUNCH if anim_enabled else ""
         return TAG_CRIMSON_FIRE, anim, r"\bord8\fscx122\fscy122", False
 
-    # 2. GLÓRIA / NOBREZA / PODER / NÚMEROS / NOMES ÉPICOS (Ouro Imperial + Aura)
-    if bool(re.search(r'\d', cluster_text)) or any(w in GLORY_NOBLE_WORDS for w in [clean_txt, first_w]):
+    # 7. GLÓRIA / NOBREZA / PODER / NÚMEROS / NOMES ÉPICOS (Ouro Imperial + Aura)
+    if bool(re.search(r'\d', cluster_text)) or any(w in GLORY_NOBLE_WORDS or w in SEMANTIC_GLORY_HERO_WORDS for w in [clean_txt, first_w]):
         anim = TAG_WORD_POP_FOCUS if anim_enabled else ""
         return TAG_IMPERIAL_GOLD, anim, r"\bord6\fscx114\fscy114\blur2", False
 
-    # 3. EMOÇÃO / TENSÃO / MISTÉRIO / FRIO / TRISTEZA (Azul Diamante Gelo)
-    if any(w in EMOTION_CHILL_WORDS for w in [clean_txt, first_w]):
-        anim = r"\fad(30,30)\t(0,40,\fscx110\fscy110)\t(40,90,\fscx100\fscy100)" if anim_enabled else ""
-        return TAG_DIAMOND_ICE, anim, r"\bord6\fscx110\fscy110\blur2", False
-
-    # 4. PERGUNTA / DÚVIDA / REVELAÇÃO (Ciano Elétrico Refinado)
-    if "?" in cluster_text or any(clean_txt.startswith(qw) for qw in QUESTION_WORDS):
+    # 8. PERGUNTA / DÚVIDA / REVELAÇÃO (Ciano Elétrico Refinado)
+    if "?" in cluster_text or any(clean_txt.startswith(qw) for qw in QUESTION_WORDS) or any(w in SEMANTIC_POWER_TECH_WORDS for w in [clean_txt, first_w]):
         anim = TAG_SLIDE_UP if anim_enabled else ""
         return TAG_CRYSTAL_CYAN, anim, r"\bord6\fscx112\fscy112", False
 
@@ -1140,15 +1365,13 @@ def build_smart_situational_dialogues(item: Dict[str, Any], pop_animation: bool 
     # 2. Pergunta ou Duvida
     if "?" in raw_text or any(words[0].startswith(qw) for qw in QUESTION_WORDS if words):
         anim = resolve_animation_tag(pop_animation)
-        if len(words) <= 3:
-            w1 = words[0]
-            rest = " ".join(words[1:])
-            text = f"{ass_block(TAG_CENTER_POS, anim)}{ass_block(TAG_YELLOW)}{w1}\\N{ass_block(TAG_CYAN)}{rest}"
-        else:
-            mid = (len(words) + 1) // 2
+        mid = split_words_balanced(words, max_chars_per_line=18)
+        if mid < len(words):
             l1 = " ".join(words[:mid])
             l2 = " ".join(words[mid:])
             text = f"{ass_block(TAG_CENTER_POS, anim)}{ass_block(TAG_YELLOW)}{l1}\\N{ass_block(TAG_CYAN)}{l2}"
+        else:
+            text = f"{ass_block(TAG_CENTER_POS, anim)}{ass_block(TAG_YELLOW)}{' '.join(words)}"
         return sanitize_timeline([{"start": start, "end": end, "text": text}])
 
     # 3. Fala muito acelerada
@@ -1158,13 +1381,20 @@ def build_smart_situational_dialogues(item: Dict[str, Any], pop_animation: bool 
     # 4. Punchline curta (1 a 3 palavras)
     if len(words) <= 3:
         anim = resolve_animation_tag(pop_animation)
+        total_len = sum(len(w) for w in words) + len(words) - 1
         if len(words) == 1:
             col = PALETTE[idx % len(PALETTE)]
             text = f"{ass_block(TAG_CENTER_POS, col, anim)}{words[0]}"
-        elif len(words) == 2:
+        elif len(words) == 2 and total_len <= 18:
             text = f"{ass_block(TAG_CENTER_POS, anim)}{ass_block(TAG_YELLOW)}{words[0]} {ass_block(TAG_CYAN)}{words[1]}"
         else:
-            text = f"{ass_block(TAG_CENTER_POS, anim)}{ass_block(TAG_YELLOW)}{words[0]}\\N{ass_block(TAG_CYAN)}{words[1]} {ass_block(TAG_GREEN)}{words[2]}"
+            mid = split_words_balanced(words, max_chars_per_line=18)
+            if mid < len(words):
+                l1 = " ".join(words[:mid])
+                l2 = " ".join(words[mid:])
+                text = f"{ass_block(TAG_CENTER_POS, anim)}{ass_block(TAG_YELLOW)}{l1}\\N{ass_block(TAG_CYAN)}{l2}"
+            else:
+                text = f"{ass_block(TAG_CENTER_POS, anim)}{ass_block(TAG_YELLOW)}{' '.join(words)}"
         return sanitize_timeline([{"start": start, "end": end, "text": text}])
 
     # 5. Dialogo normal / narrativa -> Karaoke Ativo
@@ -1191,8 +1421,8 @@ def build_keyword_highlight_dialogues(item: Dict[str, Any], pop_animation: bool 
         else:
             parts.append(w)
 
-    mid = (len(words) + 1) // 2
-    if len(words) > 3:
+    mid = split_words_balanced(words, max_chars_per_line=18)
+    if mid < len(words):
         line1 = " ".join(parts[:mid])
         line2 = " ".join(parts[mid:])
         body = f"{line1}\\N{line2}"
@@ -1204,7 +1434,7 @@ def build_keyword_highlight_dialogues(item: Dict[str, Any], pop_animation: bool 
 
 
 def build_dynamic_animax_dialogues(item: Dict[str, Any], pop_animation: bool = True, idx: int = 0) -> List[Dict[str, Any]]:
-    """Estilo classico Animax: 2 linhas em amarelo ouro e ciano eletrico."""
+    """Estilo classico Animax: 2 linhas em amarelo ouro e ciano eletrico com revelação progressiva palavra por palavra."""
     raw_text = sanitize_text(item.get("text") or item.get("word") or "").upper()
     words = raw_text.split()
     if not words:
@@ -1212,18 +1442,40 @@ def build_dynamic_animax_dialogues(item: Dict[str, Any], pop_animation: bool = T
 
     start = float(item.get("start", 0.0))
     end = float(item.get("end", 0.0))
-    anim = resolve_animation_tag(pop_animation)
+    w_list = item.get("words")
+    if not w_list or len(w_list) != len(words):
+        w_list = _interpolate_words(raw_text, start, end)
 
     c1, c2 = (TAG_YELLOW, TAG_CYAN) if idx % 2 == 0 else (TAG_CYAN, TAG_YELLOW)
-    if len(words) <= 3:
-        text = f"{ass_block(TAG_CENTER_POS, anim)}{ass_block(c1)}{words[0]}\\N{ass_block(c2)}{' '.join(words[1:])}"
-    else:
-        mid = (len(words) + 1) // 2
-        l1 = " ".join(words[:mid])
-        l2 = " ".join(words[mid:])
-        text = f"{ass_block(TAG_CENTER_POS, anim)}{ass_block(c1)}{l1}\\N{ass_block(c2)}{l2}"
+    mid = split_words_balanced(words, max_chars_per_line=18)
 
-    return sanitize_timeline([{"start": start, "end": end, "text": text}])
+    events = []
+    for i, w_obj in enumerate(w_list):
+        w_s = float(w_obj.get("start", start))
+        w_e = float(w_obj.get("end", end))
+
+        # Apenas as palavras faladas até agora (0..i) surgem na tela
+        visible = words[:i + 1]
+        formatted = []
+        for j, w in enumerate(visible):
+            anim = resolve_animation_tag(pop_animation) if (j == i) else ""
+            col = c1 if j < mid else c2
+            if j == i:
+                formatted.append(f"{ass_block(col, anim)}{w}{ass_block(TAG_WHITE)}")
+            else:
+                formatted.append(f"{ass_block(col)}{w}{ass_block(TAG_WHITE)}")
+
+        if mid < len(words) and i >= mid:
+            l1 = " ".join(formatted[:mid])
+            l2 = " ".join(formatted[mid:])
+            content = f"{l1}\\N{l2}"
+        else:
+            content = " ".join(formatted)
+
+        full_text = f"{ass_block(TAG_CENTER_POS)}{content}"
+        events.append({"start": w_s, "end": w_e, "text": full_text})
+
+    return sanitize_timeline(events)
 
 
 def build_solid_color_dialogues(item: Dict[str, Any], color_tag: str, pop_animation: bool = True) -> List[Dict[str, Any]]:
@@ -1615,9 +1867,6 @@ def build_kinetic_kawaii_dialogues(item: Dict[str, Any], pop_animation: bool = T
 
     start = float(item.get("start", 0.0))
     end = float(item.get("end", 0.0))
-    anim = r"\t(0,55,\fscx120\fscy85)\t(55,105,\fscx92\fscy115)\t(105,150,\fscx100\fscy100)"
-    col = TAG_PASTEL_PINK if idx % 2 == 0 else TAG_PASTEL_LAVENDER
-    kawaii_tags = f"{col}\\3c&H00300050&\\blur3\\bord6\\shad3\\4c&H00FFFFFF&"
     wrapped = wrap_words_to_lines(words)
     if idx % 2 == 0:
         wrapped += " ✨"
@@ -1627,15 +1876,199 @@ def build_kinetic_kawaii_dialogues(item: Dict[str, Any], pop_animation: bool = T
     return sanitize_timeline([{"start": start, "end": end, "text": text}])
 
 
+class DialogueLayout(dict):
+    """
+    Estrutura de Metadados de Layout Dinâmico (Padrão Elite Lisz / Otakuroom):
+    - Suporta acesso como dict, atributo de objeto (.pos_x, .pos_y, .angle, etc.)
+    - Converte transparentemente para int(self) retornando pos_y para 100% de retrocompatibilidade.
+    """
+    def __init__(
+        self,
+        pos_x: int = 540,
+        pos_y: int = 1020,
+        angle: float = 0.0,
+        font: str = "Arial Black",
+        size: int = 78,
+        color_theme: str = "gold",
+        align: int = 5,
+        is_manga: bool = False
+    ):
+        super().__init__(
+            pos_x=pos_x,
+            pos_y=pos_y,
+            angle=angle,
+            font=font,
+            size=size,
+            color_theme=color_theme,
+            align=align,
+            is_manga=is_manga
+        )
+        self.pos_x = pos_x
+        self.pos_y = pos_y
+        self.angle = angle
+        self.font = font
+        self.size = size
+        self.color_theme = color_theme
+        self.align = align
+        self.is_manga = is_manga
+
+    def __int__(self) -> int:
+        return int(self.pos_y)
+
+    def __index__(self) -> int:
+        return int(self.pos_y)
+
+
+def build_anime_fx_pro_dialogues(
+    item: Dict[str, Any],
+    pop_animation: bool = True,
+    idx: int = 0,
+    pos_y: Any = 1020
+) -> List[Dict[str, Any]]:
+    """
+    Anime FX Pro (Padrão de Elite: Dinâmico, Centralizado e Cinematográfico):
+    - Posição Base Padrão: Centralizada no sweet-spot de ação (X=540, Y=1020).
+    - Deslocamento Lateral Inteligente: Move para a esquerda (X=380) ou direita (X=700) acompanhando
+      os personagens e alternando em diálogos rápidos estilo mangá.
+    - Diagonal de Ação / Grito (\frz -6.5° a +5.5°): Dá vida e impacto aos momentos épicos.
+    - Troca Dinâmica de Fontes:
+        * 'Arial Black' para falas limpas, rápidas e narrativas.
+        * 'Lovely Scream Queens' (Pincel Anime Japonês) para gritos, ataques, exclamações e clímax.
+    - Escala Dinâmica:
+        * 76-80px para diálogos normais.
+        * 84-88px para perguntas e revelações.
+        * 96-108px para palavras de impacto solo e gritos.
+    - Karaoke Ativo: Frase completa nítida, com palavra falada saltando com pop elástico:
+        * Dourado/Amarelo Ouro (#FFD400) em falas padrão.
+        * Vermelho Sangue Carmesim (#EA1018) com micro-jitter em perigo, ameaças e gritos.
+        * Ciano Elétrico Neon (#00FFFF) em termos de poder, habilidades e perguntas.
+    """
+    raw_text = sanitize_text(item.get("text") or item.get("word") or "").strip()
+    clean_txt = re.sub(r'[𐀀-]', '', raw_text).strip().upper()
+    words = clean_txt.split()
+    if not words:
+        return []
+
+    start = float(item.get("start", 0.0))
+    end = float(item.get("end", 0.0))
+    words_clean = [re.sub(r'[^A-Z0-9ÁÉÍÓÚÂÊÎÔÛÃÕÇ]', '', w) for w in words]
+
+    w_list = item.get("words")
+    if not w_list or len(w_list) != len(words):
+        w_list = _interpolate_words(clean_txt, start, end)
+
+    has_threat = ("!" in clean_txt or any(w in ("MORRAM", "MORRA", "MATAR", "MORTE", "SANGUE", "DEMAIS", "VERME", "LIXO", "INÚTIL", "INUTIL", "ACABOU", "ZUMBIS", "MONSTRO") for w in words_clean))
+    has_power = any(w in ("ESMAGADOR", "DESTRUIÇÃO", "DESTRUICAO", "PODER", "FORÇA", "FORCA", "SUPREMO", "COLOSSAL", "ABSOLUTO", "ABSORÇÃO", "ABSORCAO", "EVASÃO", "EVASAO") for w in words_clean)
+
+    # Extrai propriedades dinâmicas do layout ou usa fallback inteligente
+    layout = pos_y if (isinstance(pos_y, dict) or hasattr(pos_y, "pos_x")) else None
+    if layout:
+        cur_pos_x = getattr(layout, "pos_x", layout.get("pos_x", 540))
+        cur_pos_y = getattr(layout, "pos_y", layout.get("pos_y", 1020))
+        cur_angle = getattr(layout, "angle", layout.get("angle", 0.0))
+        cur_font = getattr(layout, "font", layout.get("font", "Arial Black"))
+        cur_size = getattr(layout, "size", layout.get("size", 78))
+        cur_theme = getattr(layout, "color_theme", layout.get("color_theme", "gold"))
+        cur_align = getattr(layout, "align", layout.get("align", 5))
+        is_manga_climax = getattr(layout, "is_manga", layout.get("is_manga", False)) or (cur_pos_y == 600)
+    else:
+        int_y = int(pos_y) if isinstance(pos_y, (int, float)) else 1020
+        is_manga_climax = (int_y == 600)
+        cur_pos_x = 540
+        # Se veio o antigo default 1380, centraliza no sweet spot (1020)
+        cur_pos_y = 600 if is_manga_climax else (1020 if int_y == 1380 else int_y)
+        cur_angle = 0.0
+        cur_font = "Lovely Scream Queens" if is_manga_climax else "Arial Black"
+        cur_size = 94 if is_manga_climax else 78
+        cur_theme = "blood_red" if has_threat else ("cyan" if has_power else "gold")
+        cur_align = 5
+
+    # Micro-animação dinâmica de entrada variada por índice e contexto emocional:
+    if has_threat or "!" in clean_txt:
+        # Slam de impacto com tremor sísmico para gritos e frases fortes
+        entry_anim = r"\fad(30,30)\t(0,25,\fscx128\fscy128\frz-5)\t(25,55,\fscx108\fscy108\frz4)\t(55,85,\fscx100\fscy100\frz-2)" if pop_animation else ""
+    elif "?" in clean_txt:
+        # Pulso ciano neon com leve elevação e dispersão para mistério
+        entry_anim = r"\fad(40,40)\t(0,35,\fscx116\fscy116\blur3)\t(35,75,\fscx100\fscy100\blur0)" if pop_animation else ""
+    else:
+        # Alternância de micro-movimentações cinematográficas para as falas gerais:
+        anim_pattern = idx % 3
+        if anim_pattern == 0:
+            # Elastic bounce com overshoot suave
+            entry_anim = r"\fad(35,35)\t(0,35,\fscx116\fscy116)\t(35,70,\fscx96\fscy96)\t(70,100,\fscx100\fscy100)" if pop_animation else ""
+        elif anim_pattern == 1:
+            # Kinetic zoom suave com dissolução de foco
+            entry_anim = r"\fad(35,35)\t(0,35,\fscx112\fscy112\blur2)\t(35,75,\fscx100\fscy100\blur0)" if pop_animation else ""
+        else:
+            # Fast pop energético com assentamento rápido
+            entry_anim = r"\fad(30,30)\t(0,30,\fscx118\fscy118)\t(30,65,\fscx100\fscy100)" if pop_animation else ""
+
+    # Monta tags de estilo ASS
+    frz_tag = f"\\frz{cur_angle:.1f}" if abs(cur_angle) > 0.1 else ""
+    outline_val = 7 if (cur_font == "Lovely Scream Queens" or cur_size >= 90) else 5
+    pos_tag = rf"\fn{cur_font}\fs{cur_size}\an{cur_align}\pos({cur_pos_x},{cur_pos_y}){frz_tag}\bord{outline_val}\3c&H00000000&\shad3\4c&H00000000&{entry_anim}"
+
+    # Quebra em 2 linhas dinâmicas e equilibradas para evitar invasão das bordas e justificar visualmente
+    mid = split_words_balanced(words, max_chars_per_line=18)
+
+    events = []
+    for i, w_obj in enumerate(w_list):
+        w_s = float(w_obj.get("start", start))
+        w_e = float(w_obj.get("end", end))
+        active_word_clean = words_clean[i] if i < len(words_clean) else ""
+
+        # Revelação Progressiva Palavra por Palavra com Sentimento Emocional IA:
+        formatted_words = []
+        for j in range(i + 1):
+            w = words[j]
+            curr_clean = words_clean[j] if j < len(words_clean) else ""
+
+            active_tag, word_base_col = get_semantic_color_tags(curr_clean, pop_animation=pop_animation)
+
+            if j == i:
+                # Palavra ativa sendo falada no momento com Pop ou Shake emocional
+                if is_manga_climax:
+                    col = r"\c&H0000E6FF&"
+                    pop = r"\t(0,35,\fscx125\fscy125)\t(35,80,\fscx100\fscy100)" if pop_animation else ""
+                    formatted_words.append(f"{ass_block(col, pop)}{w}{ass_block(TAG_WHITE)}")
+                else:
+                    formatted_words.append(f"{ass_block(active_tag)}{w}{ass_block(word_base_col if word_base_col != TAG_WHITE else TAG_WHITE)}")
+            else:
+                # Palavra anterior já falada: Preserva a cor semântica base
+                if word_base_col != TAG_WHITE:
+                    formatted_words.append(f"{ass_block(word_base_col)}{w}{ass_block(TAG_WHITE)}")
+                else:
+                    formatted_words.append(w)
+
+        if mid < len(words) and i >= mid:
+            l1 = " ".join(formatted_words[:mid])
+            l2 = " ".join(formatted_words[mid:])
+            content = f"{l1}\\N{l2}"
+        else:
+            content = " ".join(formatted_words)
+
+        full_text = f"{ass_block(pos_tag)}{content}"
+        events.append({
+            "start": w_s,
+            "end": w_e,
+            "text": full_text
+        })
+
+    return sanitize_timeline(events)
+
+
 def generate_dialogue_events(
     item: Dict[str, Any],
     style_preset: str = "smart_situational",
     dialogue_index: int = 0,
-    pop_animation: bool = True
+    pop_animation: bool = True,
+    pos_y: Any = 1020
 ) -> List[Dict[str, Any]]:
     """Roteia cada item para o gerador especializado correspondente."""
+    if style_preset in ("anime_fx_pro", "anime_fx", "manga_fx"):
+        return build_anime_fx_pro_dialogues(item, pop_animation=pop_animation, idx=dialogue_index, pos_y=pos_y)
     # Presets Kinetic Emotion
-    if style_preset in ("kinetic_dramatic", "dramatic"):
+    elif style_preset in ("kinetic_dramatic", "dramatic"):
         return build_kinetic_dramatic_dialogues(item, pop_animation=pop_animation, idx=dialogue_index)
     elif style_preset in ("kinetic_emotional", "emotional"):
         return build_kinetic_emotional_dialogues(item, pop_animation=pop_animation, idx=dialogue_index)
@@ -1699,6 +2132,277 @@ def generate_dialogue_events(
         return build_dynamic_animax_dialogues(item, pop_animation=pop_animation, idx=dialogue_index)
 
 
+def analyze_dialogue_positions(
+    video_path: Optional[str],
+    sub_list: List[Dict[str, Any]],
+    box_y_offset: int = 420,
+    box_h: int = 1134,
+    box_w: int = 1080,
+    manga_interval: Optional[Tuple[float, float]] = None,
+    manga_intervals: Optional[List[Tuple[float, float]]] = None
+) -> List[DialogueLayout]:
+    """
+    Motor de Posicionamento e Tipografia Dinâmica Elite (Lisz / Otakuroom Style):
+    - Posição Base Padrão: Centralizada no sweet-spot de foco de ação (X=540, Y=1020).
+    - Deslocamento Lateral (Esquerda / Direita):
+        * Se o personagem estiver na direita, legenda se posiciona à esquerda (X=380, Y=1000).
+        * Se o personagem estiver na esquerda, legenda se posiciona à direita (X=700, Y=1000).
+        * Em bate-voltas rápidos de diálogo (<1.6s), alterna lateralmente criando ritmo visual de mangá.
+    - Diagonal de Ação / Grito / Impacto:
+        * Aplica rotação (\frz -6.5° ou +5.5°) com fonte de pincel 'Lovely Scream Queens' e escala ampliada (98-108px).
+    - Tipografia Dinâmica:
+        * Falas normais/narrativas: 'Arial Black' sólida com contorno preto 5px e sombra 3px.
+        * Gritos, poderes, exclamações e clímax: 'Lovely Scream Queens' épica.
+    - Tamanho Dinâmico:
+        * 78px para frases padrão.
+        * 84px para perguntas e revelações.
+        * 104-108px para palavras de impacto solo e gritos.
+    - Clímax de Mangá: Força Y=600 no topo limpo para nunca colidir com o recorte de personagem!
+    """
+    if not sub_list:
+        return []
+
+    active_intervals = list(manga_intervals) if manga_intervals else ([manga_interval] if manga_interval else [])
+    layouts: List[DialogueLayout] = []
+
+    SCREAM_PATTERNS = {
+        "MORRA", "MORRAM", "MATAR", "MORTE", "SANGUE", "DEMAIS", "VERME", "LIXO", 
+        "INUTIL", "INÚTIL", "ACABOU", "MONSTRO", "ZUMBIS", "DESAPAREÇA", "DESAPARECA", 
+        "CHEGA", "NUNCA", "MALDIÇÃO", "MALDICAO", "CUIDADO", "FOGO", "EXPLOSÃO", "EXPLOSAO"
+    }
+    POWER_PATTERNS = {
+        "ESMAGADOR", "DESTRUIÇÃO", "DESTRUICAO", "PODER", "FORÇA", "FORCA", 
+        "SUPREMO", "COLOSSAL", "ABSOLUTO", "ABSORÇÃO", "ABSORCAO", "EVASÃO", "EVASAO",
+        "HAKI", "GOLPE", "ATAQUE", "LIBERAR", "CAÇAR", "CACAR"
+    }
+
+    cap = None
+    fps = 24.0
+    face_cascade = None
+    if video_path and os.path.exists(video_path):
+        try:
+            import cv2
+            face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+            cap = cv2.VideoCapture(video_path)
+            fps = cap.get(cv2.CAP_PROP_FPS) or 24.0
+        except Exception:
+            cap = None
+
+    tilt_toggle = False
+    side_toggle = False
+
+    for idx, item in enumerate(sub_list):
+        st = float(item.get("start", 0.0))
+        et = float(item.get("end", st + 1.0))
+        raw_text = sanitize_text(item.get("text") or item.get("word") or "").strip()
+        clean_txt = re.sub(r'[^\w\sÁÉÍÓÚÂÊÎÔÛÃÕÇ!?-]', '', raw_text).upper()
+        words = clean_txt.split()
+        words_clean = [re.sub(r'[^A-Z0-9ÁÉÍÓÚÂÊÎÔÛÃÕÇ]', '', w) for w in words]
+
+        has_exclamation = ("!" in raw_text)
+        has_question = ("?" in raw_text)
+        has_threat_word = any(w in SCREAM_PATTERNS for w in words_clean)
+        has_power_word = any(w in POWER_PATTERNS for w in words_clean)
+        is_single_word = (len(words) == 1)
+        is_short_punch = (len(words) <= 2)
+
+        # Análise visual do quadro para detectar posição dos personagens
+        face_x_center = 0.5
+        face_y_center = 0.5
+        has_face = False
+        face_is_huge = False
+
+        if cap is not None and face_cascade is not None:
+            mid_t = (st + et) / 2.0
+            frame_no = int(mid_t * fps)
+            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_no)
+            ret, frame = cap.read()
+            if ret and frame is not None:
+                h, w = frame.shape[:2]
+                src_aspect = w / max(1, h)
+                box_aspect = box_w / box_h
+
+                if src_aspect >= box_aspect:
+                    new_w = int(h * box_aspect)
+                    cx = max(0, (w - new_w) // 2)
+                    crop = frame[:, cx:cx+new_w]
+                else:
+                    new_h = int(w / box_aspect)
+                    cy = max(0, (h - new_h) // 2)
+                    crop = frame[cy:cy+new_h, :]
+
+                crop_h, crop_w = crop.shape[:2]
+                gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+                faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=4, minSize=(40, 40))
+
+                if len(faces) > 0:
+                    faces = sorted(faces, key=lambda f: f[2] * f[3], reverse=True)
+                    fx, fy, fw, fh = faces[0]
+                    face_x_center = (fx + fw / 2.0) / float(crop_w)
+                    face_y_center = (fy + fh / 2.0) / float(crop_h)
+                    has_face = True
+                    if fw > crop_w * 0.45 or fh > crop_h * 0.45:
+                        face_is_huge = True
+
+        # Decisão de Posição, Rotação e Tipografia (Padrão de Elite: Estável, Centralizado e Cinematográfico):
+        # Caso 1: Grito / Ameaça / Exclamação forte de batalha -> Diagonal com Lovely Scream Queens
+        if has_exclamation or has_threat_word or (has_power_word and is_short_punch):
+            angle = -6.0 if tilt_toggle else 5.0
+            tilt_toggle = not tilt_toggle
+            font = "Lovely Scream Queens"
+            size = 106 if is_short_punch else 98
+            pos_x = 540
+            pos_y = 1000
+            theme = "blood_red" if (has_threat_word or "!" in raw_text) else "gold"
+            align = 5
+
+        # Caso 2: Poder solo ou revelação de habilidade ("EVASÃO", "ABSORÇÃO", "BANKAI", "HAKI") -> Lovely Scream Queens
+        elif has_power_word or (is_single_word and any(w in POWER_PATTERNS for w in words_clean)):
+            angle = -3.5 if tilt_toggle else 0.0
+            tilt_toggle = not tilt_toggle
+            font = "Lovely Scream Queens"
+            size = 104
+            pos_x = 540
+            pos_y = 1020
+            theme = "cyan" if has_power_word else "gold"
+            align = 5
+
+        # Caso 3: Pergunta / Dúvida ("?", "O QUÊ?", "COMO?") -> Ciano Neon com foco elevado e micro-tilt
+        elif has_question:
+            angle = 2.0 if tilt_toggle else -2.0
+            tilt_toggle = not tilt_toggle
+            font = "Arial Black"
+            size = 84 if is_short_punch else 78
+            pos_x = 540
+            pos_y = 990
+            theme = "cyan"
+            align = 5
+
+        # Caso 4: Rosto grande cobrindo a região central inferior -> Eleva para o topo limpo
+        elif has_face and face_is_huge and (box_y_offset + face_y_center * box_h) >= 950 and (box_y_offset + face_y_center * box_h) <= 1250:
+            angle = -1.5 if tilt_toggle else 1.5
+            tilt_toggle = not tilt_toggle
+            font = "Arial Black"
+            size = 78
+            pos_x = 540
+            pos_y = 750
+            theme = "gold"
+            align = 5
+
+        # Caso 5: Padrão Animado Dinâmico (Micro-inclinações orgânicas e ritmo visual vivo)
+        else:
+            # Alternância orgânica de micro-rotação (-2.4° a +2.4°) para ritmo visual cinematográfico vivo
+            tilt_angles = [-2.2, 2.0, -1.8, 2.4, -2.0, 1.6]
+            angle = tilt_angles[idx % len(tilt_angles)]
+            font = "Arial Black"
+            size = 78 if len(words) >= 4 else 82
+
+            # Para falas curtas (bate-volta rápido / diálogos curtos), alterna ligeiramente o foco lateral
+            if len(words) <= 3:
+                side_offsets = [0, -35, 35, -25, 25]
+                pos_x = 540 + side_offsets[idx % len(side_offsets)]
+            else:
+                pos_x = 540
+
+            # Sutil micro-variação de respiro vertical para a legenda ter cadência e nunca parecer estática
+            y_variations = [1020, 1010, 1025]
+            pos_y = y_variations[idx % len(y_variations)]
+            theme = "gold"
+            align = 5
+
+        layouts.append(DialogueLayout(
+            pos_x=pos_x,
+            pos_y=pos_y,
+            angle=angle,
+            font=font,
+            size=size,
+            color_theme=theme,
+            align=align,
+            is_manga=False
+        ))
+
+    if cap is not None:
+        cap.release()
+
+    return layouts
+
+
+def suppress_manga_interval_events(
+    events: List[Dict[str, Any]],
+    manga_intervals: List[Tuple[float, float]]
+) -> List[Dict[str, Any]]:
+    """
+    Remove ou ajusta eventos de legenda ASS durante intervalos ativos de mangá.
+    Como o recorte de mangá já queima a tipografia estilizada de impacto no próprio vídeo,
+    não pode haver legenda ASS duplicada na tela durante o clímax mangá.
+    Preserva 100% dos diálogos que ocorrem antes ou depois do recorte.
+    """
+    if not manga_intervals or not events:
+        return events
+
+    clean_intervals = sorted([(float(s), float(e)) for s, e in manga_intervals if float(e) > float(s)])
+    filtered: List[Dict[str, Any]] = []
+
+    for ev in events:
+        s = float(ev["start"])
+        e = float(ev["end"])
+        if e <= s:
+            continue
+
+        keep = True
+        cur_ev = dict(ev)
+
+        for m_s, m_e in clean_intervals:
+            # Caso A: Evento totalmente antes do mangá
+            if e <= m_s:
+                continue
+
+            # Caso B: Evento totalmente depois do mangá
+            if s >= m_e:
+                continue
+
+            # Caso C: Evento totalmente contido dentro do mangá (é a própria fala da punchline destacada no card)
+            if s >= m_s - 0.05 and e <= m_e + 0.05:
+                keep = False
+                break
+
+            # Caso D: Evento começou antes do mangá e termina dentro ou depois
+            if s < m_s:
+                # Corta o fim para coincidir exatamente com a entrada do mangá
+                cur_ev["end"] = round(m_s, 2)
+                e = cur_ev["end"]
+                # Se tem sub-palavras Whisper, preserva apenas as faladas antes de m_s
+                sub_w = cur_ev.get("words")
+                if sub_w:
+                    valid_w = [w for w in sub_w if float(w.get("start", 0)) < m_s]
+                    if valid_w:
+                        cur_ev["words"] = valid_w
+                        cur_ev["text"] = " ".join(str(w.get("word") or w.get("text") or "").strip() for w in valid_w)
+                if cur_ev["end"] <= cur_ev["start"] + 0.08:
+                    keep = False
+                    break
+
+            # Caso E: Evento começou dentro do mangá e continua depois
+            elif s < m_e and e > m_e:
+                cur_ev["start"] = round(m_e, 2)
+                s = cur_ev["start"]
+                sub_w = cur_ev.get("words")
+                if sub_w:
+                    valid_w = [w for w in sub_w if float(w.get("end", 0)) > m_e]
+                    if valid_w:
+                        cur_ev["words"] = valid_w
+                        cur_ev["text"] = " ".join(str(w.get("word") or w.get("text") or "").strip() for w in valid_w)
+                if cur_ev["end"] <= cur_ev["start"] + 0.08:
+                    keep = False
+                    break
+
+        if keep and cur_ev["end"] > cur_ev["start"] + 0.08:
+            filtered.append(cur_ev)
+
+    return filtered
+
+
+
 def generate_ass_subtitles(
     items: List[Dict[str, Any]],
     output_ass_path: str,
@@ -1709,6 +2413,10 @@ def generate_ass_subtitles(
     font_size: int = 76,
     censor_profanity: bool = True,
     max_duration: Optional[float] = None,
+    skip_item_indices: Optional[List[int]] = None,
+    video_path: Optional[str] = None,
+    manga_interval: Optional[Tuple[float, float]] = None,
+    manga_intervals: Optional[List[Tuple[float, float]]] = None,
 ) -> str:
     """
     Gera arquivo de legendas .ass profissional com anti-colisao e zero vazamento:
@@ -1721,7 +2429,10 @@ def generate_ass_subtitles(
     - Higienizacao de palavras inadequadas / palavroes (se censor_profanity=True)
     - max_duration: garante que nenhuma fala ultrapasse a duracao real do video
     """
-    if items and "text" not in items[0] and "word" in items[0]:
+    active_manga_intervals = list(manga_intervals) if manga_intervals else ([manga_interval] if manga_interval else [])
+
+    # Se os itens sao palavras soltas (Whisper), agrupa em frases/dialogos naturais
+    if items and ("words" not in items[0]) and (len((items[0].get("text") or items[0].get("word") or "").split()) <= 1 or ("word" in items[0] and "text" not in items[0])):
         sub_list = group_whisper_words(items, max_duration=max_duration)
     else:
         sub_list = items
@@ -1758,6 +2469,9 @@ def generate_ass_subtitles(
     font_name = "Lovely Scream Queens"
     if "word_by_word" in style_preset or style_preset in ("rapid", "kinetic_hype", "kinetic_shonen"):
         font_size = 84
+    elif style_preset in ("anime_fx_pro", "anime_fx", "manga_fx"):
+        font_name = "Arial Black"
+        font_size = 78
     elif style_preset in ("kinetic_emotional", "kinetic_seinen"):
         font_size = 72
     elif style_preset in ("kinetic_kawaii", "kinetic_elegant"):
@@ -1781,21 +2495,36 @@ def generate_ass_subtitles(
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
     ]
 
+    positions = analyze_dialogue_positions(video_path, sub_list, manga_intervals=active_manga_intervals)
     all_raw_events = []
     for idx, item in enumerate(sub_list):
+        if skip_item_indices and idx in skip_item_indices:
+            continue
+        # Evita gerar eventos ASS se o item estiver contido no intervalo de mangá ativo
+        it_s = float(item.get("start", 0.0))
+        it_e = float(item.get("end", 0.0))
+        if active_manga_intervals and any(m_s - 0.15 <= it_s and it_e <= m_e + 0.15 for m_s, m_e in active_manga_intervals):
+            continue
+
+        pos_y = positions[idx] if idx < len(positions) else 1020
         evs = generate_dialogue_events(
             item,
             style_preset=style_preset,
             dialogue_index=idx,
-            pop_animation=pop_animation
+            pop_animation=pop_animation,
+            pos_y=pos_y
         )
         all_raw_events.extend(evs)
 
     # Sanitizacao global para garantir ZERO sobreposicao em todo o video e clamping exato no fim do video
     final_clean_events = sanitize_timeline(all_raw_events, max_duration=max_duration)
 
+    # Filtragem definitiva para garantir que NENHUMA legenda regular duplique na tela durante o recorte mangá
+    if active_manga_intervals:
+        final_clean_events = suppress_manga_interval_events(final_clean_events, active_manga_intervals)
+
     for ev in final_clean_events:
-        lines.append(f"Dialogue: 0,{_ts(ev['start'])},{_ts(ev['end'])},Default,,0,0,0,,{ev['text']}")
+        lines.append(f"Dialogue: {ev.get('layer', 0)},{_ts(ev['start'])},{_ts(ev['end'])},Default,,0,0,0,,{ev['text']}")
 
     with open(output_ass_path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
@@ -1876,11 +2605,15 @@ def render_video_with_style(
     subtitle_pop: bool = True,
     censor_profanity: bool = True,
     censor_visual: bool = False,
+    censor_method: str = "blur",
     censor_blur_strength: str = "medium",
     custom_censor_regions: Optional[list] = None,
     include_watermark_png: bool = True,
     include_cta: bool = True,
     include_blur_sides: bool = True,
+    include_anime_fx: bool = True,
+    use_local_ai: bool = True,
+    local_ai_model: str = "qwen2.5:7b",
     on_log: Optional[Callable] = None,
     on_progress: Optional[Callable] = None,
 ) -> bool:
@@ -1890,9 +2623,10 @@ def render_video_with_style(
     - Video 187% zoom centralizado (1080x1134 de y=420 a y=1554)
     - Header Twitter/Animax com avatar calibrado (225px) + selo verificado
     - Titulo elevado na faixa superior
-    - Legendas dinamicas / situacionais / palavras
+    - Legendas dinamicas / situacionais / palavras / Anime FX Pro
+    - Cenas Mangá (Baki & Sukuna) com Katana Slash e Linhas de Velocidade
     - Protecao anti-copyright no audio
-    - Censura inteligente (palavroes no audio/legendas + blur visual em animes)
+    - Censura inteligente (palavroes no audio/legendas + blur visual ou zoom em animes)
     """
     def log(msg: str):
         if on_log:
@@ -1916,17 +2650,19 @@ def render_video_with_style(
                     dets = detect_anime_sensitive_timeline(input_path, fps_sample=4.0, conf_threshold=0.35, on_log=log)
 
                 if dets:
-                    log(f"Shield Anime: {len(dets)} detecções encontradas. Aplicando Blur Suave...")
+                    desc_method = "Zoom de Foco no Rosto" if "zoom" in str(censor_method).lower() else "Blur Suave"
+                    log(f"Shield Anime: {len(dets)} detecções encontradas. Aplicando {desc_method}...")
                     censored_raw = os.path.join(tmp_dir, "censored_raw.mp4")
                     ok_cens = process_video_visual_censorship(
                         input_path, censored_raw, dets,
                         blur_strength=censor_blur_strength,
+                        censor_method=censor_method,
                         persistence_seconds=0.45,
                         on_progress=lambda p, m: log(f"Censura visual: {int(p*100)}%") if on_progress else None
                     )
                     if ok_cens and os.path.exists(censored_raw):
                         input_path = censored_raw
-                        log("Vídeo base higienizado com Blur Suave nas regiões sensíveis.")
+                        log(f"Vídeo base higienizado com {desc_method} nas regiões sensíveis.")
                 else:
                     log("Shield Anime: Nenhuma cena sensível detectada no vídeo.")
             except Exception as e:
@@ -1956,49 +2692,128 @@ def render_video_with_style(
         create_static_overlay(title_text=title_text, output_png_path=overlay_png, style=style)
         log("Overlay visual estatico gerado com sucesso (Avatar 225px + Watermark 62px).")
 
+        video_dur = get_media_duration(input_path)
+
+        # Anime FX Pro - Recorte de Mangá Neural (ISNet-Anime) + Speedlines + Anti-Copyright
+        anime_fx_inputs = []
+        neg_enable_str = None
+        manga_clips = []
+        manga_intervals = []
+
+        if include_anime_fx and words_with_timestamps:
+            try:
+                import anime_fx_analyzer
+
+                if words_with_timestamps and ("words" not in words_with_timestamps[0]) and (len((words_with_timestamps[0].get("text") or words_with_timestamps[0].get("word") or "").split()) <= 1 or ("word" in words_with_timestamps[0] and "text" not in words_with_timestamps[0])):
+                    analysis_items = group_whisper_words(words_with_timestamps, max_duration=video_dur)
+                else:
+                    analysis_items = words_with_timestamps
+                fx_schedule = anime_fx_analyzer.analyze_transcript_for_anime_fx(
+                    analysis_items,
+                    video_dur,
+                    log_callback=log,
+                    use_local_ai=use_local_ai,
+                    local_ai_model=local_ai_model,
+                )
+
+                # 1. Recortes de Mangá Clímax Diversificados (Radial Power, Eyes Panel, Lateral Sticker)
+                events_to_process = fx_schedule.get("manga_events", [])
+                if not events_to_process and fx_schedule.get("manga_climax"):
+                    events_to_process = [fx_schedule["manga_climax"]]
+
+                for ev_idx, m_ev in enumerate(events_to_process):
+                    m_s = float(m_ev["start"])
+                    m_e = float(m_ev["end"])
+                    etype = m_ev.get("event_type", "lateral_sticker_punch")
+                    m_l1 = m_ev.get("line1", "")
+                    m_l2 = m_ev.get("line2", "")
+                    log(f"Anime FX Pro: Gerando Mangá [{etype}] ({ev_idx+1}/{len(events_to_process)}) no momento {m_s:.1f}s-{m_e:.1f}s ('{m_l1}' / '{m_l2}')...")
+                    try:
+                        import manga_fx_engine
+                        ui_img = Image.open(overlay_png) if os.path.exists(overlay_png) else None
+                        seg_clip_path = os.path.join(tmp_dir, f"ai_manga_segment_{ev_idx}.mp4")
+                        res_clip = manga_fx_engine.generate_manga_event_clip(
+                            video_path=input_path,
+                            event_dict=m_ev,
+                            output_clip_path=seg_clip_path,
+                            static_ui_img=ui_img
+                        )
+                        if res_clip and os.path.exists(res_clip):
+                            manga_clips.append({
+                                "clip": res_clip,
+                                "start": m_s,
+                                "end": m_e,
+                                "type": etype
+                            })
+                            manga_intervals.append((m_s, m_e))
+                            anime_fx_inputs.extend(["-itsoffset", f"{m_s:.3f}", "-i", res_clip])
+                            log(f"Anime FX Pro: Segmento de Mangá [{etype}] ({ev_idx+1}/{len(events_to_process)}) gerado com sucesso!")
+                        else:
+                            log(f"Aviso Anime FX Pro: Não foi possível gerar clipe para [{etype}] ({m_s:.1f}s-{m_e:.1f}s).")
+                    except Exception as me:
+                        log(f"Aviso ao gerar Manga AI [{etype}]: {me}")
+
+                # 2. Flash Negativo / Invert Pulse (0.18s de alta tensão sem pausar o vídeo)
+                if fx_schedule.get("negative_flashes"):
+                    neg_conds = [f"between(t,{ev['start']:.3f},{ev['start']+ev['duration']:.3f})" for ev in fx_schedule["negative_flashes"]]
+                    neg_enable_str = "+".join(neg_conds)
+                    log(f"Anime FX Pro: {len(fx_schedule['negative_flashes'])} flashes negativos aplicados no vídeo.")
+
+            except Exception as e:
+                log(f"Aviso no motor Anime FX Pro: {e}")
+
         # Gerar legendas ASS se fornecidas
         ass_path = None
         if words_with_timestamps:
-            video_dur = get_media_duration(input_path)
             ass_path = os.path.join(tmp_dir, "subs.ass")
             generate_ass_subtitles(
                 words_with_timestamps,
                 ass_path,
                 style_preset=subtitle_style,
                 pop_animation=subtitle_pop,
-                font_size=76,
+                font_size=78,
                 censor_profanity=censor_profanity,
-                max_duration=video_dur if video_dur > 0 else None
+                max_duration=video_dur if video_dur > 0 else None,
+                skip_item_indices=None,
+                video_path=input_path,
+                manga_intervals=manga_intervals if manga_intervals else None
             )
             log(f"Arquivo de legendas ASS gerado com sucesso (Estilo: {subtitle_style} | Duração vídeo: {video_dur:.1f}s).")
 
         # Enquadramento Animax CapCut universal (Janela central: 1080x1134 de y=420 a y=1554)
-        # Garante que NUNCA invada a barra inferior (1554-1920) nem o topo (0-420), para qualquer proporção (16:9, 4:3, 1:1, 9:16)
+        # Blindagem Anti-Copyright Visual: Micro-motion contínuo imperceptível (2.8% drift senoidal)
+        # Destrói o pHash e a matriz DCT estática do Content ID sem alterar cores, grão ou nitidez.
         BOX_W = 1080
         BOX_H = 1134
         y_overlay = 420
 
         src_aspect = in_w / max(1, in_h)
         box_aspect = BOX_W / BOX_H  # ~0.9524
+        DRIFT_MARGIN = 1.028
 
         if src_aspect >= box_aspect:
-            # Vídeo horizontal / widescreen (16:9, 4:3, etc.):
-            # Escala a altura para os 1134px exatos da janela central
-            scaled_h = BOX_H
-            scaled_w = int(BOX_H * src_aspect)
-            if scaled_w % 2 != 0:
-                scaled_w += 1
-            crop_x = int((scaled_w - BOX_W) / 2)
-            fg_filter = f"[0:v]scale={scaled_w}:{scaled_h},crop={BOX_W}:{BOX_H}:{crop_x}:0[fg]"
-        else:
-            # Vídeo vertical / estreito (ex: 9:16, 4:5):
-            # Escala a largura para 1080 e corta o excesso de altura centralizado em 1134px
-            scaled_w = BOX_W
-            scaled_h = int(BOX_W / src_aspect)
+            scaled_h = int(BOX_H * DRIFT_MARGIN)
             if scaled_h % 2 != 0:
                 scaled_h += 1
-            crop_y = int((scaled_h - BOX_H) / 2)
-            fg_filter = f"[0:v]scale={scaled_w}:{scaled_h},crop={BOX_W}:{BOX_H}:0:{crop_y}[fg]"
+            scaled_w = int(scaled_h * src_aspect)
+            if scaled_w % 2 != 0:
+                scaled_w += 1
+            crop_expr = f"crop={BOX_W}:{BOX_H}:x='({scaled_w}-{BOX_W})/2 + 10*sin(t*0.28)':y='({scaled_h}-{BOX_H})/2 + 8*cos(t*0.22)'"
+            fg_base_str = f"[0:v]scale={scaled_w}:{scaled_h},{crop_expr}"
+        else:
+            scaled_w = int(BOX_W * DRIFT_MARGIN)
+            if scaled_w % 2 != 0:
+                scaled_w += 1
+            scaled_h = int(scaled_w / src_aspect)
+            if scaled_h % 2 != 0:
+                scaled_h += 1
+            crop_expr = f"crop={BOX_W}:{BOX_H}:x='({scaled_w}-{BOX_W})/2 + 8*sin(t*0.28)':y='({scaled_h}-{BOX_H})/2 + 10*cos(t*0.22)'"
+            fg_base_str = f"[0:v]scale={scaled_w}:{scaled_h},{crop_expr}"
+
+        fg_filter = fg_base_str
+        if neg_enable_str:
+            fg_filter += f",negate=enable='{neg_enable_str}'"
+        fg_filter += "[fg]"
 
         # Filtros de Video
         font_dir = str(get_base_dir() / "assets").replace("\\", "/").replace(":", r"\:")
@@ -2014,9 +2829,21 @@ def render_video_with_style(
         vf_parts = [
             bg_filter,
             fg_filter,
-            overlay_fg,
-            "[v1][1:v]overlay=0:0[v2]"
+            overlay_fg
         ]
+
+        curr_v = "[v1]"
+
+        # Camada de Recortes de Mangá Clímax Diversificados (Radial Speedlines, Eyes Panel, Sticker Punch)
+        for k, clip_info in enumerate(manga_clips):
+            inp_idx = 2 + k
+            m_s = clip_info["start"]
+            m_e = clip_info["end"]
+            vf_parts.append(f"{curr_v}[{inp_idx}:v]overlay=0:0:enable='between(t,{m_s:.3f},{m_e:.3f})':eof_action=pass[v_manga_{k}]")
+            curr_v = f"[v_manga_{k}]"
+
+        # Overlay Estático (Header 225px, Titulo, Watermark 62px, CTA)
+        vf_parts.append(f"{curr_v}[1:v]overlay=0:0[v2]")
 
         if ass_path:
             ass_escaped = ass_path.replace("\\", "/").replace(":", r"\:")
@@ -2027,7 +2854,7 @@ def render_video_with_style(
         vf = ";".join(vf_parts)
 
         # Montagem dos Inputs e Audio
-        inputs = ["-i", input_path, "-i", overlay_png]
+        inputs = ["-i", input_path, "-i", overlay_png, *anime_fx_inputs]
         has_music = bool(music_path and Path(music_path).exists())
 
         # Censura de Audio (Mudo cirurgico em palavras inadequadas)
@@ -2050,7 +2877,7 @@ def render_video_with_style(
             else:
                 inputs += ["-stream_loop", "-1", "-i", music_path]
 
-            music_input_idx = 2
+            music_input_idx = inputs.count("-i") - 1
 
             # Calibração Proporcional: volume da música calibrado com base no volume médio do vídeo
             try:
@@ -2124,6 +2951,9 @@ def render_video_with_style(
             "-filter_complex", f"{vf};{af}",
             "-map", "[vout]",
             "-map", "[aout]",
+            "-map_metadata", "-1",
+            "-map_chapters", "-1",
+            "-fflags", "+bitexact",
             "-c:v", "libx264",
             "-preset", "fast",
             "-crf", "17",
