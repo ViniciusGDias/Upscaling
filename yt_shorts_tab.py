@@ -31,8 +31,8 @@ import windows_notifier
 COLOR_BG_DARK = "#09090b"
 COLOR_CARD = "#111113"
 COLOR_CARD_BORDER = "#27272a"
-COLOR_ACCENT = "#e2e8f0"       # off-white — principal action
-COLOR_ACCENT_HOVER = "#a1a1aa"
+COLOR_ACCENT = "#ef4444"       # YouTube Red — principal action
+COLOR_ACCENT_HOVER = "#dc2626"
 COLOR_TEXT_MUTED = "#a1a1aa"   # zinc-400 — high contrast on dark frames
 
 
@@ -174,11 +174,13 @@ class YTShortsAnalyzerTab(ctk.CTkFrame):
         self.btn_analyze = ctk.CTkButton(
             left_frame,
             text="Analisar Vídeo para YouTube Shorts",
-            image=icon_manager.get_icon("sparkle", size=(16, 16), color="#09090b"), compound="left",
+            image=icon_manager.get_icon("sparkle", size=(16, 16), color="#ffffff"), compound="left",
             font=ctk.CTkFont(family="Segoe UI", size=15, weight="bold"),
             height=42,
             fg_color=COLOR_ACCENT,
             hover_color=COLOR_ACCENT_HOVER,
+            text_color="#ffffff",
+            corner_radius=8,
             command=self._start_analysis
         )
         self.btn_analyze.pack(fill="x", padx=15, pady=(4, 8))

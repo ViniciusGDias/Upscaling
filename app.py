@@ -193,8 +193,8 @@ class VideoUpscalerApp(ctk.CTk):
         self.studio_tab = StudioPipelineTab(tab_studio, settings_manager=getattr(self, 'settings_manager', None))
         self.studio_tab.pack(fill="both", expand=True)
 
-        # ── Tab 5: Audio Separation ──
-        tab_audio = self.tabview.add("Separação de Áudio")
+        # ── Tab 5: Audio Separation & Treatment ──
+        tab_audio = self.tabview.add("Tratamento de Áudio")
         tab_audio.configure(fg_color="transparent")
         self.audio_tab = AudioSeparationTab(tab_audio)
         self.audio_tab.pack(fill="both", expand=True)

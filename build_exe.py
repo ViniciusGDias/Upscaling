@@ -59,6 +59,7 @@ PyInstaller.__main__.run([
     '--add-data=gemini_web_automator.py;.',
     '--add-data=urahara_theme.py;.',
     '--add-data=thumbnail_studio.py;.',
+    '--add-data=haarcascade_frontalface_default.xml;.' if __import__('os').path.exists('haarcascade_frontalface_default.xml') else '--add-data=version.json;.',
     '--add-data=assets;assets' if __import__('os').path.exists('assets') else '--add-data=version.json;.',
     '--add-data=app_icon.ico;.',
     '--add-data=app_icon.png;.',
@@ -98,6 +99,7 @@ if dist_dir.exists():
         ".env.example", "user_style.json", "anime_dictionary.json", "urahara_theme.json",
         "urahara_theme.py", "emoji_text_renderer.py", "thumbnail_studio.py",
         "anime_fx_analyzer.py", "manga_fx_engine.py", "gemini_web_automator.py",
+        "haarcascade_frontalface_default.xml",
         "sidebar_navigation.py", "icon_manager.py", "subtitle_preview_helper.py",
         "subtitle_editor_dialog.py", "subtitle_renderer.py", "censorship_manager.py",
         "censorship_editor_dialog.py", "custom_profanity.json", "studio_tab.py",
@@ -110,6 +112,9 @@ if dist_dir.exists():
         p = Path(f)
         if p.exists():
             shutil.copy(p, dist_dir / f)
+            internal_dir = dist_dir / "_internal"
+            if internal_dir.exists():
+                shutil.copy(p, internal_dir / f)
             print(f"Copied {f} to {dist_dir}")
     if Path("assets").exists():
         dist_assets = dist_dir / "assets"

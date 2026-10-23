@@ -2182,11 +2182,39 @@ def analyze_dialogue_positions(
     if video_path and os.path.exists(video_path):
         try:
             import cv2
-            face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
             cap = cv2.VideoCapture(video_path)
             fps = cap.get(cv2.CAP_PROP_FPS) or 24.0
+
+            # Procura o arquivo haarcascade em múltiplos caminhos possíveis
+            base_dir = os.path.dirname(os.path.abspath(__file__))
+            cascade_candidates = [
+                os.path.join(base_dir, "haarcascade_frontalface_default.xml"),
+                os.path.join(base_dir, "_internal", "haarcascade_frontalface_default.xml"),
+                os.path.join(base_dir, "_internal", "cv2", "data", "haarcascade_frontalface_default.xml"),
+                os.path.join(base_dir, "cv2", "data", "haarcascade_frontalface_default.xml"),
+            ]
+            if hasattr(cv2, "data") and hasattr(cv2.data, "haarcascades"):
+                cascade_candidates.append(os.path.join(cv2.data.haarcascades, "haarcascade_frontalface_default.xml"))
+            if getattr(sys, "frozen", False):
+                meipass = getattr(sys, "_MEIPASS", "")
+                if meipass:
+                    cascade_candidates.extend([
+                        os.path.join(meipass, "haarcascade_frontalface_default.xml"),
+                        os.path.join(meipass, "cv2", "data", "haarcascade_frontalface_default.xml"),
+                    ])
+
+            for cand in cascade_candidates:
+                if os.path.exists(cand):
+                    try:
+                        clf = cv2.CascadeClassifier(cand)
+                        if clf is not None and not clf.empty():
+                            face_cascade = clf
+                            break
+                    except Exception:
+                        pass
         except Exception:
             cap = None
+            face_cascade = None
 
     tilt_toggle = False
     side_toggle = False
@@ -2212,37 +2240,40 @@ def analyze_dialogue_positions(
         has_face = False
         face_is_huge = False
 
-        if cap is not None and face_cascade is not None:
-            mid_t = (st + et) / 2.0
-            frame_no = int(mid_t * fps)
-            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_no)
-            ret, frame = cap.read()
-            if ret and frame is not None:
-                h, w = frame.shape[:2]
-                src_aspect = w / max(1, h)
-                box_aspect = box_w / box_h
+        if cap is not None and face_cascade is not None and not face_cascade.empty():
+            try:
+                mid_t = (st + et) / 2.0
+                frame_no = int(mid_t * fps)
+                cap.set(cv2.CAP_PROP_POS_FRAMES, frame_no)
+                ret, frame = cap.read()
+                if ret and frame is not None:
+                    h, w = frame.shape[:2]
+                    src_aspect = w / max(1, h)
+                    box_aspect = box_w / box_h
 
-                if src_aspect >= box_aspect:
-                    new_w = int(h * box_aspect)
-                    cx = max(0, (w - new_w) // 2)
-                    crop = frame[:, cx:cx+new_w]
-                else:
-                    new_h = int(w / box_aspect)
-                    cy = max(0, (h - new_h) // 2)
-                    crop = frame[cy:cy+new_h, :]
+                    if src_aspect >= box_aspect:
+                        new_w = int(h * box_aspect)
+                        cx = max(0, (w - new_w) // 2)
+                        crop = frame[:, cx:cx+new_w]
+                    else:
+                        new_h = int(w / box_aspect)
+                        cy = max(0, (h - new_h) // 2)
+                        crop = frame[cy:cy+new_h, :]
 
-                crop_h, crop_w = crop.shape[:2]
-                gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
-                faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=4, minSize=(40, 40))
+                    crop_h, crop_w = crop.shape[:2]
+                    gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+                    faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=4, minSize=(40, 40))
 
-                if len(faces) > 0:
-                    faces = sorted(faces, key=lambda f: f[2] * f[3], reverse=True)
-                    fx, fy, fw, fh = faces[0]
-                    face_x_center = (fx + fw / 2.0) / float(crop_w)
-                    face_y_center = (fy + fh / 2.0) / float(crop_h)
-                    has_face = True
-                    if fw > crop_w * 0.45 or fh > crop_h * 0.45:
-                        face_is_huge = True
+                    if len(faces) > 0:
+                        faces = sorted(faces, key=lambda f: f[2] * f[3], reverse=True)
+                        fx, fy, fw, fh = faces[0]
+                        face_x_center = (fx + fw / 2.0) / float(crop_w)
+                        face_y_center = (fy + fh / 2.0) / float(crop_h)
+                        has_face = True
+                        if fw > crop_w * 0.45 or fh > crop_h * 0.45:
+                            face_is_huge = True
+            except Exception:
+                pass
 
         # Decisão de Posição, Rotação e Tipografia (Padrão de Elite: Estável, Centralizado e Cinematográfico):
         # Caso 1: Grito / Ameaça / Exclamação forte de batalha -> Diagonal com Lovely Scream Queens

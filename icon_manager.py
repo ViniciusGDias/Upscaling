@@ -253,6 +253,7 @@ TAB_ICONS = {
     "Diretor IA": "director",
     "Refinador Mastercut": "scissors",
     "Studio Pipeline": "studio",
+    "Tratamento de Áudio": "audio",
     "Separação de Áudio": "audio",
     "Instagram Shorts": "instagram",
     "YouTube Shorts": "youtube",

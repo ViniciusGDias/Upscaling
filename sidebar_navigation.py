@@ -24,7 +24,7 @@ SECTIONS = [
         ("Diretor IA", "director"),
         ("Refinador Mastercut", "scissors"),
         ("Studio Pipeline", "studio"),
-        ("Separação de Áudio", "audio"),
+        ("Tratamento de Áudio", "audio"),
     ]),
     ("DISTRIBUIÇÃO & PESQUISA", [
         ("Instagram Shorts", "instagram"),
@@ -259,7 +259,12 @@ class SidebarNavigation(ctk.CTkFrame):
     def set(self, name: str):
         """Muda a aba ativa para o nome especificado."""
         if name not in self._tab_dict:
-            return
+            if name == "Separação de Áudio" and "Tratamento de Áudio" in self._tab_dict:
+                name = "Tratamento de Áudio"
+            elif name == "Tratamento de Áudio" and "Separação de Áudio" in self._tab_dict:
+                name = "Separação de Áudio"
+            else:
+                return
 
         prev_tab = self._active_tab
         self._active_tab = name

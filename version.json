@@ -1,8 +1,11 @@
 {
-  "version": "1.2.0",
+  "version": "1.2.1",
   "name": "Urahara",
   "release_date": "2026-10-22",
   "changelog": [
+    "Nova Ferramenta de Tratamento de Áudio Anti-Copyright 2026: A aba 'Separação de Áudio' foi expandida e renomeada para 'Tratamento de Áudio', trazendo um motor de blindagem DSP em 1 clique para músicas e trilhas sonoras. Permite remover restrições de Content ID do YouTube e TikTok em ~2 segundos via FFmpeg sem necessitar de PyTorch.",
+    "Correção Visual de Alto Contraste no YouTube Shorts: O botão 'Analisar Vídeo para YouTube Shorts' recebeu acabamento em vermelho oficial do YouTube com tipografia e ícone em branco puro de alta nitidez, eliminando o problema de texto claro sobre fundo claro.",
+    "Resiliência do Classificador OpenCV na Renderização: Inclusão do classificador Haar Cascade no pacote executável e proteção contra falhas internas de detecção facial, garantindo 100% de estabilidade na exportação de vídeos no Studio.",
     "Curadoria Interativa de Mangá FX Pro no Revisor de Legendas: Novo botão '✂ Recorte' para marcar frases manualmente diretamente na revisão. Duas falas consecutivas viram automaticamente Linha 1 e Linha 2 de um único card de clímax, com classificação de feeling dinâmica via IA Local (Ollama) ou heurística sem perda de tempo.",
     "Motor Tipográfico Universal com Suporte a Emojis Coloridos Reais: Eliminação definitiva de 'quadrados cinza' (tofu) ao criar Thumbnails 9:16 para YouTube Shorts ou ao adicionar Título do Vídeo no Studio. Suporte nativo a sequências completas de emojis (🔥, 💀, 🍎, 🚀, etc.) com fontes de alto impacto (Impact, Arial Black e Lovely Scream Queens).",
     "Integração Aprimorada de IA Local (Ollama) & Modelos: Suporte nativo a modelos qwen2.5 (7b, 14b, 27b) para curadoria de punchlines no Studio e roteirização no Diretor IA, com verificação de status e fallback inteligente.",
