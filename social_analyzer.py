@@ -10,6 +10,11 @@ import re
 from typing import Optional, Dict, Any, Callable
 from pathlib import Path
 
+try:
+    from json_repair import repair_json
+except ImportError:
+    repair_json = None
+
 from director_ai import (
     call_ai_text,
     extract_audio,
@@ -69,21 +74,22 @@ Você conhece profundamente a comunidade 'dorameira', o algoritmo do Reels e as 
 """
 
 YOUTUBE_SHORTS_CONTEXT = """
-Você é o maior especialista mundial em conteúdo viral para o YouTube Shorts. Você possui conhecimento profundo sobre:
-1. ALGORITMO DO YOUTUBE SHORTS:
-   - O Shorts prioriza a Retenção de Público (Audience Retention) e a Taxa de Visualização vs. Rejeição (Viewed vs Swiped Away rate, idealmente acima de 70-80%).
-   - Vídeos que têm mais de 100% de retenção (por conta de replays/loops) são fortemente impulsionados.
-   - O YouTube Shorts depende muito do feed de Shorts, mas também se beneficia de tráfego de pesquisa (SEO do YouTube).
-   - O título é o elemento visual e metadado mais importante do Shorts.
-2. PADRÕES VIRAIS COMPROVADOS NO SHORTS:
-   - GANCHO INICIAL CRUCIAL: Os primeiros 1 a 3 segundos devem impedir o usuário de passar (swipe) o vídeo.
-   - LOOP ESTRATÉGICO: Conectar perfeitamente o áudio e o visual do final do vídeo com o começo.
-   - EDIÇÃO RÁPIDA: Cortes dinâmicos, textos na tela (legenda gerada ou texto de destaque), efeitos sonoros (SFX) e quebras de padrão frequentes.
-3. SEO, TÍTULO E DESCRIÇÃO:
-   - Títulos curtos e impactantes (com menos de 60-70 caracteres para não serem cortados na tela do celular), com uso estratégico de letras maiúsculas e emojis.
-   - Uso obrigatório de hashtags relevantes, incluindo `#shorts` ou tags de nicho (ex: `#anime`, `#animeedit`).
-   - Descrições contendo palavras-chave e chamadas para ação (CTAs) de inscrição (Subscribe) ou engajamento.
-   - Tags/Palavras-chave focadas na pesquisa do YouTube.
+Você é o maior especialista mundial em crescimento acelerado e algoritmo do YouTube Shorts (2026) para canais de Cortes de Animes, Animações, Filmes e Cultura Pop. Você domina as 4 regras reais que separam vídeos de 1.500 views dos vídeos de 100.000 a 1.000.000+ views:
+1. AS 3 PRATELEIRAS DO ALGORITMO (SEED POOLS):
+   - Prateleira 1 (1.000 a 2.500 views): O vídeo só passa daqui se a taxa 'Ficaram vs. Deslizaram' (Viewed vs Swiped Away) nos primeiros 3 segundos for maior que 75%. Quem controla isso é a FRASE NA BARRA DO TOPO DO VÍDEO + os primeiros 2 segundos visuais.
+   - Prateleira 2 (20.000 a 35.000 views): O vídeo só passa daqui para os 100k+ se tiver Retenção até o último segundo (corte seco logo após o clímax, sem 'barriga' final) + Comentários ativos rodando o vídeo em loop ao fundo.
+2. PROIBIÇÃO DE TÍTULOS ROBÓTICOS/FORMAIS DE IA:
+   - Títulos poéticos ou formais como 'A Intervenção Selvagem de...', 'A Instauração da Ameaça', 'O Confronto Implacável' MATAM o CTR no Shorts e ninguém pesquisa isso no YouTube.
+   - Os títulos DEVEM usar linguagem coloquial humana de fã/otaku (ex: 'Ele fingiu ser fraco até fazer ISSO 💀', 'O momento que todo mundo gelou na hora 🥶', 'Ninguém esperava essa reação dele 😳') combinada com SEO de Busca Real ('| [Nome do Anime] Dublado #shorts').
+3. LOOP EM ANIMES (CORTE SECO + TIMESTAMP REPLAY BAIT):
+   - Em cortes de anime/filmes, loops de frase falada cortada ao meio soam artificiais. O que funciona em animes para passar de 100% de retenção é:
+     a) CORTE SECO NO CLÍMAX: Encerrar 0.3s após o golpe/fala final para o player reiniciar direto no Teaser de 0.0s.
+     b) ISCA DE TIMESTAMP NOS COMENTÁRIOS: Citar um segundo exato do vídeo no comentário fixado (ex: 'Quem reparou no detalhe aos 0:38 sabe o tamanho do perigo 😳') para forçar o público a voltar o vídeo e assistir de novo.
+4. GRADE DE 4 POSTAGENS DIÁRIAS (12h, 15h, 18h e 21h):
+   - 12h00 (Almoço): Ideal para cortes rápidos, curiosos, engraçados ou fáceis de entender até por quem não conhece o anime (atrai público novo).
+   - 15h00 (Tarde): Ideal para sequência/Parte 2 do anime das 12h ou cenas de mistério/lore e poderes.
+   - 18h00 (Pico Otaku/Saída): Ideal para lutas frenéticas, poderes apelões, hype extremo e reviravoltas de ação.
+   - 21h00 (Horário Nobre/Cama): Ideal para cenas emocionais, plot twists sombrios ou dilemas morais que geram longos debates nos comentários durante a noite.
 """
 
 DORAMA_YOUTUBE_CONTEXT = """
@@ -122,6 +128,15 @@ def _repair_truncated_json(text: str) -> Optional[Dict[str, Any]]:
         return json.loads(s)
     except Exception:
         pass
+
+    # 1.1 Tentar json_repair
+    if repair_json:
+        try:
+            res = repair_json(s, return_objects=True)
+            if isinstance(res, dict) and len(res) > 0:
+                return res
+        except Exception:
+            pass
 
     # 2. Tentar cortar a partir da última chave fechada
     last_brace = s.rfind("}")
@@ -219,7 +234,7 @@ def _repair_truncated_json(text: str) -> Optional[Dict[str, Any]]:
 
 
 def _parse_ai_json(text: str) -> Dict[str, Any]:
-    """Parse JSON from AI response robustly with auto-repair for truncated output."""
+    """Parse JSON from AI response robustly with auto-repair for truncated output and unescaped quotes."""
     if not text:
         return {}
     clean = text.strip()
@@ -233,21 +248,53 @@ def _parse_ai_json(text: str) -> Dict[str, Any]:
             clean = clean.split("```", 1)[0]
     clean = clean.strip()
 
+    # Isola a partir da primeira chave de abertura caso haja texto/preâmbulo anterior
+    first_brace = clean.find("{")
+    if first_brace != -1:
+        clean = clean[first_brace:].strip()
+
+    # 1. Tentar parse padrão
     try:
-        return json.loads(clean)
+        res = json.loads(clean)
+        if isinstance(res, dict) and len(res) > 0:
+            return res
     except Exception:
-        repaired = _repair_truncated_json(clean)
+        pass
+
+    # 2. Tentar json_repair (corrige aspas não-escapadas, chaves soltas, literais quebrados)
+    if repair_json:
+        try:
+            res = repair_json(clean, return_objects=True)
+            if isinstance(res, dict) and len(res) > 0:
+                return res
+        except Exception:
+            pass
+
+    # 3. Tentar reparador manual estrutural
+    repaired = _repair_truncated_json(clean)
+    if repaired and isinstance(repaired, dict):
+        return repaired
+
+    # 4. Tentar isolar o maior bloco { ... }
+    match = re.search(r'\{.*\}', clean, re.DOTALL)
+    if match:
+        snippet = match.group(0)
+        try:
+            res = json.loads(snippet)
+            if isinstance(res, dict) and len(res) > 0:
+                return res
+        except Exception:
+            pass
+        if repair_json:
+            try:
+                res = repair_json(snippet, return_objects=True)
+                if isinstance(res, dict) and len(res) > 0:
+                    return res
+            except Exception:
+                pass
+        repaired = _repair_truncated_json(snippet)
         if repaired and isinstance(repaired, dict):
             return repaired
-
-        match = re.search(r'\{.*\}', clean, re.DOTALL)
-        if match:
-            try:
-                return json.loads(match.group(0))
-            except Exception:
-                repaired = _repair_truncated_json(match.group(0))
-                if repaired and isinstance(repaired, dict):
-                    return repaired
 
     return {"raw_response": text, "parse_error": True}
 
@@ -335,10 +382,11 @@ Responda EXATAMENTE neste formato JSON:
     ]
 }}
 
-REGRAS:
+REGRAS DE FORMATAÇÃO E JSON (CRÍTICAS):
+- Responda APENAS com o JSON válido, sem texto fora dele.
+- REGRA VITAL DE ASPAS: NUNCA use aspas duplas literais dentro dos textos/valores (se citar falas de personagens ou diálogos, use SEMPRE aspas simples 'exemplo' ou escape com \").
 - Gere EXATAMENTE 3 opções de legendas completas com estilos distintos.
 - Forneça recomendações práticas e acionáveis.
-- Responda APENAS com o JSON, sem texto fora dele.
 """
 
 
@@ -403,19 +451,20 @@ TODOS os 5 títulos devem conter #shorts, emojis emocionais (💔, 🥺, 😱, �
         caption_hint = "Frase curta e de ALTO IMPACTO EMOCIONAL (máx 6-8 palavras) que faz a dorameira parar o scroll (ex: 'A dor nos olhos dela... 💔' ou 'Ele defendeu ela na frente de todos! 🥺❤️')"
         desc_hint = f"CORPO COMPLETO da descrição para dorameiras: Storytelling envolvente da cena + Ficha Técnica (🎬 Dorama: [Nome] | 📺 Onde assistir: [Streaming]) + CTA provocador nos comentários + hashtags ({work_tag} {extra_tags} #seriescoreanas #shorts)."
     else:
-        title_instruction = """FÓRMULA DE OURO PARA 5 TÍTULOS DE ANIME NO YOUTUBE SHORTS (ALTO CTR):
-1. Curiosidade & Choque Extremo: ex: "O momento exato em que ele descobriu a verdade sobre o Hollow... 😱🔥 #shorts #anime"
-2. Hype & Arrepio & Poder Oculto: ex: "A presença desse cara fez todo mundo congelar na hora! ⚡🩸 #[nome_anime] #shorts"
-3. Plot Twist & Revelação Sombria: ex: "O aviso mais sombrio da história que ninguém prestou atenção 😳⏳ #shorts #[nome_anime]"
-4. Provocação & Debate com a Comunidade: ex: "Você teria coragem de aceitar a proposta dele? 👀👇 #shorts #anime"
-5. Clímax & Cena Épica Inesquecível: ex: "Essa cena arrepiou até quem não assiste o anime... 🤯🍿 #shorts #[nome_anime]"
+        title_instruction = """FÓRMULA DE OURO PARA 5 TÍTULOS DE ANIME NO YOUTUBE SHORTS (FOCO EM DESTRAVAR 100K+ VIEWS E BUSCA DO YOUTUBE):
+PROIBIDO usar palavras robóticas/literárias ('Intervenção', 'Implacável', 'Instauração', 'Subjugar'). Escreva como um criador humano viral!
+Cada título deve unir [GANCHO COLOQUIAL DE CHOQUE/CURIOSIDADE] + [SEO DE BUSCA COM NOME DO ANIME/PERSONAGEM]:
+1. Choque Coloquial + Busca Direta: ex: "Ele fingiu ser um cachorro comum até fazer ISSO 💀 | JoJo Dublado #shorts"
+2. Hype & Presença Apelona: ex: "Quando o vilão percebe que mexeu com a pessoa errada 🥶🔥 | [Nome do Anime] #shorts"
+3. Detalhe Oculto / Revelação: ex: "Quase ninguém reparou no que o [Personagem] fez nesse segundo 😳⏳ #shorts #anime"
+4. Provocação / Debate Otaku: ex: "Esse foi o golpe mais apelão de todo [Nome do Anime]? 🤯👇 #shorts #[anime]"
+5. SEO de Pesquisa + Clímax Épico: ex: "[Personagem] vs [Inimigo] Dublado: O momento que arrepiou todo mundo! 🔥🍿 #shorts #anime"
 REQUISITOS OBRIGATÓRIOS DOS 5 TÍTULOS:
-- Use nomes reais dos personagens na cena (ex: Ichigo, Shinji, Gojo, etc.)
-- Gatilhos mentais fortes (curiosidade, perigo, choque, arrepio)
-- Todos os 5 títulos devem ter #shorts e hashtags específicas da obra!"""
-        comment_format_hint = f"🎬 {work_label}: [Nome do Anime] (Episódio [Nº])\\n🍿 Personagens na cena: [Nomes dos Personagens]\\n\\n💬 Pergunta polêmica para a comunidade: [Pergunta provocativa que divide opiniões entre os fãs, ex: 'Você aceitaria essa proposta ou lutaria sozinho?'] Deixa nos comentários! 👇🔥\\n\\n{work_tag} #[AnimeSemEspaco] {extra_tags} #shorts #anime"
-        caption_hint = "Texto de Gancho Visual para os primeiros 3s (máx 6-8 palavras) que impede o swipe (ex: 'O aviso que o Ichigo ignorou... 😱' ou 'Quando o verdadeiro monstro acorda... 🥶')"
-        desc_hint = f"CORPO COMPLETO da descrição otimizada para o algoritmo do YouTube Shorts (300-600 chars):\\n- Linha 1 de gancho irresistível\\n- Storytelling rápido da cena destacando os nomes e técnicas dos personagens\\n- Ficha Técnica (🎬 Anime: [Nome] | 🍿 Episódio: [Nº])\\n- Chamada para inscrição e like\\n- Bloco de hashtags estratégicas ({work_tag} {extra_tags} #anime #otaku #shorts #viral)"
+- Linguagem 100% natural, direta e magnética (zero cara de IA).
+- Inclua o nome real do personagem ou do anime + 'Dublado' (quando em PT) para ranquear na Pesquisa do YouTube!"""
+        comment_format_hint = f"🎬 {work_label}: [Nome do Anime] (Episódio [Nº])\\n🍿 Personagens: [Nomes]\\n\\n⏱️ [ISCA DE REPLAY COM TIMESTAMP REAL DA TRANSCRIÇÃO: ex: 'Quem mais reparou na reação dele aos 0:38?! 😱']\\n💬 [Pergunta polêmica e direta que faz os fãs discutirem nos comentários] 👇🔥\\n\\n{work_tag} #[AnimeSemEspaco] {extra_tags} #shorts #anime #animesdublados"
+        caption_hint = "Frase CURTA e COLOQUIAL para a Barra Branca do Topo do vídeo (máx 6-8 palavras, ZERO palavras difíceis) que cria curiosidade agoniante até o fim (ex: 'ELE ACHOU QUE TINHA GANHADO... ATÉ ISSO ACONTECER 💀' ou 'FOI NESSE SEGUNDO QUE ELE PERDEU TUDO 😳')"
+        desc_hint = f"CORPO COMPLETO da descrição otimizada para SEO de Busca do YouTube + Feed de Shorts (350-650 chars):\\n- Linha 1 de gancho coloquial irresistível\\n- Resumo direto contendo os termos exatos que as pessoas pesquisam no YouTube (Ex: '[Personagem] vs [Inimigo] dublado', 'melhores momentos [Nome do Anime]')\\n- Ficha Técnica (🎬 Anime: [Nome] | 🍿 Episódio: [Nº] | 🎙️ Idioma: Dublado PT-BR)\\n- CTA para se inscrever no canal\\n- Bloco de hashtags estratégicas ({work_tag} {extra_tags} #animesdublados #cortesdeanime #shorts #viral)"
 
     return f"""{base_context}
 TAREFA: Analise este vídeo e forneça uma estratégia impecável de otimização para viralizar no YouTube Shorts.
@@ -443,8 +492,15 @@ Responda EXATAMENTE neste formato JSON:
         "hook_grade": "EXCELENTE / BOM / ATENCAO / FRACO",
         "hook_quality": "Análise detalhada do gancho nos primeiros 3 segundos",
         "suggested_hook": "Sugestão de gancho (verbal/visual) para impedir o swipe",
-        "loop_strategy": "Estratégia para conectar o áudio/visual do fim com o início para >100% retenção",
+        "loop_strategy": "Em animes, NUNCA sugira cortar frase ao meio se soar artificial. Indique o CORTE SECO exato após o clímax final + qual segundo exato (ex: 0:34) citar nos comentários para forçar o espectador a rever a cena!",
         "retention_tricks": ["Truque de edição/ritmo 1", "Truque de edição 2"]
+    }},
+    "channel_growth_advisor": {{
+        "best_slot_4x": "Escolha o melhor horário da grade de 4 vídeos/dia (12:00 Almoço/Curiosidade, 15:00 Tarde/Sequência & Lore, 18:00 Pico Otaku/Ação & Hype, ou 21:00 Horário Nobre/Plot Twist & Debate) e explique por que esta cena performa melhor nesse horário",
+        "pairing_strategy": "Qual tipo de corte postar no horário seguinte da grade (pareamento 2+2 da mesma obra ou mesmo sub-nicho) para criar efeito maratona e não canibalizar views",
+        "search_seo_keywords": ["termo exato de busca 1 (ex: iggy vs pet shop dublado)", "termo de busca 2", "termo de busca 3"],
+        "replay_bait_timestamp": "Indique o segundo exato mais chocante/curioso deste vídeo e a frase exata para usar como isca de replay nos comentários",
+        "unlock_100k_plan": "O que ajustar se o vídeo travar na Prateleira 1 (1.5k views: foco em Viewed vs Swiped Away >76%) ou na Prateleira 2 (25k views: foco em corte seco no segundo final + debate nos comentários)"
     }},
     "titles": [
         {{
@@ -508,9 +564,11 @@ REGRAS CRÍTICAS PARA AS DESCRIÇÕES:
 - A first_line é o que aparece ANTES do "ver mais" no YouTube Shorts (deve prender a atenção em até 80 caracteres e conter emoji).
 - O body deve conter parágrafos curtos, storytelling sobre a cena, quebras visuais de linha, emojis e palavras-chave que posicionam o vídeo nas buscas do YouTube.
 - O full_caption DEVE ser a versão COMPLETA e 100% pronta para colar direto no YouTube Studio (first_line + quebra de linha + body + quebra de linha + CTA + quebra de linha + hashtags_inline).
+REGRAS CRÍTICAS DE FORMATAÇÃO E JSON:
+- Responda APENAS com o JSON válido, sem texto fora dele.
+- REGRA VITAL DE ASPAS: NUNCA use aspas duplas literais dentro dos textos/valores (se citar falas de personagens como 'Eu vou vencer', use SEMPRE aspas simples ou escape com \").
 - Gere pelo menos 5 títulos variados (sempre incluindo #shorts).
 - Gere entre 10 e 15 tags prontas para o YouTube Studio.
-- Responda APENAS com o JSON.
 """
 
 
@@ -788,6 +846,7 @@ def analyze_instagram_video(
                     lines = []
                     curr = []
                     st = None
+                    e = 0.0
                     for w in words:
                         s = float(w.get("start", 0.0))
                         e = float(w.get("end", 0.0))
@@ -820,6 +879,7 @@ def analyze_instagram_video(
                             lines = []
                             curr = []
                             st_rel = None
+                            e = 0.0
                             for w in cut_words:
                                 s = max(0.0, float(w.get("start", 0)) - float(st_sec))
                                 e = max(s + 0.1, float(w.get("end", 0)) - float(st_sec))
@@ -884,7 +944,12 @@ def analyze_instagram_video(
     )
     engine = kwargs.get("engine") or os.getenv("DIRECTOR_ENGINE", "ollama_local")
     local_model = kwargs.get("local_model") or os.getenv("DIRECTOR_LOCAL_MODEL", "qwen2.5:7b")
-    raw_response = call_ai_text(prompt, on_log=_log, max_tokens=4096, engine=engine, local_model=local_model)
+    try:
+        from metadata_enricher import clean_media_query
+        s_key = f"social_{clean_media_query(context or os.path.basename(video_path))}"
+    except Exception:
+        s_key = "social_chat"
+    raw_response = call_ai_text(prompt, on_log=_log, max_tokens=4096, engine=engine, local_model=local_model, session_key=s_key)
 
     _log("✨ Formatando resultados da análise...")
     data = _parse_ai_json(raw_response)
@@ -922,6 +987,52 @@ def analyze_instagram_video(
     return data
 
 
+def _populate_growth_advisor_fallback(data: Dict[str, Any], work_title: str = "", character: str = "") -> None:
+    """Garante que o bloco channel_growth_advisor esteja sempre completo (mesmo em análises vindas do cache ou LLM local)."""
+    if not isinstance(data, dict):
+        return
+    cga = data.get("channel_growth_advisor")
+    if not isinstance(cga, dict):
+        cga = {}
+
+    va = data.get("video_analysis") or {}
+    chars = va.get("characters_detected") or []
+    first_char = character.strip()
+    if not first_char and chars and isinstance(chars, list):
+        first_char = str(chars[0]).split("(")[0].split("-")[0].strip()
+
+    w_clean = (work_title or "Anime").strip()
+    c_clean = (first_char or "Personagem").strip()
+
+    if not cga.get("best_slot_4x"):
+        cga["best_slot_4x"] = (
+            f"18:00 (Pico de Ação/Hype) ou 21:00 (Horário Nobre/Debate) — "
+            f"Ideal para cortes intensos de '{w_clean}', onde o público assiste até o fim e abre os comentários."
+        )
+    if not cga.get("pairing_strategy"):
+        cga["pairing_strategy"] = (
+            f"Grade 2+2: Poste 2 cortes da mesma obra ('{w_clean}') em horários seguidos (ex: 12h + 15h ou 18h + 21h). "
+            f"Assim, quem assistir ao primeiro recebe o segundo no feed seguinte sem dividir o algoritmo em 4 públicos diferentes!"
+        )
+    if not cga.get("search_seo_keywords"):
+        cga["search_seo_keywords"] = [
+            f"{w_clean.lower()} dublado",
+            f"{c_clean.lower()} {w_clean.lower()} cena",
+            f"melhores momentos {w_clean.lower()} shorts"
+        ]
+    if not cga.get("replay_bait_timestamp"):
+        cga["replay_bait_timestamp"] = (
+            f"Em animes, NÃO faça loop cortando frase no meio. Faça CORTE SECO 0.3s após o golpe/fala final no segundo ~58s "
+            f"e fixe no comentário: 'Quem reparou no detalhe aos 0:36 sabe o que ia acontecer 😱👇' (força o replay!)."
+        )
+    if not cga.get("unlock_100k_plan"):
+        cga["unlock_100k_plan"] = (
+            "• Travou em 1.5k views? O 'Ficaram vs Deslizaram' ficou abaixo de 75% — troque a frase da barra branca do topo por uma provocação curta de 6 palavras.\n"
+            "• Travou em 20k–30k views? Faltou replay/comentários nos últimos 10s — corte 2s de sobra no final e fixe uma pergunta polêmica dividindo fãs no topo dos comentários."
+        )
+    data["channel_growth_advisor"] = cga
+
+
 def analyze_yt_shorts_video(
     video_path: str,
     character: str = "",
@@ -956,6 +1067,8 @@ def analyze_yt_shorts_video(
             not cached_res.get("parse_error") and
             ("video_analysis" in cached_res or "optimization" in cached_res)):
             _log("⚡ [Cache Inteligente 24h] Análise YouTube Shorts recuperada instantaneamente (0 tokens gastos)!")
+            w_hint = _detect_work_title(video_path, user_work=anime, user_character=character, user_context=context, ai_cache=ai_cache)
+            _populate_growth_advisor_fallback(cached_res, work_title=w_hint, character=character)
             return cached_res
 
         # Cross-cache: verifica se o vídeo já foi analisado na aba Instagram Reels
@@ -989,6 +1102,7 @@ def analyze_yt_shorts_video(
                     lines = []
                     curr = []
                     st = None
+                    e = 0.0
                     for w in words:
                         s = float(w.get("start", 0.0))
                         e = float(w.get("end", 0.0))
@@ -1021,6 +1135,7 @@ def analyze_yt_shorts_video(
                             lines = []
                             curr = []
                             st_rel = None
+                            e = 0.0
                             for w in cut_words:
                                 s = max(0.0, float(w.get("start", 0)) - float(st_sec))
                                 e = max(s + 0.1, float(w.get("end", 0)) - float(st_sec))
@@ -1087,12 +1202,18 @@ def analyze_yt_shorts_video(
     )
     engine = kwargs.get("engine") or os.getenv("DIRECTOR_ENGINE", "ollama_local")
     local_model = kwargs.get("local_model") or os.getenv("DIRECTOR_LOCAL_MODEL", "qwen2.5:7b")
-    raw_response = call_ai_text(prompt, on_log=_log, max_tokens=4096, engine=engine, local_model=local_model)
+    try:
+        from metadata_enricher import clean_media_query
+        s_key = f"social_{clean_media_query(context or os.path.basename(video_path))}"
+    except Exception:
+        s_key = "social_chat"
+    raw_response = call_ai_text(prompt, on_log=_log, max_tokens=4096, engine=engine, local_model=local_model, session_key=s_key)
 
     _log("✨ Formatando resultados de SEO e retenção...")
     data = _parse_ai_json(raw_response)
     data["_transcript"] = transcript
     data["_enriched_context"] = enriched_context
+    _populate_growth_advisor_fallback(data, work_title=target_work, character=character)
 
     # Identifica o melhor título para a capa 9:16
     titles = data.get("titles", [])

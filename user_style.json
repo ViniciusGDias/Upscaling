@@ -49,6 +49,11 @@
   "cta_bar": {
     "line1": "FINALMENTE O ALGORITMO TE TROUXE",
     "line2": "PRO CANAL CERTO! 🚀 SE INSCREVE",
+    "line3": "",
+    "lines": [
+      "FINALMENTE O ALGORITMO TE TROUXE",
+      "PRO CANAL CERTO! 🚀 SE INSCREVE"
+    ],
     "font_name": "Lovely Scream Queens",
     "font_path": "assets/Queens.otf",
     "background_color": "transparent",
@@ -63,9 +68,8 @@
     "fps": 60
   },
   "_meta": {
-    "analyzed_segments": 46,
-    "subtitle_segments": 36,
-    "static_segments": 10,
+    "profile_id": "animax",
+    "profile_name": "Animax",
     "font_family": "Lovely Scream Queens"
   }
 }

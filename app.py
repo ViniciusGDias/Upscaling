@@ -26,7 +26,7 @@ except Exception:
 def resource_path(relative_path):
     """ Get absolute path to resource, works for dev and for PyInstaller """
     try:
-        base_path = sys._MEIPASS
+        base_path = getattr(sys, "_MEIPASS", os.path.abspath("."))
     except Exception:
         base_path = os.path.abspath(".")
     return os.path.join(base_path, relative_path)
@@ -46,6 +46,7 @@ from upscaler import (
     compute_target_dimensions,
     find_ffmpeg,
     format_time,
+    format_file_size,
     ENCODERS,
     ANTI_COPYRIGHT_OPTIONS,
     AUDIO_ENHANCE_OPTIONS,
@@ -121,6 +122,12 @@ class VideoUpscalerApp(ctk.CTk):
         self._start_time = 0.0
         self._elapsed_timer_id = None
         self._ai_mode = False  # True when using Real-ESRGAN AI pipeline
+
+        # Batch Upscaling State
+        self.batch_files: list[str] = []
+        self.batch_dest_folder: str = ""
+        self.batch_status_labels: dict[str, ctk.CTkLabel] = {}
+        self._batch_cancelled: bool = False
 
         # Build UI
         self._build_ui()
@@ -272,18 +279,29 @@ class VideoUpscalerApp(ctk.CTk):
         )
         card.pack(fill="x", pady=(0, 8))
 
+        header_row = ctk.CTkFrame(card, fg_color="transparent")
+        header_row.pack(fill="x", padx=16, pady=(14, 8))
+
         ctk.CTkLabel(
-            card, text="Arquivo de Entrada",
+            header_row, text="Arquivo(s) de Entrada",
             font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
             text_color=COLORS["text_secondary"], anchor="w",
-        ).pack(fill="x", padx=16, pady=(14, 8))
+        ).pack(side="left")
+
+        self.batch_badge = ctk.CTkLabel(
+            header_row, text="",
+            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+            text_color=COLORS["accent_primary"],
+            fg_color="#182c23", corner_radius=12, padx=10, pady=2,
+        )
+        # Not packed until batch is active
 
         file_row = ctk.CTkFrame(card, fg_color="transparent")
         file_row.pack(fill="x", padx=16, pady=(0, 12))
 
         self.file_entry = ctk.CTkEntry(
             file_row,
-            placeholder_text="Selecione um arquivo de vídeo...",
+            placeholder_text="Selecione um vídeo ou múltiplos arquivos / pasta...",
             font=ctk.CTkFont(family="Segoe UI", size=12),
             fg_color=COLORS["bg_dark"],
             border_color=COLORS["border"],
@@ -291,8 +309,36 @@ class VideoUpscalerApp(ctk.CTk):
             text_color=COLORS["text_primary"],
             height=36, corner_radius=6,
         )
-        self.file_entry.pack(side="left", fill="x", expand=True, padx=(0, 8))
+        self.file_entry.pack(side="left", fill="x", expand=True, padx=(0, 6))
 
+        # Botão Limpar seleção
+        self.clear_file_btn = ctk.CTkButton(
+            file_row, text="✕",
+            font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
+            fg_color=COLORS["bg_card_hover"],
+            hover_color="#ef4444",
+            text_color=COLORS["text_secondary"],
+            border_width=1,
+            border_color=COLORS["border"],
+            height=36, width=34, corner_radius=6,
+            command=self._clear_input_and_batch,
+        )
+        self.clear_file_btn.pack(side="left", padx=(0, 6))
+
+        # Botão Selecionar Pasta inteira
+        ctk.CTkButton(
+            file_row, text="📁 Pasta",
+            font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
+            fg_color=COLORS["bg_card_hover"],
+            hover_color=COLORS["border_active"],
+            text_color=COLORS["text_primary"],
+            border_width=1,
+            border_color=COLORS["border"],
+            height=36, width=90, corner_radius=6,
+            command=self._browse_folder,
+        ).pack(side="left", padx=(0, 6))
+
+        # Botão Procurar Arquivo(s)
         ctk.CTkButton(
             file_row, text="Procurar",
             image=icon_manager.get_icon("folder", size=(14, 14), color=COLORS["text_primary"]),
@@ -303,9 +349,51 @@ class VideoUpscalerApp(ctk.CTk):
             text_color=COLORS["text_primary"],
             border_width=1,
             border_color=COLORS["border"],
-            height=36, width=110, corner_radius=6,
+            height=36, width=105, corner_radius=6,
             command=self._browse_file,
         ).pack(side="right")
+
+        # ── Card da Fila de Lote (oculto por padrão) ──
+        self.batch_card = ctk.CTkFrame(
+            card, fg_color=COLORS["bg_dark"], corner_radius=8,
+            border_width=1, border_color=COLORS["border"],
+        )
+        # Oculto até carregar múltiplos vídeos
+
+        b_header = ctk.CTkFrame(self.batch_card, fg_color="transparent")
+        b_header.pack(fill="x", padx=12, pady=(10, 6))
+
+        self.batch_title_label = ctk.CTkLabel(
+            b_header, text="Fila de Processamento em Lote",
+            font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
+            text_color=COLORS["text_primary"],
+        )
+        self.batch_title_label.pack(side="left")
+
+        ctk.CTkButton(
+            b_header, text="+ Adicionar",
+            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+            fg_color="#182c23", hover_color="#223e32",
+            text_color=COLORS["accent_primary"],
+            border_width=1, border_color="#10b981",
+            height=26, width=95, corner_radius=5,
+            command=self._add_more_batch_files,
+        ).pack(side="right", padx=(6, 0))
+
+        ctk.CTkButton(
+            b_header, text="Limpar Fila",
+            font=ctk.CTkFont(family="Segoe UI", size=11),
+            fg_color="#27272a", hover_color="#3f3f46",
+            text_color=COLORS["text_muted"],
+            height=26, width=85, corner_radius=5,
+            command=self._clear_input_and_batch,
+        ).pack(side="right")
+
+        self.batch_scroll = ctk.CTkScrollableFrame(
+            self.batch_card, fg_color="transparent",
+            height=130, corner_radius=6,
+        )
+        self.batch_scroll.pack(fill="x", padx=8, pady=(0, 8))
 
         # Quick shortcuts
         shortcut_row = ctk.CTkFrame(card, fg_color="transparent")
@@ -890,7 +978,7 @@ class VideoUpscalerApp(ctk.CTk):
 
     # ── Helper Methods ───────────────────────────────────────────────────
 
-    def _set_status(self, text: str, color: str = None):
+    def _set_status(self, text: str, color: str | None = None):
         """Update the status bar text."""
         self.status_label.configure(
             text=text,
@@ -1125,17 +1213,186 @@ class VideoUpscalerApp(ctk.CTk):
             messagebox.showerror("Erro", "Falha na instalação. Verifique a conexão e tente novamente.")
 
     def _browse_file(self):
-        """Open file dialog to select input video."""
+        """Open file dialog to select one or multiple input videos."""
         filetypes = [
             ("Vídeos", "*.mp4 *.mkv *.avi *.mov *.wmv *.flv *.webm *.m4v *.mpeg *.mpg *.ts"),
             ("Todos os arquivos", "*.*"),
         ]
-        filepath = filedialog.askopenfilename(
-            title="Selecionar Vídeo",
+        filepaths = filedialog.askopenfilenames(
+            title="Selecionar Vídeo(s)",
             filetypes=filetypes,
         )
-        if filepath:
-            self._load_video(filepath)
+        if filepaths:
+            file_list = list(filepaths)
+            if len(file_list) == 1:
+                self._load_video(file_list[0])
+            else:
+                self._load_batch_videos(file_list)
+
+    def _browse_folder(self):
+        """Open folder dialog to load all videos inside a selected folder."""
+        folder = filedialog.askdirectory(title="Selecionar Pasta com Vídeos")
+        if folder and os.path.isdir(folder):
+            video_files = []
+            for root, _, files in os.walk(folder):
+                for f in files:
+                    if any(f.lower().endswith(ext) for ext in VIDEO_EXTENSIONS):
+                        video_files.append(os.path.join(root, f))
+            video_files.sort()
+            if not video_files:
+                messagebox.showinfo("Nenhum Vídeo Encontrado", f"Nenhum arquivo de vídeo suportado foi encontrado em:\n{folder}")
+                return
+            if len(video_files) == 1:
+                self._load_video(video_files[0])
+            else:
+                self._load_batch_videos(video_files)
+
+    def _add_more_batch_files(self):
+        """Add more files to the current batch queue."""
+        filetypes = [
+            ("Vídeos", "*.mp4 *.mkv *.avi *.mov *.wmv *.flv *.webm *.m4v *.mpeg *.mpg *.ts"),
+            ("Todos os arquivos", "*.*"),
+        ]
+        filepaths = filedialog.askopenfilenames(
+            title="Adicionar Mais Vídeos ao Lote",
+            filetypes=filetypes,
+        )
+        if filepaths:
+            current_set = set(self.batch_files)
+            for fp in filepaths:
+                if fp not in current_set and os.path.isfile(fp):
+                    self.batch_files.append(fp)
+                    current_set.add(fp)
+            self._load_batch_videos(list(self.batch_files))
+
+    def _clear_input_and_batch(self):
+        """Clear all loaded files, batch queue, and reset inputs."""
+        if self.is_processing:
+            messagebox.showwarning("Aviso", "Aguarde ou cancele o processamento antes de limpar a fila.")
+            return
+        self.batch_files = []
+        self.batch_dest_folder = ""
+        self.batch_status_labels.clear()
+        if hasattr(self, "batch_card") and self.batch_card.winfo_ismapped():
+            self.batch_card.pack_forget()
+        if hasattr(self, "batch_badge") and self.batch_badge.winfo_ismapped():
+            self.batch_badge.pack_forget()
+        self.file_entry.delete(0, "end")
+        self.output_entry.delete(0, "end")
+        self.current_video = None
+        self.input_path = ""
+        if hasattr(self, "info_card_outer") and self.info_card_outer.winfo_ismapped():
+            self.info_card_outer.pack_forget()
+        self._set_status("Pronto")
+
+    def _remove_batch_item(self, fpath: str):
+        """Remove a single item from the batch queue."""
+        if self.is_processing:
+            messagebox.showwarning("Aviso", "Não é possível remover itens durante o processamento.")
+            return
+        if fpath in self.batch_files:
+            self.batch_files.remove(fpath)
+        if len(self.batch_files) == 1:
+            self._load_video(self.batch_files[0])
+        elif len(self.batch_files) == 0:
+            self._clear_input_and_batch()
+        else:
+            self._render_batch_card()
+            self.file_entry.delete(0, "end")
+            self.file_entry.insert(0, f"{len(self.batch_files)} vídeos selecionados para processamento em lote")
+            self.batch_badge.configure(text=f"{len(self.batch_files)} vídeos no lote")
+
+    def _render_batch_card(self):
+        """Render individual video items in the batch scroll list."""
+        for widget in self.batch_scroll.winfo_children():
+            widget.destroy()
+        self.batch_status_labels.clear()
+
+        for idx, fpath in enumerate(self.batch_files, 1):
+            row = ctk.CTkFrame(self.batch_scroll, fg_color=COLORS["bg_card"], corner_radius=6, height=32)
+            row.pack(fill="x", pady=2, padx=4)
+            row.pack_propagate(False)
+
+            # Index badge
+            ctk.CTkLabel(
+                row, text=f"#{idx}",
+                font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+                text_color=COLORS["text_muted"], width=28,
+            ).pack(side="left", padx=(6, 4))
+
+            # Filename
+            fname = os.path.basename(fpath)
+            try:
+                fsize = os.path.getsize(fpath)
+                size_str = f" ({format_file_size(fsize)})"
+            except Exception:
+                size_str = ""
+
+            display_name = fname if len(fname) <= 45 else fname[:42] + "..."
+            ctk.CTkLabel(
+                row, text=f"{display_name}{size_str}",
+                font=ctk.CTkFont(family="Segoe UI", size=11),
+                text_color=COLORS["text_primary"], anchor="w",
+            ).pack(side="left", fill="x", expand=True, padx=4)
+
+            # Status badge
+            status_lbl = ctk.CTkLabel(
+                row, text="⏳ Na Fila",
+                font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
+                text_color=COLORS["text_muted"], width=95, anchor="e",
+            )
+            status_lbl.pack(side="right", padx=(4, 6))
+            self.batch_status_labels[fpath] = status_lbl
+
+            # Remove button
+            ctk.CTkButton(
+                row, text="✕",
+                font=ctk.CTkFont(size=11, weight="bold"),
+                fg_color="transparent", hover_color="#ef4444",
+                text_color=COLORS["text_muted"],
+                width=24, height=22, corner_radius=4,
+                command=lambda p=fpath: self._remove_batch_item(p),
+            ).pack(side="right", padx=(2, 4))
+
+    def _load_batch_videos(self, filepaths: list[str]):
+        """Load multiple videos into the batch queue."""
+        valid_files = [f for f in filepaths if os.path.isfile(f) and any(f.lower().endswith(ext) for ext in VIDEO_EXTENSIONS)]
+        if not valid_files:
+            return
+
+        if len(valid_files) == 1:
+            self._load_video(valid_files[0])
+            return
+
+        self.batch_files = valid_files
+        self.input_path = valid_files[0]
+
+        # Default destination folder: directory of first file
+        first_dir = os.path.dirname(os.path.abspath(valid_files[0]))
+        if not self.batch_dest_folder or not os.path.isdir(self.batch_dest_folder):
+            self.batch_dest_folder = first_dir
+
+        self.file_entry.delete(0, "end")
+        self.file_entry.insert(0, f"{len(valid_files)} vídeos selecionados para processamento em lote")
+
+        self.output_entry.delete(0, "end")
+        self.output_entry.insert(0, f"Salvar todos em: {self.batch_dest_folder}")
+
+        # Show badge
+        self.batch_badge.configure(text=f"{len(valid_files)} vídeos no lote")
+        self.batch_badge.pack(side="right", padx=(8, 0))
+
+        # Show batch card
+        self.batch_card.pack(fill="x", padx=16, pady=(0, 10))
+        self._render_batch_card()
+
+        # Update first video info for preview/presets
+        first_info = get_video_info(valid_files[0])
+        if first_info:
+            self.current_video = first_info
+            self._update_dims_preview()
+
+        self._set_status(f"[OK] Fila criada com {len(valid_files)} vídeos para lote", COLORS["success"])
 
     def _open_in_refiner(self):
         """Send current video to Refiner Mastercut tab and switch to it."""
@@ -1152,19 +1409,37 @@ class VideoUpscalerApp(ctk.CTk):
             self.tabview.set("Diretor IA")
 
     def _browse_output(self):
-        """Open file dialog to select output path."""
-        filetypes = [("MP4", "*.mp4"), ("MKV", "*.mkv"), ("AVI", "*.avi")]
-        filepath = filedialog.asksaveasfilename(
-            title="Salvar Vídeo Como",
-            filetypes=filetypes,
-            defaultextension=".mp4",
-        )
-        if filepath:
-            self.output_entry.delete(0, "end")
-            self.output_entry.insert(0, filepath)
+        """Open file dialog or folder dialog to select output path."""
+        if len(self.batch_files) > 1:
+            initial = self.batch_dest_folder or (os.path.dirname(self.batch_files[0]) if self.batch_files else None)
+            folder = filedialog.askdirectory(
+                title="Selecionar Pasta de Destino para os Vídeos",
+                initialdir=initial,
+            )
+            if folder:
+                self.batch_dest_folder = folder
+                self.output_entry.delete(0, "end")
+                self.output_entry.insert(0, f"Salvar todos em: {folder}")
+        else:
+            filetypes = [("MP4", "*.mp4"), ("MKV", "*.mkv"), ("AVI", "*.avi")]
+            filepath = filedialog.asksaveasfilename(
+                title="Salvar Vídeo Como",
+                filetypes=filetypes,
+                defaultextension=".mp4",
+            )
+            if filepath:
+                self.output_entry.delete(0, "end")
+                self.output_entry.insert(0, filepath)
 
     def _load_video(self, filepath: str):
-        """Load video file and display its information."""
+        """Load single video file and display its information."""
+        self.batch_files = [filepath]
+        self.batch_dest_folder = ""
+        if hasattr(self, "batch_card") and self.batch_card.winfo_ismapped():
+            self.batch_card.pack_forget()
+        if hasattr(self, "batch_badge") and self.batch_badge.winfo_ismapped():
+            self.batch_badge.pack_forget()
+
         self.input_path = filepath
 
         self.file_entry.delete(0, "end")
@@ -1271,9 +1546,312 @@ class VideoUpscalerApp(ctk.CTk):
         else:
             self._set_status("Falha ao abrir pré-visualização.", COLORS["error"])
 
+    def _update_batch_progress(self, percent: float, status: str):
+        """Update batch progress bar and label (main thread)."""
+        self.progress_bar.set(percent / 100)
+        self.progress_percent_label.configure(text=f"{percent:.1f}%")
+        self.progress_status_label.configure(text=status)
+
+    def _update_batch_item_status(self, fpath: str, status_text: str, text_color: str):
+        """Update status label of a single item in the batch scroll list."""
+        lbl = self.batch_status_labels.get(fpath)
+        if lbl and lbl.winfo_exists():
+            lbl.configure(text=status_text, text_color=text_color)
+
+    def _finish_batch_upscaling(self, successful: int, failed: int, total: int, cancelled: bool, dest_folder: str):
+        """Finalize batch processing on the main thread."""
+        self.is_processing = False
+        self._stop_elapsed_timer()
+        self.start_btn.configure(state="normal", text="Iniciar Upscaling")
+        self.cancel_btn.configure(state="disabled")
+
+        elapsed = time.time() - self._start_time
+        elapsed_str = format_time(elapsed)
+        self.elapsed_label.configure(text=f"Tempo total: {elapsed_str}")
+
+        if cancelled:
+            self.progress_status_label.configure(text="[CANCELADO] Lote interrompido")
+            self._set_status(f"Processamento em lote cancelado ({successful}/{total} concluídos)", COLORS["warning"])
+            self._log("\n" + "═" * 56)
+            self._log(f"🛑 [LOTE INTERROMPIDO] {successful} de {total} vídeos foram concluídos.")
+            self._log(f"Tempo decorrido: {elapsed_str}")
+            self._log("═" * 56)
+            messagebox.showwarning("Lote Cancelado", f"O processamento em lote foi cancelado.\n\nVídeos concluídos: {successful} de {total}.")
+        else:
+            self.progress_bar.set(1.0)
+            self.progress_percent_label.configure(text="100%")
+            status_summary = f"[OK] Lote concluído ({successful}/{total})"
+            self.progress_status_label.configure(text=status_summary)
+            self._set_status(f"[OK] Lote finalizado: {successful} vídeos prontos!", COLORS["success"])
+
+            self._log("\n" + "═" * 56)
+            self._log(f"🎉 [LOTE FINALIZADO] {successful} de {total} vídeos concluídos com sucesso!")
+            if failed > 0:
+                self._log(f"⚠️ Atenção: {failed} vídeo(s) falharam durante o lote.")
+            self._log(f"📁 Pasta dos vídeos: {dest_folder}")
+            self._log(f"⏱️ Tempo total de processamento: {elapsed_str}")
+            self._log("═" * 56)
+
+            # Native Toast Notification
+            try:
+                import windows_notifier
+                windows_notifier.show_toast(
+                    "Urahara Studio — Lote Concluído!",
+                    f"{successful} de {total} vídeos foram processados com sucesso.",
+                )
+            except Exception:
+                pass
+
+            if messagebox.askyesno(
+                "Lote Concluído!",
+                f"Processamento em lote finalizado!\n\n"
+                f"• Sucesso: {successful} de {total}\n"
+                f"• Falhas: {failed}\n"
+                f"• Tempo total: {elapsed_str}\n\n"
+                f"Deseja abrir a pasta com os vídeos gerados?"
+            ):
+                if os.path.exists(dest_folder):
+                    os.startfile(dest_folder)
+
+    def _start_batch_upscaling(self):
+        """Execute upscaling across multiple queued videos sequentially."""
+        if not self.batch_files:
+            messagebox.showerror("Erro", "Nenhum arquivo na fila de lote.")
+            return
+
+        if not self.upscaler.is_available:
+            messagebox.showerror("Erro", "FFmpeg não disponível. Instale-o primeiro.")
+            return
+
+        dest_folder = self.batch_dest_folder or os.path.dirname(os.path.abspath(self.batch_files[0]))
+        try:
+            os.makedirs(dest_folder, exist_ok=True)
+        except Exception as e:
+            messagebox.showerror("Erro na Pasta de Saída", f"Não foi possível acessar a pasta de destino:\n{e}")
+            return
+
+        # Read common presets
+        res_key = self.resolution_var.get()
+        base_height = RESOLUTIONS[res_key]
+        ar_key = self.aspect_ratio_var.get()
+        aspect = ASPECT_RATIOS[ar_key]
+        fps_key = self.fps_var.get()
+        target_fps = FPS_OPTIONS[fps_key]
+        algo_key = self.algorithm_var.get()
+        algorithm = ALGORITHMS[algo_key]
+        quality_key = self.quality_var.get()
+        quality = QUALITY_PRESETS[quality_key]
+        encoder_key = self.encoder_var.get()
+        encoder = ENCODERS[encoder_key]
+        sharpen_key = self.sharpen_var.get()
+        sharpen_filter = SHARPEN_OPTIONS[sharpen_key]
+        color_key = self.color_var.get()
+        color_filter = COLOR_ENHANCEMENTS[color_key]
+        denoise_key = self.denoise_var.get()
+        denoise_filter = DENOISE_OPTIONS[denoise_key]
+        anti_copyright = self.anti_copyright_var.get()
+        audio_enhance = self.audio_enhance_var.get()
+
+        # Check AI dependencies if in AI mode
+        selected_model = self.ai_model_var.get()
+        ac_options = None
+        ac_video_filter = None
+        ac_audio_filter = None
+        ae_filter = None
+        if self._ai_mode:
+            if not self.ai_upscaler:
+                messagebox.showerror("Erro", "ai_upscaler.py não encontrado!")
+                return
+            is_cugan = "CUGAN" in selected_model
+            if is_cugan:
+                from ai_upscaler import find_realcugan_bin
+                cugan_bin = find_realcugan_bin()
+                if not cugan_bin or not os.path.isfile(cugan_bin):
+                    messagebox.showerror("Motor não encontrado", "O executável do Real-CUGAN não foi encontrado.")
+                    return
+            else:
+                available, msg = check_realesrgan_available()
+                if not available:
+                    messagebox.showerror("IA não disponível", f"{msg}")
+                    return
+            ac_options = ANTI_COPYRIGHT_OPTIONS.get(anti_copyright)
+            ac_video_filter = None
+            ac_audio_filter = None
+            if ac_options:
+                ac_video_filter = ac_options.get("video")
+                ac_audio_filter = ac_options.get("audio")
+            ae_filter = AUDIO_ENHANCE_OPTIONS.get(audio_enhance)
+
+        # Set UI to processing mode
+        self.is_processing = True
+        self._batch_cancelled = False
+        self.start_btn.configure(state="disabled", text="Processando Lote...")
+        self.cancel_btn.configure(state="normal")
+        self.live_compare_btn.pack_forget()
+
+        self._toggle_console_drawer(force_show=True)
+        self.progress_bar.set(0)
+        self.progress_percent_label.configure(text="0.0%")
+        self.progress_status_label.configure(text=f"[LOTE 0/{len(self.batch_files)}] Iniciando fila...")
+        self.elapsed_label.configure(text="Tempo: 00:00")
+
+        # Reset item status badges
+        for f in self.batch_files:
+            self._update_batch_item_status(f, "⏳ Na Fila", COLORS["text_muted"])
+
+        total = len(self.batch_files)
+        mode_label = f"Real-ESRGAN ({selected_model})" if self._ai_mode else f"FFmpeg / {algo_key}"
+        res_tag = "original" if base_height == 0 else f"{base_height}p"
+
+        self._clear_log()
+        self._log("═" * 58)
+        self._log(f"🎬 [LOTE] INICIANDO PROCESSAMENTO EM LOTE ({total} VÍDEOS)")
+        self._log(f"Modo:        {mode_label}")
+        self._log(f"Resolução:   {res_key} ({res_tag})")
+        self._log(f"Proporção:   {ar_key}")
+        self._log(f"FPS:         {fps_key}")
+        self._log(f"Nitidez:     {sharpen_key}")
+        self._log(f"Estilo Cor:  {color_key}")
+        self._log(f"Limpeza:     {denoise_key}")
+        self._log(f"Anti-Copyr.: {anti_copyright}")
+        self._log(f"Melh. Áudio: {audio_enhance}")
+        self._log(f"Pasta Saída: {dest_folder}")
+        self._log("═" * 58)
+
+        self._set_status(f"Processando lote: 0/{total} vídeos", COLORS["warning"])
+        self._start_elapsed_timer()
+
+        import threading
+
+        def _batch_worker():
+            successful_count = 0
+            failed_count = 0
+
+            for idx, in_path in enumerate(self.batch_files, 1):
+                if self._batch_cancelled:
+                    break
+
+                fname = os.path.basename(in_path)
+                self.after(0, self._update_batch_item_status, in_path, "⚡ Processando...", "#38bdf8")
+                self.after(0, lambda i=idx, f=fname: self.progress_status_label.configure(
+                    text=f"[LOTE {i}/{total}] {f}"
+                ))
+
+                self._on_log(f"\n────────────────────────────────────────────────────────────")
+                self._on_log(f"🎬 [LOTE {idx}/{total}] Processando: {fname}")
+                self._on_log(f"────────────────────────────────────────────────────────────")
+
+                # Get dimensions for this specific video
+                v_info = get_video_info(in_path)
+                orig_w = v_info.width if v_info else 0
+                orig_h = v_info.height if v_info else 0
+                t_w, t_h = compute_target_dimensions(base_height, aspect, orig_w, orig_h)
+
+                # Generate output name avoiding overwrite collisions
+                base_name, ext = os.path.splitext(fname)
+                out_name = f"{base_name}_upscaled_{res_tag}{ext}"
+                final_out = os.path.join(dest_folder, out_name)
+                counter = 1
+                while os.path.exists(final_out):
+                    out_name = f"{base_name}_upscaled_{res_tag}_{counter}{ext}"
+                    final_out = os.path.join(dest_folder, out_name)
+                    counter += 1
+
+                self._on_log(f"   Destino:   {out_name}")
+                self._on_log(f"   Dimensões: {t_w}×{t_h}")
+
+                done_event = threading.Event()
+                res_holder = {"success": False, "message": ""}
+
+                def _sub_progress(item_pct: float, item_status: str):
+                    global_pct = ((idx - 1 + (item_pct / 100.0)) / total) * 100.0
+                    self.after(0, self._update_batch_progress, global_pct, f"[{idx}/{total}] {int(item_pct)}% — {fname}")
+
+                def _sub_complete(s: bool, m: str):
+                    res_holder["success"] = s
+                    res_holder["message"] = m
+                    done_event.set()
+
+                def _sub_log(msg: str):
+                    self._on_log(msg)
+
+                if self._ai_mode and self.ai_upscaler:
+                    self.ai_upscaler.upscale(
+                        input_path=in_path,
+                        output_path=final_out,
+                        model_key=selected_model,
+                        target_width=t_w,
+                        target_height=t_h,
+                        encoder=encoder,
+                        crf=quality["crf"],
+                        preset=quality["preset"],
+                        target_fps=target_fps,
+                        sharpen_filter=sharpen_filter,
+                        color_filter=color_filter,
+                        denoise_filter=denoise_filter,
+                        anti_copyright_filter=ac_video_filter,
+                        anti_copyright_audio=ac_audio_filter,
+                        audio_enhance_filter=ae_filter,
+                        audio_enhance_key=audio_enhance,
+                        on_progress=_sub_progress,
+                        on_complete=_sub_complete,
+                        on_log=_sub_log,
+                    )
+                else:
+                    self.upscaler.upscale(
+                        input_path=in_path,
+                        output_path=final_out,
+                        target_width=t_w,
+                        target_height=t_h,
+                        algorithm=algorithm,
+                        encoder=encoder,
+                        crf=quality["crf"],
+                        preset=quality["preset"],
+                        aspect_ratio=aspect,
+                        target_fps=target_fps,
+                        sharpen_filter=sharpen_filter,
+                        color_filter=color_filter,
+                        denoise_filter=denoise_filter,
+                        anti_copyright=anti_copyright,
+                        audio_enhance=audio_enhance,
+                        on_progress=_sub_progress,
+                        on_complete=_sub_complete,
+                        on_log=_sub_log,
+                    )
+
+                # Wait for video completion or cancel
+                while not done_event.is_set():
+                    if self._batch_cancelled:
+                        if self._ai_mode and self.ai_upscaler:
+                            self.ai_upscaler.cancel()
+                        else:
+                            self.upscaler.cancel()
+                    done_event.wait(timeout=0.4)
+
+                if self._batch_cancelled:
+                    self.after(0, self._update_batch_item_status, in_path, "🛑 Cancelado", "#f59e0b")
+                    break
+
+                if res_holder["success"]:
+                    successful_count += 1
+                    self.after(0, self._update_batch_item_status, in_path, "✅ [OK]", "#10b981")
+                    self._on_log(f"✅ [OK] [LOTE {idx}/{total}] Concluído com sucesso: {fname}")
+                else:
+                    failed_count += 1
+                    self.after(0, self._update_batch_item_status, in_path, "❌ Falhou", "#ef4444")
+                    self._on_log(f"❌ [FALHA] [LOTE {idx}/{total}] Erro em {fname}: {res_holder['message']}")
+
+            self.after(0, self._finish_batch_upscaling, successful_count, failed_count, total, self._batch_cancelled, dest_folder)
+
+        threading.Thread(target=_batch_worker, daemon=True).start()
+
     def _start_upscaling(self):
         """Start the upscaling process."""
         if self.is_processing:
+            return
+
+        if len(self.batch_files) > 1:
+            self._start_batch_upscaling()
             return
 
         input_path = self.file_entry.get().strip()
@@ -1422,6 +2000,12 @@ class VideoUpscalerApp(ctk.CTk):
             if ac_options:
                 ac_video_filter = ac_options.get("video")
                 ac_audio_filter = ac_options.get("audio")
+            ae_filter = AUDIO_ENHANCE_OPTIONS.get(audio_enhance)
+            ac_video_filter = None
+            ac_audio_filter = None
+            if ac_options:
+                ac_video_filter = ac_options.get("video")
+                ac_audio_filter = ac_options.get("audio")
 
             # Resolve audio enhancement filter
             ae_filter = AUDIO_ENHANCE_OPTIONS.get(audio_enhance)
@@ -1476,6 +2060,7 @@ class VideoUpscalerApp(ctk.CTk):
         """Cancel the current upscaling process."""
         if self.is_processing:
             if messagebox.askyesno("Cancelar", "Cancelar o upscaling?"):
+                self._batch_cancelled = True
                 if self._ai_mode and self.ai_upscaler:
                     self.ai_upscaler.cancel()
                 else:
@@ -1610,10 +2195,31 @@ def setup_drag_drop(app: VideoUpscalerApp):
     try:
         import windnd
         def handle_drop(files):
-            if files:
-                fp = files[0].decode('gbk') if isinstance(files[0], bytes) else files[0]
-                if any(fp.lower().endswith(ext) for ext in VIDEO_EXTENSIONS):
-                    app._load_video(fp)
+            if not files:
+                return
+            all_video_files = []
+            for item in files:
+                fp = item.decode('gbk') if isinstance(item, bytes) else str(item)
+                if os.path.isdir(fp):
+                    for root, _, fnames in os.walk(fp):
+                        for f in fnames:
+                            if any(f.lower().endswith(ext) for ext in VIDEO_EXTENSIONS):
+                                all_video_files.append(os.path.join(root, f))
+                elif os.path.isfile(fp):
+                    if any(fp.lower().endswith(ext) for ext in VIDEO_EXTENSIONS):
+                        all_video_files.append(fp)
+
+            # Deduplicate and sort
+            unique_videos = list(dict.fromkeys(all_video_files))
+            unique_videos.sort()
+            if not unique_videos:
+                return
+
+            if len(unique_videos) == 1:
+                app._load_video(unique_videos[0])
+            else:
+                app._load_batch_videos(unique_videos)
+
         windnd.hook_dropfiles(app, func=handle_drop)
     except ImportError:
         pass

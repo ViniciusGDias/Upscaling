@@ -18,6 +18,7 @@ from updater import (
     download_update_asset,
     apply_update_and_restart,
     open_download_page,
+    open_folder_and_select_file,
 )
 import icon_manager
 
@@ -298,14 +299,42 @@ class UpdateDialog(ctk.CTkToplevel):
 
                 # Success: apply update
                 self.status_label.configure(
-                    text="✅ Download concluído! Reiniciando o Urahara Studio atualizado...",
+                    text="✅ Download 100% concluído! Abrindo o instalador...",
                     text_color=DIALOG_COLORS["success"]
                 )
                 self.progress_bar.set(1.0)
                 self.pct_label.configure(text="100%")
 
-                # Wait 1.2s so user sees success and then restart
-                self.after(1200, lambda: apply_update_and_restart(dest_file))
+                # Atualiza botões para controle instantâneo
+                self.update_btn.configure(
+                    state="normal",
+                    text="🚀 Instalar Agora",
+                    command=lambda: apply_update_and_restart(dest_file),
+                )
+                self.later_btn.configure(
+                    text="📂 Abrir Pasta",
+                    command=lambda: open_folder_and_select_file(dest_file),
+                )
+
+                # Mostra aviso visual claro sobre o Windows Defender SmartScreen
+                try:
+                    self.changelog_box.configure(state="normal")
+                    tip_banner = (
+                        "\n\n═══════════════════════════════════════════════════════════════\n"
+                        "🛡️ DICA DE INSTALAÇÃO NO WINDOWS (SMARTSCREEN):\n"
+                        "Se o Windows exibir a tela azul 'O Windows protegeu o seu computador':\n"
+                        "1. Clique no link 'Mais informações'\n"
+                        "2. Clique no botão 'Executar assim mesmo'\n"
+                        "═══════════════════════════════════════════════════════════════\n"
+                    )
+                    self.changelog_box.insert("end", tip_banner)
+                    self.changelog_box.see("end")
+                    self.changelog_box.configure(state="disabled")
+                except Exception:
+                    pass
+
+                # Dispara a instalação automaticamente após 3 segundos caso o usuário não clique antes
+                self.after(3000, lambda: apply_update_and_restart(dest_file))
 
             self.after(0, _done)
 

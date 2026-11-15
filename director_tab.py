@@ -1432,6 +1432,12 @@ class DirectorTab(ctk.CTkFrame):
             try:
                 from ai_cache_hub import ai_cache
                 is_continuous = dur_sec >= 10.0
+                raw_ctx = self.context_entry.get().strip() if hasattr(self, "context_entry") else ""
+                anime_name = str(cand.get("anime") or cand.get("anime_name") or cand.get("source_title") or "").strip()
+                if not anime_name and raw_ctx:
+                    anime_name = re.split(r'\s+(?:ep(?:is[oó]dio)?\.?\s*\d+|temporada|season|\()', raw_ctx, maxsplit=1, flags=re.IGNORECASE)[0].strip() or raw_ctx
+                scene_reason = str(cand.get("why_viral") or cand.get("reason") or cand.get("description") or "").strip()
+                content_type_sel = self._get_selected_content_type() if hasattr(self, "_get_selected_content_type") else "general"
                 ai_cache.register_cut_origin(out_path, {
                     "is_continuous": is_continuous,
                     "continuous_duration": round(dur_sec, 2),
@@ -1439,8 +1445,12 @@ class DirectorTab(ctk.CTkFrame):
                     "source_path": clean_input,
                     "start_sec": round(start_sec, 2),
                     "end_sec": round(start_sec + dur_sec, 2),
+                    "anime_name": anime_name,
+                    "work_context": raw_ctx,
                     "title": cand.get("title", ""),
+                    "reason": scene_reason,
                     "genre": cand.get("genre", ""),
+                    "content_type": content_type_sel,
                     "quality_score": cand.get("quality_score", 8),
                     "cut_mode": self.cut_mode_var.get() if hasattr(self, "cut_mode_var") else "context",
                 })
@@ -1539,8 +1549,8 @@ class DirectorTab(ctk.CTkFrame):
 
                 if self.main_app and hasattr(self.main_app, "refiner_tab"):
                     self.main_app.refiner_tab._load_video(out_path)
-                    if is_arc and hasattr(self.main_app.refiner_tab, "target_duration_var"):
-                        self.main_app.refiner_tab.target_duration_var.set("Tratar Mini-Filme / Resumo 50% (Até 2:30 min)")
+                    if is_arc and hasattr(self.main_app.refiner_tab, "set_profile_by_key"):
+                        self.main_app.refiner_tab.set_profile_by_key("mini_movie")
                         self.main_app.refiner_tab._on_setting_changed()
 
                     self.main_app.tabview.set("Refinador Mastercut")

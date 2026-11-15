@@ -338,6 +338,215 @@ def _emit_log(cb: Optional[Callable[[str], None]], msg: str):
     print(msg)
 
 
+HQ_PANEL_STYLES = [
+    "hq_shonen_panel",     # Quadro Clássico Shonen Jump (Nanquim P&B + Retícula 45° + Selective Color Pop)
+    "hq_color_webtoon",    # Quadro Colorido Solo Leveling / Manhwa Deluxe (Cel-Shading + Lineart Nanquim)
+    "hq_diagonal_impact",  # Quadro de Ação Inclinado em Paralelogramo + Katana Slash
+    "hq_eyes_strip",       # Faixa Horizontal Cinematográfica Close-Up nos Olhos/Expressão
+    "hq_dual_split",       # Página Dupla de Mangá (2-Panel Split: Setup + Clímax)
+    "hq_triple_cascade",   # Página Tripla de Mangá (3-Panel Escalation Strip: Setup -> Zoom -> Clímax)
+    "hq_noir_crimson",     # Quadro Seinen Dark / Sin City Noir Duotone
+    "hq_rain_melancholy",  # Quadro Melancólico Chuva & Prata Azul-Frio (Triste / Emocional)
+    "hq_soft_memory",      # Quadro Memória / Flashback Marfim-Prateado (Triste / Nostalgia)
+    "hq_romance_glow",     # Quadro Shoujo / Webtoon Romance (Luz Rosé & Ouro Quente)
+    "hq_pop_halftone",     # Quadro Pop Vibrante Mangá (Comédia / Animada / Hype)
+    "hq_golden_eclipse",   # Quadro Eclipse Dourado / Imperial (Épico / Seinen / Soberano)
+]
+
+ALL_FEELING_STYLES = [
+    "domain_dark", "blade_stream", "golden_god", "blood_ink", "electric",
+    "fire", "cyber_glitch", "comic_halftone", "emotional_tear", "offset_comic",
+    "manga_bubble", "slam", "shonen_badge", "typewriter", "comedy",
+    "dramatic_silence", "silver_grief", "midnight_sorrow",
+    "fading_echo", "broken_promise", "cold_solitude",
+    "sakura_bloom", "golden_romance", "heart_pulse",
+    "velvet_kiss", "starlight_crush", "sweet_blush", "eternal_vow",
+    "cursed_aura", "abyssal_void"
+]
+
+MANGA_THEME_PROFILES: Dict[str, Dict[str, Any]] = {
+    "geral": {
+        "label": "🌟 Geral / Dinâmico (Padrão IA)",
+        "description": "Adaptação livre ao vídeo: usa todos os 12 Quadros Editoriais HQ e 30 Feelings sem repetição.",
+        "panels": [
+            "hq_shonen_panel", "hq_color_webtoon", "hq_diagonal_impact",
+            "hq_eyes_strip", "hq_dual_split", "hq_triple_cascade",
+            "hq_noir_crimson", "hq_golden_eclipse", "hq_pop_halftone",
+            "hq_rain_melancholy", "hq_soft_memory", "hq_romance_glow"
+        ],
+        "feelings": [
+            "domain_dark", "blade_stream", "golden_god", "blood_ink", "electric",
+            "fire", "cyber_glitch", "comic_halftone", "emotional_tear", "offset_comic",
+            "manga_bubble", "slam", "shonen_badge", "cursed_aura", "abyssal_void",
+            "dramatic_silence", "silver_grief", "sakura_bloom", "golden_romance"
+        ],
+        "keywords": [],
+        "prompt_hint": "Modo Geral Dinâmico: adapte livremente as 12 arquiteturas de quadro e feelings ao clímax real de cada frase, sem repetir estilos.",
+    },
+    "triste": {
+        "label": "💧 Triste / Emocional & Melancólico",
+        "description": "6 Quadros Melancólicos (Chuva/Memória/Olhos/Split/Cascata 3x) • 8 Feelings Emocionais Únicos (Zero Katana/Fogo).",
+        "panels": [
+            "hq_rain_melancholy", "hq_eyes_strip", "hq_soft_memory",
+            "hq_dual_split", "hq_triple_cascade", "hq_shonen_panel"
+        ],
+        "feelings": [
+            "emotional_tear", "dramatic_silence", "silver_grief", "midnight_sorrow",
+            "fading_echo", "broken_promise", "cold_solitude", "typewriter"
+        ],
+        "keywords": [
+            "adeus", "perdão", "perdoa", "desculpa", "sozinho", "sozinha", "chorar", "choro",
+            "lágrimas", "dor", "doi", "dói", "nunca", "promessa", "saudade", "partir", "morrer",
+            "morte", "fim", "culpa", "tarde", "esquecer", "lembrar", "coração", "triste", "perdi"
+        ],
+        "prompt_hint": (
+            "TEMA OBRIGATÓRIO: TRISTE / EMOCIONAL / MELANCÓLICO. "
+            "Este vídeo é dramático, triste ou reflexivo. Escolha as falas de maior carga emocional, despedida, dor, luto ou desabafo. "
+            "Use EXCLUSIVAMENTE panel_style dentre ['hq_rain_melancholy', 'hq_eyes_strip', 'hq_soft_memory', 'hq_dual_split', 'hq_triple_cascade', 'hq_shonen_panel'] "
+            "e feeling dentre ['emotional_tear', 'dramatic_silence', 'silver_grief', 'midnight_sorrow', 'fading_echo', 'broken_promise', 'cold_solitude', 'typewriter']. "
+            "PROIBIDO usar feelings agressivos ou cômicos como 'fire', 'slam', 'comedy', 'blood_ink' ou 'manga_bubble'!"
+        ),
+    },
+    "romantica": {
+        "label": "💖 Romântica / Casal & Shoujo",
+        "description": "6 Quadros Romance (Glow/Olhos/Split/Cascata 3x/Memória/Webtoon) • 8 Feelings Românticos Únicos.",
+        "panels": [
+            "hq_romance_glow", "hq_eyes_strip", "hq_dual_split",
+            "hq_triple_cascade", "hq_soft_memory", "hq_color_webtoon"
+        ],
+        "feelings": [
+            "sakura_bloom", "golden_romance", "heart_pulse", "velvet_kiss",
+            "starlight_crush", "sweet_blush", "eternal_vow", "emotional_tear"
+        ],
+        "keywords": [
+            "amor", "amo", "amar", "coração", "juntos", "proteger", "sempre", "sorriso",
+            "linda", "lindo", "sentimento", "apaixonado", "apaixonada", "beijo", "abraço",
+            "comigo", "mundo", "prometo", "cuidar", "feliz", "destino", "você", "casar"
+        ],
+        "prompt_hint": (
+            "TEMA OBRIGATÓRIO: ROMÂNTICA / CASAL / SHOUJO / DORAMA. "
+            "Este vídeo foca em romance, química, afeto ou declaração emocional. Escolha as falas mais apaixonantes, doces ou intensas do casal. "
+            "Use EXCLUSIVAMENTE panel_style dentre ['hq_romance_glow', 'hq_eyes_strip', 'hq_dual_split', 'hq_triple_cascade', 'hq_soft_memory', 'hq_color_webtoon'] "
+            "e feeling dentre ['sakura_bloom', 'golden_romance', 'heart_pulse', 'velvet_kiss', 'starlight_crush', 'sweet_blush', 'eternal_vow', 'emotional_tear']. "
+            "PROIBIDO usar estilos violentos ou sombrios!"
+        ),
+    },
+    "acao": {
+        "label": "⚔️ Ação / Batalha & Poder Shonen",
+        "description": "7 Quadros de Combate (Diagonal/Webtoon/Split/Cascata 3x/Shonen/Noir/Eclipse) • 9 Feelings de Poder.",
+        "panels": [
+            "hq_diagonal_impact", "hq_color_webtoon", "hq_dual_split",
+            "hq_triple_cascade", "hq_shonen_panel", "hq_noir_crimson", "hq_golden_eclipse"
+        ],
+        "feelings": [
+            "blade_stream", "fire", "electric", "blood_ink", "slam",
+            "shonen_badge", "domain_dark", "golden_god", "cursed_aura"
+        ],
+        "keywords": [
+            "morra", "matar", "poder", "força", "ataque", "golpe", "corte", "destruir",
+            "bankai", "haki", "lutem", "lutar", "vencer", "derrotar", "sangue", "fogo", "raio"
+        ],
+        "prompt_hint": (
+            "TEMA OBRIGATÓRIO: AÇÃO / BATALHA SHONEN / COMBATE EXPLOSIVO. "
+            "Escolha gritos de guerra, técnicas especiais, impactos de luta e momentos de adrenalina máxima. "
+            "Use EXCLUSIVAMENTE panel_style dentre ['hq_diagonal_impact', 'hq_color_webtoon', 'hq_dual_split', 'hq_triple_cascade', 'hq_shonen_panel', 'hq_noir_crimson', 'hq_golden_eclipse'] "
+            "e feeling dentre ['blade_stream', 'fire', 'electric', 'blood_ink', 'slam', 'shonen_badge', 'domain_dark', 'golden_god', 'cursed_aura']."
+        ),
+    },
+    "animada": {
+        "label": "🎉 Animada / Comédia & Hype Pop",
+        "description": "6 Quadros Pop (Halftone/Webtoon/Split/Cascata 3x/Shonen/Olhos) • 8 Feelings Vibrantes.",
+        "panels": [
+            "hq_pop_halftone", "hq_color_webtoon", "hq_dual_split",
+            "hq_triple_cascade", "hq_shonen_panel", "hq_eyes_strip"
+        ],
+        "feelings": [
+            "comedy", "offset_comic", "comic_halftone", "manga_bubble",
+            "electric", "golden_god", "shonen_badge", "starlight_crush"
+        ],
+        "keywords": [
+            "incrível", "demais", "maluco", "doido", "sério", "mentira", "olha", "bora",
+            "vamos", "ganhei", "perfeito", "festa", "amigos", "engraçado", "socorro", "eita", "opa"
+        ],
+        "prompt_hint": (
+            "TEMA OBRIGATÓRIO: ANIMADA / COMÉDIA / HYPE POP / DIVERTIDA. "
+            "Escolha falas carismáticas, reações engraçadas, surpresas ou momentos empolgantes. "
+            "Use EXCLUSIVAMENTE panel_style dentre ['hq_pop_halftone', 'hq_color_webtoon', 'hq_dual_split', 'hq_triple_cascade', 'hq_shonen_panel', 'hq_eyes_strip'] "
+            "e feeling dentre ['comedy', 'offset_comic', 'comic_halftone', 'manga_bubble', 'electric', 'golden_god', 'shonen_badge', 'starlight_crush']."
+        ),
+    },
+    "sombria": {
+        "label": "🌑 Sombria / Suspense & Seinen Dark",
+        "description": "6 Quadros Seinen (Noir/Olhos/Shonen/Split/Cascata 3x/Eclipse) • 8 Feelings Sombrios.",
+        "panels": [
+            "hq_noir_crimson", "hq_eyes_strip", "hq_shonen_panel",
+            "hq_dual_split", "hq_triple_cascade", "hq_golden_eclipse"
+        ],
+        "feelings": [
+            "domain_dark", "blood_ink", "cursed_aura", "abyssal_void",
+            "cyber_glitch", "typewriter", "blade_stream", "midnight_sorrow"
+        ],
+        "keywords": [
+            "morte", "sangue", "maldição", "medo", "escuridão", "inferno", "demônio", "monstro",
+            "segredo", "mentira", "traição", "assassino", "kira", "justiça", "sombra", "pesadelo", "caos"
+        ],
+        "prompt_hint": (
+            "TEMA OBRIGATÓRIO: SOMBRIA / SUSPENSE PSICOLÓGICO / VILÃO / SEINEN DARK. "
+            "Escolha falas frias, intimidadoras, ameaças calculistas ou revelações sombrias. "
+            "Use EXCLUSIVAMENTE panel_style dentre ['hq_noir_crimson', 'hq_eyes_strip', 'hq_shonen_panel', 'hq_dual_split', 'hq_triple_cascade', 'hq_golden_eclipse'] "
+            "e feeling dentre ['domain_dark', 'blood_ink', 'cursed_aura', 'abyssal_void', 'cyber_glitch', 'typewriter', 'blade_stream', 'midnight_sorrow']."
+        ),
+    },
+    "epica": {
+        "label": "👑 Épica / Clímax Supremo & Divino",
+        "description": "7 Quadros Soberanos (Eclipse/Split/Cascata 3x/Webtoon/Shonen/Diagonal) • 9 Feelings Épicos.",
+        "panels": [
+            "hq_golden_eclipse", "hq_dual_split", "hq_triple_cascade",
+            "hq_color_webtoon", "hq_shonen_panel", "hq_diagonal_impact", "hq_eyes_strip"
+        ],
+        "feelings": [
+            "golden_god", "domain_dark", "electric", "fire", "blade_stream",
+            "shonen_badge", "cursed_aura", "eternal_vow", "abyssal_void"
+        ],
+        "keywords": [
+            "deus", "rei", "imperador", "supremo", "absoluto", "mundo", "destino", "história",
+            "lenda", "nunca", "jamais", "juro", "poder", "erguer", "vencer", "eternidade", "glória"
+        ],
+        "prompt_hint": (
+            "TEMA OBRIGATÓRIO: ÉPICA / CLÍMAX SUPREMO / DIVINO / ARREPIO. "
+            "Escolha discursos lendários, despertares supremos, juramentos e momentos históricos. "
+            "Use EXCLUSIVAMENTE panel_style dentre ['hq_golden_eclipse', 'hq_dual_split', 'hq_triple_cascade', 'hq_color_webtoon', 'hq_shonen_panel', 'hq_diagonal_impact', 'hq_eyes_strip'] "
+            "e feeling dentre ['golden_god', 'domain_dark', 'electric', 'fire', 'blade_stream', 'shonen_badge', 'cursed_aura', 'eternal_vow', 'abyssal_void']."
+        ),
+    },
+}
+
+
+def resolve_manga_theme_key(theme_input: Optional[str]) -> str:
+    """Converte chave ou rótulo de UI para a chave canônica do tema ('geral', 'triste', 'romantica', 'acao', 'animada', 'sombria', 'epica')."""
+    if not theme_input:
+        return "geral"
+    raw = str(theme_input).strip().lower()
+    if raw in MANGA_THEME_PROFILES:
+        return raw
+    for k, v in MANGA_THEME_PROFILES.items():
+        if raw == v["label"].lower() or k in raw:
+            return k
+    if "triste" in raw or "emocional" in raw or "melanc" in raw:
+        return "triste"
+    if "romant" in raw or "românt" in raw or "casal" in raw or "shoujo" in raw:
+        return "romantica"
+    if "ação" in raw or "acao" in raw or "batalha" in raw or "shonen" in raw:
+        return "acao"
+    if "animad" in raw or "comédia" in raw or "comedia" in raw or "pop" in raw:
+        return "animada"
+    if "sombri" in raw or "suspense" in raw or "seinen" in raw or "noir" in raw:
+        return "sombria"
+    if "épic" in raw or "epic" in raw or "suprem" in raw or "divin" in raw:
+        return "epica"
+    return "geral"
+
+
 def curate_manga_punchlines_with_ollama(
     items: List[Dict[str, Any]],
     video_duration: float,
@@ -345,6 +554,7 @@ def curate_manga_punchlines_with_ollama(
     model: str = "qwen2.5:7b",
     timeout: float = 30.0,
     log_callback: Optional[Callable[[str], None]] = None,
+    manga_theme: str = "geral",
 ) -> Optional[List[Dict[str, Any]]]:
     """
     Curadoria Semântica via IA Local (Ollama Qwen 2.5 7B na GPU RTX 5060):
@@ -382,8 +592,17 @@ def curate_manga_punchlines_with_ollama(
             "text": raw_text
         })
 
-    prompt = f"""Você é um Diretor de Anime e Editor Chefe de Mangá Shonen.
-Seu objetivo é criar um ritmo cinematográfico equilibrado ao longo de todo o vídeo de {video_duration:.1f}s.
+    t_key = resolve_manga_theme_key(manga_theme)
+    theme_cfg = MANGA_THEME_PROFILES.get(t_key, MANGA_THEME_PROFILES["geral"])
+    theme_hint_block = f"\nDIRETRIZ DE TEMA ESCOLHIDA PELO USUÁRIO ({theme_cfg['label']}):\n{theme_cfg['prompt_hint']}\n"
+
+    sector_rules_str = "\n".join(
+        f"   - 1 momento do Setor {i+1} ({sectors[i][0]}s-{sectors[i][1]}s)"
+        for i in range(target_count)
+    )
+
+    prompt = f"""Você é um Diretor de Anime e Editor Chefe de Mangá.
+Seu objetivo é criar um ritmo cinematográfico equilibrado ao longo de todo o vídeo de {video_duration:.1f}s.{theme_hint_block}
 O vídeo foi dividido em {target_count} Setores Temporais ({sectors[0][0]}s a {sectors[-1][1]}s).
 
 Você DEVE selecionar EXATAMENTE 1 momento de impacto por Setor (totalizando exatamente {target_count} momentos).
@@ -391,20 +610,21 @@ NUNCA aglomere momentos no mesmo setor deixando outros setores vazios. Cada seto
 
 REGRAS OBRIGATÓRIAS:
 1. EXATAMENTE 1 MOMENTO POR SETOR (Distribuídos ao longo de todo o vídeo):
-   - 1 momento do Setor 1 (Abertura / Hook: 0s-{sectors[0][1]}s)
-   - 1 momento do Setor 2
-   - 1 momento do Setor 3
-   - 1 momento do Setor 4
-   - 1 momento do Setor 5
-   - 1 momento do Setor 6 (Desfecho / Clímax final)
+{sector_rules_str}
 2. PUNCHLINE CURTA: Extraia 1 a 4 palavras por momento. NUNCA selecione frases longas.
 3. PALAVRAS REAIS: Use EXCLUSIVAMENTE palavras faladas no áudio da oração indicada pelo "id". NUNCA invente palavras. NUNCA use palavras de exemplos anteriores se elas não existirem na transcrição deste vídeo.
 4. DIVISÃO EM 2 LINHAS: Divida em "line1" e "line2" com cadência dramática de mangá (ex: L1: "PALAVRA 1", L2: "PALAVRA 2!"). Se for apenas 1 palavra, line1 fica vazio e line2 recebe a palavra.
-5. FEELING DA CENA:
+5. FEELING DA CENA (Adapte ao tom dramático ou emocional real):
    - "slam": Choque, perigo, corte, impacto físico imediato.
-   - "electric": Suspense tenso, questionamento, dúvida.
-   - "golden_god": Poder supremo, transformação, revelação ou vitória.
+   - "domain_dark": Poder absoluto, vazio cósmico, escuridão, vilão, Sukuna/Gojo.
+   - "blade_stream": Respiração shonen, espada, corte fluido de katana, marcial.
+   - "blood_ink": Fúria visceral, berserk, ódio, combate sangrento, desespero.
+   - "golden_god": Poder supremo, transformação divina, revelação ou vitória.
+   - "electric": Suspense tenso, questionamento, raio/reiatsu.
    - "fire": Raiva, fúria, ataque, grito de batalha.
+   - "cyber_glitch": Tecnologia, scanline, distorção holográfica.
+   - "comic_halftone": Pop shonen clássico reticulado, super-herói.
+   - "emotional_tear": Tristeza profunda, dor emocional, luto, despedida, lágrimas.
    - "offset_comic": Ironia, impacto pop, surpresa.
    - "manga_bubble": Chamada de nome, exclamação rápida.
 
@@ -522,9 +742,10 @@ Responda ESTRITAMENTE em formato JSON com uma chave "moments" contendo os {targe
             st, et = _card_timing(words, first_k, last_k, video_duration)
 
 
-            feeling = m.get("feeling", "slam")
-            if feeling not in ("slam", "golden_god", "electric", "fire", "offset_comic", "manga_bubble", "shonen_badge", "typewriter", "comedy"):
-                feeling = "slam"
+            allowed_f = theme_cfg.get("feelings") or ALL_FEELING_STYLES
+            feeling = m.get("feeling", allowed_f[0])
+            if feeling not in allowed_f:
+                feeling = allowed_f[len(events) % len(allowed_f)]
 
             events.append({
                 "sentence_idx": s_id,
@@ -547,8 +768,8 @@ Responda ESTRITAMENTE em formato JSON com uma chave "moments" contendo os {targe
 
         events.sort(key=lambda x: x["start"])
 
-        # Pacing Guard: Garante espacamento ritmico equilibrado (sem recortes colados)
-        min_pacing_gap = max(3.5, (video_duration / target_count) * 0.40)
+        # Pacing Guard: Garante espacamento ritmico equilibrado (permitindo 8-9 recortes em videos >40s)
+        min_pacing_gap = max(1.4, (video_duration / max(1, target_count)) * 0.22)
         spaced_events = []
         for ev in events:
             if not spaced_events:
@@ -558,14 +779,14 @@ Responda ESTRITAMENTE em formato JSON com uma chave "moments" contendo os {targe
             if ev["start"] >= prev_ev["end"] + min_pacing_gap:
                 spaced_events.append(ev)
 
-        # Se houver setores vazios (gap > min_pacing_gap * 2.2), preenche lacunas com o melhor candidato
+        # Se houver setores vazios, preenche lacunas com o melhor candidato de cada setor
         if len(spaced_events) < target_count:
             candidates = build_spoken_punchline_candidates(items, video_duration)
             used_sentence_ids = {e["sentence_idx"] for e in spaced_events}
             for sec_idx, (sec_st, sec_et) in enumerate(sectors):
                 if len(spaced_events) >= target_count:
                     break
-                has_ev = any(sec_st - 1.5 <= e["start"] <= sec_et + 1.5 for e in spaced_events)
+                has_ev = any(sec_st - 0.8 <= e["start"] <= sec_et + 0.8 for e in spaced_events)
                 if not has_ev:
                     best_cand, best_sc = None, -1e9
                     sec_mid = (sec_st + sec_et) / 2.0
@@ -590,6 +811,27 @@ Responda ESTRITAMENTE em formato JSON com uma chave "moments" contendo os {targe
                         spaced_events.append(new_ev)
                         spaced_events.sort(key=lambda x: x["start"])
 
+            # Segunda passagem com gap relaxado (0.9s) caso ainda falte atingir a meta de 8-9 recortes
+            if len(spaced_events) < target_count:
+                relaxed_gap = 0.90
+                for c in sorted(candidates, key=lambda x: x["score"], reverse=True):
+                    if len(spaced_events) >= target_count:
+                        break
+                    if c["sentence_idx"] in used_sentence_ids:
+                        continue
+                    collides = any(
+                        not (c["end"] + relaxed_gap <= e["start"] or c["start"] >= e["end"] + relaxed_gap)
+                        for e in spaced_events
+                    )
+                    if not collides:
+                        used_sentence_ids.add(c["sentence_idx"])
+                        new_ev = dict(c)
+                        new_ev["event_type"] = "manga_eyes_panel" if new_ev["symbol"] == "?" else "scene_manga_panel"
+                        new_ev["item_idx"] = -1
+                        new_ev["text_style"] = "electric" if new_ev["symbol"] == "?" else "slam"
+                        spaced_events.append(new_ev)
+                        spaced_events.sort(key=lambda x: x["start"])
+
         events = spaced_events
         events.sort(key=lambda x: x["start"])
 
@@ -606,76 +848,627 @@ Responda ESTRITAMENTE em formato JSON com uma chave "moments" contendo os {targe
 
 def classify_manga_feelings_with_ollama(
     cards_text: List[str],
-    model: str = "qwen2.5:7b",
-    timeout: float = 15.0,
+    model: str = "qwen2.5vl:3b",
+    timeout: float = 22.0,
     log_callback: Optional[Callable[[str], None]] = None
 ) -> List[str]:
-    """Classifica o feeling emocional de frases manuais usando IA Local Ollama ou heurística rápida."""
-    default_feelings = []
-    for txt in cards_text:
-        low = txt.lower()
-        if "?" in txt:
-            f = "electric"
-        elif any(w in low for w in ["deus", "mundo", "poder", "ouro", "glória", "supremo"]):
-            f = "golden_god"
-        elif any(w in low for w in ["morte", "matar", "sangue", "corte", "destruir", "morrer"]):
-            f = "slam"
-        elif any(w in low for w in ["justiça", "fogo", "luta", "combate", "fúria", "atacar"]):
-            f = "fire"
-        elif any(w in low for w in ["não", "nunca", "acha", "quem", "olhe", "veja"]):
-            f = "offset_comic"
-        else:
-            f = "slam"
-        default_feelings.append(f)
-
+    """
+    Classifica o feeling emocional de frases manuais usando IA Local Ollama ou heurística contextual,
+    garantindo DIVERSIDADE VISUAL MÁXIMA E ZERO REPETIÇÃO em recortes consecutivos.
+    """
     if not cards_text:
-        return default_feelings
+        return []
 
+    decisions = analyze_cutouts_with_vlm(
+        cards_meta=[{"text": t, "start": i * 5.0, "end": i * 5.0 + 2.0} for i, t in enumerate(cards_text)],
+        video_path=None,
+        video_duration=max(30.0, len(cards_text) * 6.0),
+        model=model,
+        timeout=timeout,
+        log_callback=log_callback,
+    )
+    return [d["feeling"] for d in decisions]
+
+
+def ensure_ollama_running(log_callback: Optional[Callable[[str], None]] = None) -> List[str]:
+    """
+    Garante que o servidor local Ollama esteja rodando em localhost:11434.
+    Se estiver offline, inicia `ollama serve` automaticamente em background sem janela.
+    Retorna a lista de modelos instalados no Ollama.
+    """
+    import subprocess
     try:
-        prompt = f"""Você é um Diretor de Anime Shonen. Classifique o feeling visual de mangá para cada uma das {len(cards_text)} frases abaixo.
-Opções permitidas: "slam", "electric", "golden_god", "fire", "offset_comic", "manga_bubble".
-
-Frases:
-{json.dumps(cards_text, ensure_ascii=False, indent=2)}
-
-Responda ESTRITAMENTE em formato JSON com uma lista "feelings":
-{{"feelings": ["slam", "electric"]}}
-"""
-        resp = requests.post(
-            "http://localhost:11434/api/chat",
-            json={
-                "model": model,
-                "messages": [{"role": "user", "content": prompt}],
-                "stream": False,
-                "format": "json",
-                "options": {"temperature": 0.1}
-            },
-            timeout=timeout
-        )
-        if resp.status_code == 200:
-            data = json.loads(resp.json().get("message", {}).get("content", ""))
-            f_list = data.get("feelings")
-            if isinstance(f_list, list) and len(f_list) == len(cards_text):
-                valid_opts = {"slam", "electric", "golden_god", "fire", "offset_comic", "manga_bubble"}
-                return [f if f in valid_opts else default_feelings[i] for i, f in enumerate(f_list)]
+        r = requests.get("http://localhost:11434/api/tags", timeout=1.8)
+        if r.status_code == 200:
+            return [m.get("name", "") for m in r.json().get("models", [])]
     except Exception:
         pass
 
-    return default_feelings
+    try:
+        if log_callback:
+            _emit_log(log_callback, "Anime FX Pro: Iniciando servidor local Ollama em segundo plano...")
+        creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000) if os.name == "nt" else 0
+        subprocess.Popen(
+            ["ollama", "serve"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=creationflags,
+        )
+        for _ in range(10):
+            time.sleep(0.5)
+            try:
+                r = requests.get("http://localhost:11434/api/tags", timeout=1.5)
+                if r.status_code == 200:
+                    return [m.get("name", "") for m in r.json().get("models", [])]
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return []
+
+
+def _resolve_best_ollama_model(requested_model: str, installed_models: List[str]) -> Tuple[str, bool]:
+    """
+    Resolve o melhor modelo disponível no Ollama (priorizando VLMs visuais se instalados)
+    e retorna (model_name, is_vision_model).
+    """
+    vision_keywords = ("vl", "vision", "moondream", "llava", "minicpm-v", "bakllava")
+    req_lower = (requested_model or "").strip().lower()
+
+    if installed_models:
+        # 1. Match exato
+        for m in installed_models:
+            if m.lower() == req_lower:
+                is_v = any(vk in m.lower() for vk in vision_keywords)
+                return m, is_v
+        # 2. Match parcial pelo prefixo
+        req_prefix = req_lower.split(":")[0]
+        for m in installed_models:
+            if m.lower().startswith(req_prefix):
+                is_v = any(vk in m.lower() for vk in vision_keywords)
+                return m, is_v
+        # 3. Se pediu VLM e tem algum VLM instalado (ex: qwen2.5vl:3b, qwen2.5vl:7b, llama3.2-vision)
+        for pref in ("qwen2.5vl:3b", "qwen2-vl", "qwen2.5vl:7b", "moondream", "phi3", "llava", "llama3.2-vision"):
+            for m in installed_models:
+                if pref in m.lower():
+                    is_v = any(vk in m.lower() for vk in vision_keywords)
+                    return m, is_v
+        # 4. Fallback para qwen2.5:7b ou primeiro modelo disponível
+        for m in installed_models:
+            if "qwen2.5:7b" in m.lower():
+                return m, False
+        return installed_models[0], any(vk in installed_models[0].lower() for vk in vision_keywords)
+
+    is_v = any(vk in req_lower for vk in vision_keywords)
+    return requested_model or "qwen2.5vl:3b", is_v
+
+
+def _extract_cutout_visual_context(
+    video_path: Optional[str],
+    cards_meta: List[Dict[str, Any]],
+    video_duration: float
+) -> Tuple[List[Dict[str, Any]], Optional[str], List[Any]]:
+    """
+    Extrai métricas visuais reais de cada recorte (luminância, saturação, contraste, movimento,
+    detecção de rosto/close-up) e monta uma Prancha de Storyboard (Contact Sheet base64)
+    para que o Vision LLM enxergue todos os quadros simultaneamente.
+    """
+    import base64
+    from io import BytesIO
+    import cv2
+    import numpy as np
+    from PIL import Image, ImageDraw
+
+    telemetry: List[Dict[str, Any]] = []
+    pil_thumbs: List[Image.Image] = []
+
+    has_video = bool(video_path and os.path.exists(str(video_path)))
+    cap = cv2.VideoCapture(str(video_path)) if has_video else None
+    v_fps = (cap.get(cv2.CAP_PROP_FPS) or 24.0) if cap else 24.0
+
+    detect_faces = None
+    ort_lock = None
+    try:
+        import manga_fx_engine
+        ort_lock = getattr(manga_fx_engine, "_ORT_GPU_LOCK", None)
+    except Exception:
+        pass
+    try:
+        from imgutils.detect import detect_faces as _df
+        detect_faces = _df
+        has_face_det = True
+    except Exception:
+        has_face_det = False
+
+    for idx, cm in enumerate(cards_meta):
+        st = float(cm.get("start", 0.0))
+        et = float(cm.get("end", st + 1.5))
+        mid_t = st + min(0.45, max(0.15, (et - st) * 0.35))
+        prog = round(min(1.0, max(0.0, st / max(1.0, video_duration))), 2)
+
+        info = {
+            "card_index": idx + 1,
+            "text": cm.get("text", ""),
+            "narrative_progress": prog,
+            "luminance": 115.0,
+            "saturation": 95.0,
+            "contrast": 52.0,
+            "motion_intensity": 20.0,
+            "has_face_closeup": False,
+            "face_area_ratio": 0.0,
+        }
+
+        if cap and cap.isOpened():
+            cap.set(cv2.CAP_PROP_POS_FRAMES, max(0, int(mid_t * v_fps)))
+            ret, frame_bgr = cap.read()
+            if ret and frame_bgr is not None:
+                rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+                gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
+                hsv = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2HSV)
+
+                info["luminance"] = round(float(np.mean(gray)), 1)
+                info["saturation"] = round(float(np.mean(hsv[:, :, 1])), 1)
+                info["contrast"] = round(float(np.std(gray)), 1)
+
+                # Mede intensidade de movimento comparando frame 0.25s antes
+                cap.set(cv2.CAP_PROP_POS_FRAMES, max(0, int(max(0.0, mid_t - 0.25) * v_fps)))
+                ret_prev, prev_bgr = cap.read()
+                if ret_prev and prev_bgr is not None and prev_bgr.shape == frame_bgr.shape:
+                    prev_gray = cv2.cvtColor(prev_bgr, cv2.COLOR_BGR2GRAY)
+                    diff = float(np.mean(cv2.absdiff(gray, prev_gray)))
+                    info["motion_intensity"] = round(diff, 1)
+
+                pil_f = Image.fromarray(rgb)
+                if has_face_det and detect_faces is not None:
+                    try:
+                        orig_w, orig_h = pil_f.size
+                        det_f = pil_f.resize((640, max(1, int(orig_h * (640.0 / orig_w)))), Image.Resampling.BILINEAR) if orig_w > 640 else pil_f
+                        if ort_lock is not None:
+                            with ort_lock:
+                                faces = detect_faces(det_f)
+                        else:
+                            faces = detect_faces(det_f)
+                        if faces:
+                            best_f = max(faces, key=lambda item: (item[0][2] - item[0][0]) * (item[0][3] - item[0][1]))
+                            fw = max(1, best_f[0][2] - best_f[0][0])
+                            fh = max(1, best_f[0][3] - best_f[0][1])
+                            f_ratio = float(fw * fh) / float(det_f.width * det_f.height)
+                            info["face_area_ratio"] = round(f_ratio, 3)
+                            info["has_face_closeup"] = f_ratio >= 0.045
+                    except Exception:
+                        pass
+
+                thumb = pil_f.resize((384, 216), Image.Resampling.BILINEAR)
+                tdraw = ImageDraw.Draw(thumb)
+                tdraw.rectangle([0, 0, 130, 32], fill=(0, 0, 0))
+                tdraw.text((8, 6), f"CARD #{idx + 1} ({st:.1f}s)", fill=(255, 220, 40))
+                pil_thumbs.append(thumb)
+
+        telemetry.append(info)
+
+    if cap:
+        cap.release()
+
+    contact_b64 = None
+    if pil_thumbs:
+        cols = min(2, len(pil_thumbs))
+        rows = (len(pil_thumbs) + cols - 1) // cols
+        sheet = Image.new("RGB", (cols * 384, rows * 216), (12, 12, 16))
+        for i, th in enumerate(pil_thumbs):
+            r_idx = i // cols
+            c_idx = i % cols
+            sheet.paste(th, (c_idx * 384, r_idx * 216))
+        buf = BytesIO()
+        sheet.save(buf, format="JPEG", quality=82)
+        contact_b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+
+    return telemetry, contact_b64, pil_thumbs
+
+
+def _compute_context_driven_design(
+    cards_meta: List[Dict[str, Any]],
+    telemetry: List[Dict[str, Any]],
+    manga_theme: str = "geral"
+) -> List[Dict[str, str]]:
+    """
+    Motor Contextual Inteligente baseado nas métricas visuais reais da cena + semântica da fala + tema escolhido:
+    NUNCA usa uma sequência fixa! Adapta o estilo do painel e o feeling respeitando estritamente o `manga_theme`
+    ('geral', 'triste', 'romantica', 'acao', 'animada', 'sombria', 'epica') e garantindo zero repetição consecutiva.
+    """
+    from manga_fx_engine import detect_manga_feeling
+
+    t_key = resolve_manga_theme_key(manga_theme)
+    theme_cfg = MANGA_THEME_PROFILES.get(t_key, MANGA_THEME_PROFILES["geral"])
+    allowed_panels: List[str] = list(theme_cfg["panels"])
+    allowed_feelings: List[str] = list(theme_cfg["feelings"])
+
+    results: List[Dict[str, str]] = []
+    used_feelings_recent: List[str] = []
+    used_panels_recent: List[str] = []
+    used_layouts_recent: List[str] = []
+
+    # Janela de Anti-Repetição de Baralho Completo (Full-Deck Cycle):
+    # Garante que em vídeos com 8 a 9 recortes cada recorte tenha um feeling 100% único
+    # e alterne entre todas as arquiteturas de quadro do tema antes de repetir!
+    f_win = max(1, len(allowed_feelings) - 1)
+    p_win = max(1, len(allowed_panels) - 1)
+
+    for idx, cm in enumerate(cards_meta):
+        txt = str(cm.get("text", "")).strip()
+        t_up = txt.upper()
+        tel = telemetry[idx] if idx < len(telemetry) else {}
+
+        lum = float(tel.get("luminance", 115.0))
+        sat = float(tel.get("saturation", 95.0))
+        mot = float(tel.get("motion_intensity", 20.0))
+        has_closeup = bool(tel.get("has_face_closeup", False))
+        prog = float(tel.get("narrative_progress", 0.5))
+
+        # 1. Determina candidatos de Feeling ordenados por afinidade contextual + tema
+        feeling_candidates: List[str] = []
+        if t_key == "triste":
+            if "?" in txt or lum < 80.0:
+                feeling_candidates.extend(["midnight_sorrow", "dramatic_silence", "broken_promise", "cold_solitude", "emotional_tear", "silver_grief", "fading_echo", "typewriter"])
+            elif prog >= 0.65:
+                feeling_candidates.extend(["emotional_tear", "silver_grief", "fading_echo", "broken_promise", "midnight_sorrow", "dramatic_silence", "cold_solitude", "typewriter"])
+            else:
+                feeling_candidates.extend(["dramatic_silence", "emotional_tear", "silver_grief", "fading_echo", "midnight_sorrow", "broken_promise", "cold_solitude", "typewriter"])
+        elif t_key == "romantica":
+            if prog >= 0.65 or "!" in txt:
+                feeling_candidates.extend(["sakura_bloom", "heart_pulse", "eternal_vow", "velvet_kiss", "golden_romance", "starlight_crush", "sweet_blush", "emotional_tear"])
+            elif sat > 110.0:
+                feeling_candidates.extend(["golden_romance", "starlight_crush", "sakura_bloom", "sweet_blush", "heart_pulse", "velvet_kiss", "eternal_vow", "emotional_tear"])
+            else:
+                feeling_candidates.extend(["heart_pulse", "sakura_bloom", "sweet_blush", "golden_romance", "velvet_kiss", "starlight_crush", "eternal_vow", "emotional_tear"])
+        elif t_key == "animada":
+            if "!" in txt or mot > 22.0:
+                feeling_candidates.extend(["comedy", "offset_comic", "comic_halftone", "manga_bubble", "electric", "golden_god", "shonen_badge", "starlight_crush"])
+            else:
+                feeling_candidates.extend(["offset_comic", "manga_bubble", "comedy", "comic_halftone", "starlight_crush", "golden_god", "electric", "shonen_badge"])
+        else:
+            base_f = detect_manga_feeling(txt)
+            if base_f in allowed_feelings and base_f != "slam":
+                feeling_candidates.append(base_f)
+            if "?" in txt or any(q in t_up for q in ("COMO", "POR QUE", "QUEM", "ONDE", "SERÁ", "IMPOSSÍVEL")):
+                feeling_candidates.extend(["cyber_glitch", "electric", "manga_bubble", "domain_dark", "typewriter"])
+            if lum < 75.0:
+                feeling_candidates.extend(["domain_dark", "blood_ink", "cursed_aura", "abyssal_void", "electric", "cyber_glitch"])
+            elif sat > 125.0:
+                feeling_candidates.extend(["fire", "golden_god", "electric", "blade_stream", "comic_halftone"])
+            elif mot > 26.0:
+                feeling_candidates.extend(["blade_stream", "fire", "blood_ink", "shonen_badge", "slam"])
+            elif prog >= 0.72:
+                feeling_candidates.extend(["golden_god", "domain_dark", "fire", "blood_ink", "electric", "cursed_aura"])
+
+        text_seed = sum((i + 1) * ord(ch) for i, ch in enumerate(t_up)) % len(allowed_feelings)
+        rotated_f = allowed_feelings[text_seed:] + allowed_feelings[:text_seed]
+        feeling_candidates.extend(rotated_f)
+        feeling_candidates = [f for f in feeling_candidates if f in allowed_feelings]
+        if not feeling_candidates:
+            feeling_candidates = list(allowed_feelings)
+
+        chosen_feeling = feeling_candidates[0]
+        for cand_f in feeling_candidates:
+            if cand_f not in used_feelings_recent[-f_win:]:
+                chosen_feeling = cand_f
+                break
+
+        # 2. Determina candidatos de Arquitetura de Quadro HQ (panel_style) dentro do tema escolhido
+        panel_candidates: List[str] = []
+        if t_key == "triste":
+            if "?" in txt or has_closeup:
+                panel_candidates.extend(["hq_eyes_strip", "hq_rain_melancholy", "hq_soft_memory"])
+            if prog >= 0.65 or mot >= 22.0:
+                panel_candidates.extend(["hq_dual_split", "hq_triple_cascade", "hq_rain_melancholy"])
+            if lum < 85.0:
+                panel_candidates.extend(["hq_rain_melancholy", "hq_shonen_panel", "hq_eyes_strip"])
+            else:
+                panel_candidates.extend(["hq_soft_memory", "hq_rain_melancholy", "hq_dual_split", "hq_triple_cascade"])
+        elif t_key == "romantica":
+            if "?" in txt or has_closeup:
+                panel_candidates.extend(["hq_eyes_strip", "hq_romance_glow", "hq_soft_memory"])
+            if prog >= 0.60 or mot >= 20.0:
+                panel_candidates.extend(["hq_dual_split", "hq_triple_cascade", "hq_romance_glow", "hq_color_webtoon"])
+            else:
+                panel_candidates.extend(["hq_romance_glow", "hq_soft_memory", "hq_dual_split", "hq_triple_cascade", "hq_eyes_strip"])
+        elif t_key == "animada":
+            if "?" in txt or has_closeup:
+                panel_candidates.extend(["hq_eyes_strip", "hq_pop_halftone", "hq_color_webtoon"])
+            elif mot >= 22.0 or prog >= 0.65:
+                panel_candidates.extend(["hq_dual_split", "hq_triple_cascade", "hq_pop_halftone", "hq_color_webtoon"])
+            else:
+                panel_candidates.extend(["hq_pop_halftone", "hq_color_webtoon", "hq_shonen_panel", "hq_dual_split", "hq_triple_cascade"])
+        else:
+            if "?" in txt or (has_closeup and mot < 24.0):
+                panel_candidates.extend(["hq_eyes_strip", "hq_shonen_panel", "hq_noir_crimson"])
+            if mot >= 25.0 and idx > 0:
+                panel_candidates.extend(["hq_dual_split", "hq_triple_cascade", "hq_diagonal_impact", "hq_color_webtoon"])
+            if sat >= 115.0 or chosen_feeling in ("fire", "golden_god", "electric", "blade_stream"):
+                panel_candidates.extend(["hq_color_webtoon", "hq_diagonal_impact", "hq_dual_split", "hq_golden_eclipse"])
+            if lum <= 82.0 or chosen_feeling in ("domain_dark", "blood_ink", "cursed_aura", "abyssal_void"):
+                panel_candidates.extend(["hq_noir_crimson", "hq_shonen_panel", "hq_diagonal_impact", "hq_golden_eclipse"])
+            if prog >= 0.75:
+                panel_candidates.extend(["hq_dual_split", "hq_triple_cascade", "hq_color_webtoon", "hq_diagonal_impact"])
+
+        p_seed = (int(lum) + int(sat) + len(t_up) * 7 + idx * 3) % len(allowed_panels)
+        panel_candidates.extend(allowed_panels[p_seed:] + allowed_panels[:p_seed])
+        panel_candidates = [p for p in panel_candidates if p in allowed_panels]
+        if not panel_candidates:
+            panel_candidates = list(allowed_panels)
+
+        chosen_panel = panel_candidates[0]
+        for cand_p in panel_candidates:
+            if cand_p not in used_panels_recent[-p_win:]:
+                chosen_panel = cand_p
+                break
+
+        # 3. Determina Layout de Posição da Legenda harmonizado com o Quadro HQ
+        if chosen_panel in ("hq_eyes_strip", "hq_dual_split", "hq_triple_cascade"):
+            layout_candidates = ["bottom", "lateral_right", "lateral_left", "center"]
+        elif chosen_panel == "hq_diagonal_impact":
+            layout_candidates = ["lateral_right", "lateral_left", "bottom", "center"]
+        elif has_closeup:
+            layout_candidates = ["bottom", "lateral_right", "lateral_left", "center"]
+        else:
+            layout_candidates = ["center", "bottom", "lateral_right", "lateral_left"]
+
+        chosen_layout = layout_candidates[0]
+        for cand_l in layout_candidates:
+            if cand_l not in used_layouts_recent[-1:]:
+                chosen_layout = cand_l
+                break
+
+        used_feelings_recent.append(chosen_feeling)
+        used_panels_recent.append(chosen_panel)
+        used_layouts_recent.append(chosen_layout)
+
+        results.append({
+            "feeling": chosen_feeling,
+            "panel_style": chosen_panel,
+            "pos_layout": chosen_layout,
+        })
+
+    return results
+
+
+_HF_VLM_CACHE: Dict[str, Any] = {}
+
+
+def _try_huggingface_vlm_inference(
+    hf_model_id: str,
+    prompt: str,
+    pil_thumbs: List[Any],
+    log_callback: Optional[Callable[[str], None]] = None
+) -> Optional[Dict[str, Any]]:
+    """
+    Suporte nativo aos modelos Vision-Language do Hugging Face sugeridos pelo usuário:
+      - Qwen/Qwen2-VL-2B-Instruct (ou 7B em 4-bit)
+      - microsoft/Phi-3-vision-128k-instruct
+      - vikhyatk/moondream2
+      - llava-hf/llava-1.5-7b-hf
+    Carrega sob demanda na GPU (8GB VRAM friendly) e retorna o JSON estruturado.
+    """
+    try:
+        import torch
+        from PIL import Image
+        clean_id = hf_model_id.replace("hf:", "").strip()
+        if log_callback:
+            _emit_log(log_callback, f"Anime FX Pro: Consultando VLM Hugging Face '{clean_id}' na GPU...")
+
+        if "moondream" in clean_id.lower():
+            from transformers import AutoModelForCausalLM, AutoTokenizer
+            if clean_id not in _HF_VLM_CACHE:
+                tok = AutoTokenizer.from_pretrained(clean_id, trust_remote_code=True)
+                mdl: Any = AutoModelForCausalLM.from_pretrained(
+                    clean_id, trust_remote_code=True,
+                    torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
+                )
+                dev_str = "cuda" if torch.cuda.is_available() else "cpu"
+                mdl = mdl.to(torch.device(dev_str))
+                _HF_VLM_CACHE[clean_id] = (tok, mdl)
+            tok, mdl = _HF_VLM_CACHE[clean_id]
+            img = pil_thumbs[0] if pil_thumbs else Image.new("RGB", (384, 216), (0, 0, 0))
+            enc_img = mdl.encode_image(img)
+            ans = mdl.answer_question(enc_img, prompt, tok)
+            m = re.search(r"\{.*\}", ans, re.DOTALL)
+            if m:
+                return json.loads(m.group(0))
+    except Exception as e:
+        if log_callback:
+            _emit_log(log_callback, f"Anime FX Pro: Aviso HuggingFace VLM ({hf_model_id}): {e}")
+    return None
+
+
+def analyze_cutouts_with_vlm(
+    cards_meta: List[Dict[str, Any]],
+    video_path: Optional[str] = None,
+    video_duration: float = 60.0,
+    model: str = "qwen2.5vl:3b",
+    timeout: float = 28.0,
+    log_callback: Optional[Callable[[str], None]] = None,
+    manga_theme: str = "geral"
+) -> List[Dict[str, str]]:
+    """
+    Diretor de Arte Multimodal (Vision LLM + Telemetria Visual de Cena):
+    Analisa os quadros reais do vídeo e o contexto dramático/clímax de cada frase para escolher
+    dinamicamente para cada recorte:
+      1. `feeling` (tipografia e animação de energia)
+      2. `panel_style` (arquitetura do Quadro Editorial HQ)
+      3. `pos_layout` (posicionamento seguro da legenda)
+    """
+    if not cards_meta:
+        return []
+
+    t_key = resolve_manga_theme_key(manga_theme)
+    theme_cfg = MANGA_THEME_PROFILES.get(t_key, MANGA_THEME_PROFILES["geral"])
+    allowed_panels: List[str] = list(theme_cfg["panels"])
+    allowed_feelings: List[str] = list(theme_cfg["feelings"])
+
+    telemetry, contact_b64, pil_thumbs = _extract_cutout_visual_context(video_path, cards_meta, video_duration)
+    baseline_decisions = _compute_context_driven_design(cards_meta, telemetry, manga_theme=t_key)
+
+    installed_models = ensure_ollama_running(log_callback=log_callback)
+    resolved_model, is_vision = _resolve_best_ollama_model(model, installed_models)
+
+    prompt = f"""Você é um Diretor de Arte de Mangá e Webtoon.
+Analise os {len(cards_meta)} recortes abaixo (com suas frases, progresso narrativo e telemetria visual da cena) e defina um design ÚNICO, DINÂMICO e CONTEXTUAL para cada recorte.
+
+🎭 TEMA ESCOLHIDO PELO USUÁRIO: {theme_cfg['label']}
+{theme_cfg['prompt_hint']}
+
+ARQUITETURAS DE QUADRO HQ (`panel_style`) PERMITIDAS PARA ESTE TEMA:
+{json.dumps(allowed_panels, ensure_ascii=False)}
+
+FEELINGS DE TIPOGRAFIA E ANIMAÇÃO (`feeling`) PERMITIDOS PARA ESTE TEMA:
+{json.dumps(allowed_feelings, ensure_ascii=False)}
+
+POSIÇÕES DE LEGENDA (`pos_layout`) DISPONÍVEIS:
+- "bottom", "center", "lateral_right", "lateral_left"
+
+⛔ REGRAS OBRIGATÓRIAS:
+1. NUNCA use uma ordem fixa ou repetitiva! A escolha DEVE refletir o clímax, a emoção da fala e a cena visual de cada card.
+2. PROIBIDO repetir o mesmo `feeling` ou o mesmo `panel_style` em recortes consecutivos!
+3. Se houver 3 ou mais recortes, use pelo menos 3 arquiteturas diferentes de `panel_style`.
+
+DADOS DOS RECORTES E TELEMETRIA DA CENA:
+{json.dumps(telemetry, ensure_ascii=False, indent=2)}
+
+Responda ESTRITAMENTE em formato JSON:
+{{
+  "cutouts": [
+    {{"card_index": 1, "feeling": "...", "panel_style": "...", "pos_layout": "..."}},
+    ...
+  ]
+}}"""
+
+    parsed_cutouts = None
+
+    if str(model).startswith("hf:"):
+        hf_data = _try_huggingface_vlm_inference(model, prompt, pil_thumbs, log_callback=log_callback)
+        if isinstance(hf_data, dict):
+            parsed_cutouts = hf_data.get("cutouts")
+
+    if not parsed_cutouts:
+        try:
+            msg_payload: Dict[str, Any] = {"role": "user", "content": prompt}
+            if is_vision and contact_b64:
+                msg_payload["images"] = [contact_b64]
+                if log_callback:
+                    _emit_log(log_callback, f"Anime FX Pro: Analisando {len(cards_meta)} cenas com Vision LLM '{resolved_model}' (Imagem + Contexto)...")
+            else:
+                if log_callback:
+                    _emit_log(log_callback, f"Anime FX Pro: Analisando contexto e telemetria visual com LLM '{resolved_model}'...")
+
+            resp = requests.post(
+                "http://localhost:11434/api/chat",
+                json={
+                    "model": resolved_model,
+                    "messages": [msg_payload],
+                    "stream": False,
+                    "format": "json",
+                    "options": {"temperature": 0.35}
+                },
+                timeout=timeout
+            )
+            if resp.status_code == 200:
+                raw_content = resp.json().get("message", {}).get("content", "")
+                data = json.loads(raw_content)
+                if isinstance(data.get("cutouts"), list):
+                    parsed_cutouts = data["cutouts"]
+                elif isinstance(data.get("feelings"), list):
+                    parsed_cutouts = [{"feeling": f} for f in data["feelings"]]
+        except Exception as e:
+            if log_callback:
+                _emit_log(log_callback, f"Anime FX Pro: Aviso VLM/Ollama ({e}). Aplicando Diretor Visual Contextual de Cena.")
+
+    if isinstance(parsed_cutouts, list) and len(parsed_cutouts) == len(cards_meta):
+        final_decisions: List[Dict[str, str]] = []
+        valid_feelings = set(allowed_feelings)
+        valid_panels = set(allowed_panels)
+        valid_layouts = {"bottom", "center", "lateral_right", "lateral_left"}
+
+        f_win = max(1, len(allowed_feelings) - 1)
+        p_win = max(1, len(allowed_panels) - 1)
+
+        for i, item in enumerate(parsed_cutouts):
+            if not isinstance(item, dict):
+                item = {}
+            f = item.get("feeling")
+            p = item.get("panel_style")
+            l = item.get("pos_layout")
+
+            f_val = f if f in valid_feelings else baseline_decisions[i]["feeling"]
+            p_val = p if p in valid_panels else baseline_decisions[i]["panel_style"]
+            l_val = l if l in valid_layouts else baseline_decisions[i]["pos_layout"]
+
+            recent_feelings = [d["feeling"] for d in final_decisions[-f_win:]]
+            recent_panels = [d["panel_style"] for d in final_decisions[-p_win:]]
+            recent_layouts = [d["pos_layout"] for d in final_decisions[-2:]]
+
+            if f_val in recent_feelings:
+                ctx_f = baseline_decisions[i]["feeling"]
+                if ctx_f not in recent_feelings:
+                    f_val = ctx_f
+                else:
+                    for cand_f in allowed_feelings:
+                        if cand_f not in recent_feelings:
+                            f_val = cand_f
+                            break
+
+            if "?" in str(cards_meta[i].get("text", "")) and "hq_eyes_strip" in valid_panels and "hq_eyes_strip" not in recent_panels:
+                p_val = "hq_eyes_strip"
+            elif p_val in recent_panels:
+                ctx_p = baseline_decisions[i]["panel_style"]
+                if ctx_p not in recent_panels:
+                    p_val = ctx_p
+                else:
+                    for cand_p in allowed_panels:
+                        if cand_p not in recent_panels:
+                            p_val = cand_p
+                            break
+
+            if l_val in recent_layouts:
+                ctx_l = baseline_decisions[i]["pos_layout"]
+                if ctx_l not in recent_layouts:
+                    l_val = ctx_l
+                else:
+                    for cand_l in ["bottom", "center", "lateral_right", "lateral_left"]:
+                        if cand_l not in recent_layouts:
+                            l_val = cand_l
+                            break
+
+            final_decisions.append({
+                "feeling": f_val,
+                "panel_style": p_val,
+                "pos_layout": l_val,
+            })
+
+        if log_callback:
+            summary_str = ", ".join(f"#{i+1}:{d['panel_style']}[{d['feeling']}]" for i, d in enumerate(final_decisions))
+            _emit_log(log_callback, f"Anime FX Pro: Direção de Arte VLM concluída -> {summary_str}")
+        return final_decisions
+
+    if log_callback:
+        summary_str = ", ".join(f"#{i+1}:{d['panel_style']}[{d['feeling']}]" for i, d in enumerate(baseline_decisions))
+        _emit_log(log_callback, f"Anime FX Pro: Direção de Arte Contextual concluída -> {summary_str}")
+    return baseline_decisions
 
 
 def build_manual_manga_punchlines(
     items: List[Dict[str, Any]],
     video_duration: float,
-    model: str = "qwen2.5:7b",
-    log_callback: Optional[Callable[[str], None]] = None
+    model: str = "qwen2.5vl:3b",
+    log_callback: Optional[Callable[[str], None]] = None,
+    video_path: Optional[str] = None,
+    manga_theme: str = "geral"
 ) -> Optional[List[Dict[str, Any]]]:
     """
     Constrói os recortes de mangá com base EXCLUSIVA nas frases selecionadas
-    pelo usuário na janela de revisão de legendas.
-    - Se o usuário marcou duas frases consecutivas, elas viram Linha 1 e Linha 2.
-    - Se marcou uma frase isolada, divide em 2 linhas ou centraliza na Linha 2.
-    - Classifica os feelings visuais via Ollama com base no texto escolhido.
+    pelo usuário na janela de revisão de legendas:
+      - Analisa os quadros reais do vídeo + contexto dramático da fala via Vision LLM (Qwen2-VL / Moondream / Phi-3-Vision / LLaVA).
+      - Nunca repete a mesma ordem fixa de design! Cada recorte recebe uma arquitetura de Quadro HQ
+        (`hq_shonen_panel`, `hq_color_webtoon`, `hq_diagonal_impact`, `hq_eyes_strip`, `hq_dual_split`, `hq_noir_crimson`)
+        e um `feeling` condizente com o clímax e a imagem da cena.
     """
     selected_items = [it for it in items if it.get("is_manga_cutout")]
     if not selected_items:
@@ -720,17 +1513,27 @@ def build_manual_manga_punchlines(
     if not card_groups:
         return None
 
-    cards_summary_text = []
+    cards_meta = []
     for grp in card_groups:
         full_text = " ".join(g.get("text", "") for g in grp).strip()
-        cards_summary_text.append(full_text)
+        raw_st = float(grp[0].get("start", 0.0))
+        raw_et = float(grp[-1].get("end", raw_st + 1.5))
+        cards_meta.append({"text": full_text, "start": raw_st, "end": raw_et})
 
-    _emit_log(log_callback, f"Anime FX Pro: Classificando feelings dinâmicos para {len(card_groups)} recortes manuais...")
-    feelings = classify_manga_feelings_with_ollama(cards_summary_text, model=model, log_callback=log_callback)
+    t_key = resolve_manga_theme_key(manga_theme)
+    theme_label = MANGA_THEME_PROFILES.get(t_key, MANGA_THEME_PROFILES["geral"])["label"]
+    _emit_log(log_callback, f"Anime FX Pro: Analisando {len(card_groups)} cenas selecionadas [Tema: {theme_label}] com Vision LLM ({model})...")
+    vlm_decisions = analyze_cutouts_with_vlm(
+        cards_meta=cards_meta,
+        video_path=video_path,
+        video_duration=video_duration,
+        model=model,
+        log_callback=log_callback,
+        manga_theme=t_key,
+    )
 
     flat_words = _flatten_words(items)
     events: List[Dict[str, Any]] = []
-    layout_cycle = ["center", "bottom", "lateral_right", "lateral_left", "center", "bottom"]
 
     for idx, grp in enumerate(card_groups):
         if len(grp) >= 2:
@@ -775,7 +1578,22 @@ def build_manual_manga_punchlines(
             sp_st = round(raw_st, 2)
             sp_et = round(raw_et, 2)
 
-        feeling = feelings[idx] if idx < len(feelings) else "slam"
+        # Respeita escolha manual explícita do usuário apenas se ele trocou de "auto" para um feeling específico
+        explicit_f = None
+        for g in grp:
+            mf = g.get("manga_feeling")
+            if mf and mf != "auto":
+                explicit_f = mf
+                break
+
+        dec = vlm_decisions[idx] if idx < len(vlm_decisions) else {
+            "feeling": "domain_dark",
+            "panel_style": "hq_shonen_panel",
+            "pos_layout": "bottom",
+        }
+        feeling = explicit_f or dec["feeling"]
+        panel_style = dec["panel_style"]
+        pos_layout = dec["pos_layout"]
 
         events.append({
             "sentence_idx": idx,
@@ -784,22 +1602,23 @@ def build_manual_manga_punchlines(
             "end": et,
             "speech_start": sp_st,
             "speech_end": sp_et,
-            "text": cards_summary_text[idx],
+            "text": cards_meta[idx]["text"],
             "punch_text": f"{clean_l1} {clean_l2}".strip(),
             "line1": clean_l1,
             "line2": clean_l2,
             "symbol": sym,
-            "event_type": "manga_eyes_panel" if sym == "?" else "scene_manga_panel",
+            "event_type": panel_style,
+            "panel_style": panel_style,
             "item_idx": -1,
             "text_style": feeling,
-            "pos_layout": layout_cycle[idx % len(layout_cycle)]
+            "pos_layout": pos_layout,
         })
 
     events.sort(key=lambda x: x["start"])
-    _emit_log(log_callback, f"Anime FX Pro: {len(events)} recortes manuais configurados com sucesso!")
+    _emit_log(log_callback, f"Anime FX Pro: {len(events)} Quadros Editoriais HQ configurados dinamicamente conforme cena e clímax!")
     for idx, ev in enumerate(events):
         gap_str = f" [Intervalo: {ev['start'] - events[idx-1]['end']:.1f}s]" if idx > 0 else " [Abertura]"
-        _emit_log(log_callback, f"   -> Recorte Manual ({idx+1}/{len(events)}): '{ev['punch_text']}' [Estilo: {ev['text_style']}] no momento {ev['start']}s-{ev['end']}s{gap_str}")
+        _emit_log(log_callback, f"   -> Quadro HQ ({idx+1}/{len(events)}): '{ev['punch_text']}' [Painel: {ev['panel_style']} | Feeling: {ev['text_style']} | Posição: {ev['pos_layout']}] em {ev['start']}s-{ev['end']}s{gap_str}")
 
     return events
 
@@ -809,12 +1628,15 @@ def analyze_transcript_for_anime_fx(
     video_duration: float = 60.0,
     log_callback: Optional[Callable[[str], None]] = None,
     use_local_ai: bool = True,
-    local_ai_model: str = "qwen2.5:7b"
+    local_ai_model: str = "qwen2.5vl:3b",
+    video_path: Optional[str] = None,
+    manga_theme: str = "geral"
 ) -> Dict[str, Any]:
     """
     Analisa os chunks de transcrição e retorna os eventos programados de FX de Elite:
-    - Prioridade 1: Curadoria Semântica de Clímax via IA Local (Ollama Qwen 2.5 7B na GPU RTX 5060).
-    - Prioridade 2 (Fallback ou Seleção Manual): Analisador heurístico determinístico com âncoras canônicas.
+    - Prioridade 0: Seleção Manual do Usuário enriquecida por Vision LLM (analisando os quadros reais do vídeo).
+    - Prioridade 1: Curadoria Semântica & Visual via IA Local (Ollama Vision / Qwen2-VL / Moondream / Phi-3-Vision).
+    - Prioridade 2 (Fallback): Analisador heurístico determinístico com Diretor Visual Contextual.
     """
     fx_schedule: Dict[str, Any] = {
         "white_flashes": [],
@@ -828,26 +1650,32 @@ def analyze_transcript_for_anime_fx(
     if not items:
         return fx_schedule
 
-    if video_duration < 22.0:
-        target_count = 2
-    elif video_duration < 36.0:
+    # Meta de recortes automáticos: vídeos > 40s geram em média 8 a 9 quadros de mangá!
+    if video_duration < 18.0:
         target_count = 3
-    elif video_duration < 48.0:
-        target_count = 4
-    elif video_duration < 65.0:
+    elif video_duration < 28.0:
+        target_count = 5
+    elif video_duration < 40.0:
         target_count = 6
+    elif video_duration < 52.0:
+        target_count = 8
+    elif video_duration <= 72.0:
+        target_count = 9
     else:
-        target_count = min(10, max(6, int(video_duration / 8.8)))
+        target_count = min(12, max(9, int(round(video_duration / 6.5))))
 
-    # Layouts 100% seguros: Central e Inferior (NUNCA top/split -> ZERO colisão com a watermark @ANIMAX_97)
-    layout_cycle = ["center", "bottom", "lateral_right", "lateral_left", "center", "bottom"]
-    style_cycle = ["shonen_badge", "manga_bubble", "fire", "electric", "golden_god", "offset_comic", "slam", "typewriter"]
+    t_key = resolve_manga_theme_key(manga_theme)
+    theme_label = MANGA_THEME_PROFILES.get(t_key, MANGA_THEME_PROFILES["geral"])["label"]
 
     # 0. Prioridade Absoluta: Seleção Manual do Usuário (se configurada na janela de revisão de legendas)
     has_manual = any(it.get("is_manga_cutout") for it in items)
     if has_manual:
-        _emit_log(log_callback, "Anime FX Pro: Modo Manual Ativo! Utilizando frases marcadas pelo usuário...")
-        manual_events = build_manual_manga_punchlines(items, video_duration, model=local_ai_model, log_callback=log_callback)
+        _emit_log(log_callback, f"Anime FX Pro: Modo Manual Ativo [Tema: {theme_label}]! Analisando quadros e contexto para design dinâmico...")
+        manual_events = build_manual_manga_punchlines(
+            items, video_duration, model=local_ai_model,
+            log_callback=log_callback, video_path=video_path,
+            manga_theme=t_key
+        )
         if manual_events:
             fx_schedule["manga_events"] = manual_events
             fx_schedule["manga_climax"] = manual_events[0]
@@ -856,21 +1684,20 @@ def analyze_transcript_for_anime_fx(
     # 1. Tenta Curadoria Inteligente via IA Local (se ativada)
     ollama_events = None
     if use_local_ai:
+        ensure_ollama_running(log_callback=log_callback)
         ollama_events = curate_manga_punchlines_with_ollama(
             items, video_duration, target_count=target_count,
-            model=local_ai_model, timeout=30.0, log_callback=log_callback
+            model=local_ai_model, timeout=30.0, log_callback=log_callback,
+            manga_theme=t_key
         )
     else:
         _emit_log(log_callback, "Anime FX Pro: Modo Heurístico Ativo (IA Local desativada nas opções do Studio)...")
 
     if ollama_events and len(ollama_events) >= max(2, target_count - 1):
-        for i, ev in enumerate(ollama_events):
-            ev["pos_layout"] = layout_cycle[i % len(layout_cycle)]
         manga_events = ollama_events
     else:
         if use_local_ai:
             _emit_log(log_callback, "Anime FX Pro: Alternando para Curadoria Heurística Determinística com âncoras canônicas...")
-        # Fallback Determinístico Heurístico com Âncoras Canônicas
         windows = [(0.0, min(6.0, video_duration - 1.5))]
         if target_count > 1 and video_duration > 8.0:
             rem_start = 7.0
@@ -885,7 +1712,7 @@ def analyze_transcript_for_anime_fx(
         candidates = build_spoken_punchline_candidates(items, video_duration)
         manga_events = []
         used_sentences = set()
-        min_gap = max(3.5, (video_duration / target_count) * 0.40)
+        min_gap = max(1.4, (video_duration / max(1, target_count)) * 0.22)
 
         def _pick(pool: List[Dict[str, Any]], w_mid: float, hook: bool) -> Optional[Dict[str, Any]]:
             best, best_sc = None, -1e9
@@ -911,19 +1738,51 @@ def analyze_transcript_for_anime_fx(
                 continue
             used_sentences.add(chosen["sentence_idx"])
             ev = dict(chosen)
-            ev["event_type"] = "manga_eyes_panel" if ev["symbol"] == "?" else "scene_manga_panel"
             ev["item_idx"] = -1
             manga_events.append(ev)
 
-        for i, ev in enumerate(manga_events):
-            ev["pos_layout"] = layout_cycle[i % len(layout_cycle)]
-            style = style_cycle[i % len(style_cycle)]
-            if ev["symbol"] == "?" and style in ("fire", "slam"):
-                style = "electric"
-            ev["text_style"] = style
+        # Passagem complementar: garante atingir a meta de 8-9 recortes quando houver falas suficientes
+        if len(manga_events) < target_count and len(candidates) > len(manga_events):
+            relaxed_gap = 0.90
+            for c in sorted(candidates, key=lambda x: x["score"], reverse=True):
+                if len(manga_events) >= target_count:
+                    break
+                if c["sentence_idx"] in used_sentences:
+                    continue
+                collides = any(
+                    not (c["end"] + relaxed_gap <= e["start"] or c["start"] >= e["end"] + relaxed_gap)
+                    for e in manga_events
+                )
+                if not collides:
+                    used_sentences.add(c["sentence_idx"])
+                    ev = dict(c)
+                    ev["item_idx"] = -1
+                    manga_events.append(ev)
+                    manga_events.sort(key=lambda x: x["start"])
 
-    fx_schedule["manga_events"] = manga_events
-    fx_schedule["manga_climax"] = manga_events[0]
+    # Passa todos os eventos automáticos pelo Diretor de Arte VLM / Contextual para atribuir panel_style + feeling + pos_layout dinâmicos
+    if manga_events:
+        auto_meta = [
+            {"text": ev.get("punch_text") or ev.get("text", ""), "start": ev["start"], "end": ev["end"]}
+            for ev in manga_events
+        ]
+        vlm_auto = analyze_cutouts_with_vlm(
+            cards_meta=auto_meta,
+            video_path=video_path,
+            video_duration=video_duration,
+            model=local_ai_model,
+            log_callback=log_callback if use_local_ai else None,
+            manga_theme=t_key,
+        )
+        for i, ev in enumerate(manga_events):
+            if i < len(vlm_auto):
+                ev["panel_style"] = vlm_auto[i]["panel_style"]
+                ev["event_type"] = vlm_auto[i]["panel_style"]
+                ev["text_style"] = vlm_auto[i]["feeling"]
+                ev["pos_layout"] = vlm_auto[i]["pos_layout"]
+
+        fx_schedule["manga_events"] = manga_events
+        fx_schedule["manga_climax"] = manga_events[0]
 
     # 2. Identificar Símbolo 3D de Anime (Ex: '?' em perguntas e mistérios)
     for idx, it in enumerate(items):

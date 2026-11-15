@@ -52,6 +52,14 @@ AVAILABLE_DIRECTOR_ENGINES = [
     ("kimi", "Kimi Moonshot (Janela Longa / Maratona de Episódios)"),
 ]
 
+AVAILABLE_GEMINI_WEB_MODELS = [
+    ("4 Hydrogen", "Gemini 4 Hydrogen (Rápido / Ajuda no dia a dia - Recomendado)"),
+    ("4 Argon", "Gemini 4 Argon (Tarefas complexas)"),
+    ("3.1 Pro", "Gemini 3.1 Pro (Raciocínio avançado)"),
+    ("3.8 Flash", "Gemini 3.8 Flash (Ajuda para tudo -> 4 Hydrogen)"),
+    ("3.5 Flash Lite", "Gemini 3.5 Flash Lite (Respostas mais rápidas)"),
+]
+
 AVAILABLE_OLLAMA_MODELS = [
     ("qwen3.8:27b", "Qwen 3.8 27B (Máximo Raciocínio, Narrativa & Lore - 17GB)"),
     ("qwen2.5:7b", "Qwen 2.5 7B (Ultra Rápido & Slicing Cirúrgico / Recomendado)"),
@@ -108,6 +116,11 @@ AVAILABLE_REFINER_AI_ENGINES = [
     ("cloud", "☁️ Nuvem Híbrida (Google Gemini 3.8 Flash + Groq Whisper)"),
 ]
 
+AVAILABLE_WHISPER_MODES = [
+    ("auto", "🤖 Automático (Groq Nuvem ➔ GPU Local large-v3)"),
+    ("local_gpu", "⚡ 100% GPU Local (faster-whisper large-v3 — Sem Limite)"),
+]
+
 
 
 
@@ -148,9 +161,12 @@ def load_app_settings(env_file_path: Optional[Path] = None) -> Dict[str, Any]:
 
     gemini_keys_text = "\n".join(gemini_keys)
     gemini_model = os.getenv("GEMINI_MODEL", "gemini-3.8-flash").strip()
+    gemini_web_model = os.getenv("GEMINI_WEB_PRIMARY_MODEL", "4 Hydrogen").strip()
+    gemini_web_fallback = os.getenv("GEMINI_WEB_AUTO_FALLBACK", "true").lower() in ("true", "1", "yes")
     director_engine = os.getenv("DIRECTOR_ENGINE", "gemini").strip().lower()
     director_local_model = os.getenv("DIRECTOR_LOCAL_MODEL", "qwen2.5:7b").strip()
     refiner_ai_engine = os.getenv("REFINER_AI_ENGINE", "auto").strip().lower()
+    whisper_mode = os.getenv("WHISPER_MODE", "auto").strip().lower()
     groq_key = os.getenv("GROQ_API_KEY", "").strip()
     openrouter_key = os.getenv("OPENROUTER_API_KEY", "").strip()
     felo_key = os.getenv("FELO_API_KEY", "").strip()
@@ -160,9 +176,12 @@ def load_app_settings(env_file_path: Optional[Path] = None) -> Dict[str, Any]:
         "gemini_keys": gemini_keys,
         "gemini_keys_text": gemini_keys_text,
         "gemini_model": gemini_model,
+        "gemini_web_model": gemini_web_model,
+        "gemini_web_fallback": gemini_web_fallback,
         "director_engine": director_engine,
         "director_local_model": director_local_model,
         "refiner_ai_engine": refiner_ai_engine,
+        "whisper_mode": whisper_mode,
         "groq_key": groq_key,
         "openrouter_key": openrouter_key,
         "felo_key": felo_key,
@@ -187,6 +206,8 @@ def parse_keys_from_text(raw_text: str) -> List[str]:
 def save_app_settings(
     gemini_keys_text: Optional[str] = None,
     gemini_model: Optional[str] = None,
+    gemini_web_model: Optional[str] = None,
+    gemini_web_fallback: Optional[bool] = None,
     groq_key: Optional[str] = None,
     openrouter_key: Optional[str] = None,
     felo_key: Optional[str] = None,
@@ -194,6 +215,7 @@ def save_app_settings(
     director_engine: Optional[str] = None,
     director_local_model: Optional[str] = None,
     refiner_ai_engine: Optional[str] = None,
+    whisper_mode: Optional[str] = None,
     env_file_path: Optional[Path] = None,
 ) -> Tuple[bool, str]:
     """
@@ -217,6 +239,16 @@ def save_app_settings(
             os.environ["GEMINI_MODEL"] = clean_model
             keys_to_update["GEMINI_MODEL"] = clean_model
 
+        if gemini_web_model is not None:
+            clean_gw_model = gemini_web_model.strip() or "4 Argon"
+            os.environ["GEMINI_WEB_PRIMARY_MODEL"] = clean_gw_model
+            keys_to_update["GEMINI_WEB_PRIMARY_MODEL"] = clean_gw_model
+
+        if gemini_web_fallback is not None:
+            gw_fb_val = "true" if gemini_web_fallback else "false"
+            os.environ["GEMINI_WEB_AUTO_FALLBACK"] = gw_fb_val
+            keys_to_update["GEMINI_WEB_AUTO_FALLBACK"] = gw_fb_val
+
         if director_engine is not None:
             clean_engine = director_engine.strip().lower() or "gemini"
             os.environ["DIRECTOR_ENGINE"] = clean_engine
@@ -231,6 +263,11 @@ def save_app_settings(
             clean_ref_engine = refiner_ai_engine.strip().lower() or "auto"
             os.environ["REFINER_AI_ENGINE"] = clean_ref_engine
             keys_to_update["REFINER_AI_ENGINE"] = clean_ref_engine
+
+        if whisper_mode is not None:
+            clean_w_mode = whisper_mode.strip().lower() or "auto"
+            os.environ["WHISPER_MODE"] = clean_w_mode
+            keys_to_update["WHISPER_MODE"] = clean_w_mode
 
         if groq_key is not None:
             clean_groq = groq_key.strip().strip('"\'').splitlines()[0].strip() if groq_key.strip() else ""

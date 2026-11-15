@@ -20,6 +20,12 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+try:
+    from metadata_enricher import clean_media_query
+except ImportError:
+    def clean_media_query(query: str) -> str:
+        return re.sub(r'[^a-zA-Z0-9_\-]', '_', str(query or "")).strip('_')
+
 
 def _get_gemini_keys() -> List[str]:
     """Retrieve, deduplicate and prioritize Gemini API keys from .env."""
@@ -215,95 +221,58 @@ def extract_audio(video_path: str, ffmpeg_bin: str = "ffmpeg") -> str:
     return tmp_audio_path
 
 
-def transcribe_audio_groq(audio_path: str, groq_key: str, on_log: Optional[Callable[[str], None]] = None) -> str:
-    """Transcribe audio using Groq Whisper API (whisper-large-v3). Super fast (1-3s)."""
-    if on_log:
-        on_log("[WHISPER] Transcrevendo áudio com Whisper Large v3 (Groq)...")
-
-    url = "https://api.groq.com/openai/v1/audio/transcriptions"
-    headers = {"Authorization": f"Bearer {groq_key}"}
-
-    file_size_mb = os.path.getsize(audio_path) / (1024 * 1024)
-    # Groq max file size is 25MB. 64k mp3 is ~0.48MB per minute (20 min = ~9.6MB).
-    if file_size_mb > 24:
-        raise ValueError(f"Áudio ({file_size_mb:.1f}MB) excede o limite de 25MB para o Groq.")
-
-    with open(audio_path, "rb") as f:
-        files = {"file": (os.path.basename(audio_path), f, "audio/mpeg")}
-        data = {
-            "model": "whisper-large-v3-turbo",
-            "response_format": "verbose_json",
-            "temperature": "0.0",
-        }
-        resp = requests.post(url, headers=headers, files=files, data=data, timeout=120)
-
-    if resp.status_code != 200:
-        raise RuntimeError(f"Erro no Groq Whisper ({resp.status_code}): {resp.text[:200]}")
-
-    result = resp.json()
-    segments = result.get("segments", [])
-    if not segments:
-        return result.get("text", "")
-
+def _format_whisper_segments(segments: list, fallback_text: str = "") -> str:
     lines = []
     for s in segments:
         start_str = _seconds_to_time_str(s.get("start", 0))
         end_str = _seconds_to_time_str(s.get("end", 0))
-        text = s.get("text", "").strip()
+        text = str(s.get("text", "")).strip()
         if text:
             lines.append(f"[{start_str} -> {end_str}] {text}")
+    return "\n".join(lines) if lines else fallback_text
 
-    return "\n".join(lines)
+
+def transcribe_audio_groq(audio_path: str, groq_key: str, on_log: Optional[Callable[[str], None]] = None) -> str:
+    """Transcribe audio using Groq Whisper API via whisper_hub (with retry)."""
+    from whisper_hub import transcribe_groq_whisper
+    if on_log:
+        on_log("[WHISPER] Transcrevendo áudio com Whisper Large v3 (Groq)...")
+    res = transcribe_groq_whisper(
+        audio_path=audio_path,
+        groq_key=groq_key,
+        model_name="whisper-large-v3-turbo",
+        timeout=120,
+        max_retries=2,
+        on_log=on_log,
+    )
+    if not res:
+        raise RuntimeError("Groq Whisper não retornou transcrição válida.")
+    return _format_whisper_segments(res.get("segments", []), res.get("full_text", ""))
 
 
 def transcribe_audio_local(audio_path: str, on_log: Optional[Callable[[str], None]] = None) -> str:
-    """Fallback local transcription with faster-whisper (CTranslate2, works without PyTorch)."""
-    if on_log:
-        on_log("[WHISPER] Transcrevendo com faster-whisper local (GPU/CPU)...")
-
-    from faster_whisper import WhisperModel
-
-    device = "cpu"
-    compute_type = "int8"
-    try:
-        import ctranslate2
-        if ctranslate2.get_cuda_device_count() > 0:
-            device = "cuda"
-            compute_type = "float16"
-    except Exception:
-        pass
-
-    model = WhisperModel("base", device=device, compute_type=compute_type)
-    segments, _ = model.transcribe(audio_path, beam_size=2)
-
-    lines = []
-    for s in segments:
-        start_str = _seconds_to_time_str(s.start)
-        end_str = _seconds_to_time_str(s.end)
-        text = s.text.strip()
-        if text:
-            lines.append(f"[{start_str} -> {end_str}] {text}")
-
-    return "\n".join(lines)
+    """Local transcription with faster-whisper large-v3 on CUDA GPU (or CPU fallback) via whisper_hub."""
+    from whisper_hub import transcribe_local_whisper
+    res = transcribe_local_whisper(
+        audio_path=audio_path,
+        model_name="large-v3",
+        on_log=on_log,
+    )
+    return _format_whisper_segments(res.get("segments", []), res.get("full_text", ""))
 
 
 def transcribe_video_audio(audio_path: str, on_log: Optional[Callable[[str], None]] = None) -> str:
-    """Smart transcriber: Groq Whisper API first, falls back to faster-whisper."""
-    groq_key = _get_api_key("GROQ_API_KEY")
-    if groq_key and groq_key.startswith("gsk_"):
-        try:
-            return transcribe_audio_groq(audio_path, groq_key, on_log)
-        except Exception as e:
-            if on_log:
-                on_log(f"[AVISO] Groq Whisper falhou ({e}). Tentando transcrição local...")
-
-    # Fallback local
-    try:
-        return transcribe_audio_local(audio_path, on_log)
-    except Exception as e:
-        if on_log:
-            on_log(f"[AVISO] faster-whisper local falhou: {e}")
-        return ""
+    """Smart transcriber: respects WHISPER_MODE (auto: Groq -> GPU local large-v3, or 100% GPU local)."""
+    from whisper_hub import transcribe_audio_smart
+    res = transcribe_audio_smart(
+        media_path=audio_path,
+        groq_model="whisper-large-v3-turbo",
+        local_model="large-v3",
+        use_cache=False,
+        require_word_timestamps=False,
+        on_log=on_log,
+    )
+    return _format_whisper_segments(res.get("segments", []), res.get("full_text", ""))
 
 
 def _safe_log(logger: Optional[Callable[[str], None]], msg: str) -> None:
@@ -504,26 +473,39 @@ def call_ai_text(
         qwen_res = _call_openrouter_custom(prompt, qwen_models, "Qwen-Max", logger=_logger, max_tokens=qwen_tokens, temperature=req_temp)
         if qwen_res:
             return qwen_res
+        _safe_log(_logger, "🛑 [MOTOR RESTRITO] Motor 'Qwen-Max' falhou. Parando conforme preferência (API oficial não acionada).")
+        return ""
 
     elif engine == "kimi":
         kimi_models = ["moonshotai/kimi-k3", "moonshotai/kimi-latest", "moonshotai/kimi-k2.6", "moonshotai/kimi-k2.5"]
-        # Limita max_tokens em 2500 para evitar que o OpenRouter exija saldo prévio para 131k tokens
         kimi_tokens = min(gem_max, 2500)
         kimi_res = _call_openrouter_custom(prompt, kimi_models, "Kimi", logger=_logger, max_tokens=kimi_tokens, temperature=req_temp)
         if kimi_res:
             return kimi_res
+        _safe_log(_logger, "🛑 [MOTOR RESTRITO] Motor 'Kimi' falhou. Parando conforme preferência (API oficial não acionada).")
+        return ""
 
     elif engine in ("gemini_web", "web", "gemini_navegador", "navegador"):
         try:
             from gemini_web_automator import ask_gemini_web
-            web_res = ask_gemini_web(prompt, timeout=180, on_log=_logger, headless=True)
+            s_key = str(kwargs.get("session_key") or kwargs.get("context") or "director_global").strip()
+            web_res = ask_gemini_web(
+                prompt,
+                timeout=240,
+                on_log=_logger,
+                headless=True,
+                session_key=s_key,
+            )
             if web_res:
+                _ai_call_state.last = {"provider": "gemini_web", "model": "Gemini Web"}
                 return web_res
-            _safe_log(_logger, "⚠️ [GEMINI WEB] Nenhuma resposta obtida. Certifique-se de que sua conta Google está conectada.")
-            return ""
+            _safe_log(_logger, "⚠️ [GEMINI WEB] Resposta vazia ou tempo limite atingido no navegador.")
         except Exception as e:
             _safe_log(_logger, f"❌ [GEMINI WEB] Erro na automação: {e}")
-            return ""
+
+        # O usuário definiu explicitamente: se falhar o modo escolhido, parar e NUNCA pular para a API oficial!
+        _safe_log(_logger, "🛑 [MOTOR RESTRITO] O motor 'Gemini Web' não retornou dados. Parando conforme preferência (API oficial bloqueada).")
+        return ""
 
     # 1. TIER 1: GEMINI WITH STATEFUL ROUND-ROBIN & COOLDOWN
     if gemini_keys:
@@ -1268,56 +1250,92 @@ def _parse_ai_candidates_json(raw_response: str, on_log: Optional[Callable[[str]
     2. Dict with 'candidates': {"candidates": [...]}
     3. Dict with any list: {"cortes": [...]} or {"items": [...]}
     4. Markdown code blocks (```json ... ```)
-    5. Regex extraction for list [...] or dict {...}
+    5. Conversational wrappers ("Aqui estão os cortes...", etc.)
+    6. Trailing commas (LLM syntax artifacts)
     """
     if not raw_response or not isinstance(raw_response, str):
         return []
 
+    def _sanitize(s: str) -> str:
+        # Remove comentários de linha //
+        s = re.sub(r'//[^\n]*', '', s)
+        # Remove vírgulas sobressalentes antes de fechamento de chave ou colchete
+        s = re.sub(r',\s*([\]}])', r'\1', s)
+        return s.strip()
+
     clean = raw_response.strip()
     if "```json" in clean:
-        clean = clean.split("```json")[1].split("```")[0].strip()
+        clean = clean.split("```json", 1)[1].split("```", 1)[0].strip()
     elif "```" in clean:
-        clean = clean.split("```")[1].split("```")[0].strip()
+        clean = clean.split("```", 1)[1].split("```", 1)[0].strip()
 
+    # Tentativa 1: Parse direto do bloco limpo
     try:
-        data = json.loads(clean)
+        data = json.loads(_sanitize(clean))
         if isinstance(data, list):
-            return [x for x in data if isinstance(x, dict)]
+            res = [x for x in data if isinstance(x, dict)]
+            if res:
+                return res
         if isinstance(data, dict):
             if "candidates" in data and isinstance(data["candidates"], list):
-                return [x for x in data["candidates"] if isinstance(x, dict)]
+                res = [x for x in data["candidates"] if isinstance(x, dict)]
+                if res:
+                    return res
             for v in data.values():
                 if isinstance(v, list) and v and isinstance(v[0], dict):
                     return v
-            return []
-    except Exception as e:
-        if on_log:
-            on_log(f"[AVISO] Tentando extração avançada de candidatos JSON ({e})...")
+    except Exception:
+        pass
 
-    # Fallback 1: Direct JSON list [...]
-    match_list = re.search(r'\[\s*\{.*\}\s*\]', raw_response, re.DOTALL)
-    if match_list:
+    # Tentativa 2: Extrair substring do primeiro '[' ao último ']'
+    first_b = raw_response.find("[")
+    last_b = raw_response.rfind("]")
+    if first_b != -1 and last_b != -1 and last_b > first_b:
+        sub_list = raw_response[first_b:last_b + 1]
         try:
-            data = json.loads(match_list.group(0))
+            data = json.loads(_sanitize(sub_list))
             if isinstance(data, list):
-                return [x for x in data if isinstance(x, dict)]
+                res = [x for x in data if isinstance(x, dict)]
+                if res:
+                    return res
         except Exception:
             pass
 
-    # Fallback 2: JSON object {...}
-    match_dict = re.search(r'\{.*\}', raw_response, re.DOTALL)
-    if match_dict:
+    # Tentativa 3: Extrair substring do primeiro '{' ao último '}'
+    first_c = raw_response.find("{")
+    last_c = raw_response.rfind("}")
+    if first_c != -1 and last_c != -1 and last_c > first_c:
+        sub_dict = raw_response[first_c:last_c + 1]
         try:
-            data = json.loads(match_dict.group(0))
+            data = json.loads(_sanitize(sub_dict))
             if isinstance(data, dict):
                 if "candidates" in data and isinstance(data["candidates"], list):
-                    return [x for x in data["candidates"] if isinstance(x, dict)]
+                    res = [x for x in data["candidates"] if isinstance(x, dict)]
+                    if res:
+                        return res
                 for v in data.values():
                     if isinstance(v, list) and v and isinstance(v[0], dict):
                         return v
         except Exception:
             pass
 
+    # Tentativa 4: Extração individual de objetos de corte {"id": ...}
+    found_cands = []
+    obj_pattern = re.compile(r'\{[^{}]*?"id"[^{}]*?"title"[^{}]*?\}', re.DOTALL)
+    for m in obj_pattern.finditer(raw_response):
+        try:
+            obj = json.loads(_sanitize(m.group(0)))
+            if isinstance(obj, dict) and obj.get("title"):
+                found_cands.append(obj)
+        except Exception:
+            pass
+    if found_cands:
+        if on_log:
+            on_log(f"✓ {len(found_cands)} cortes recuperados via extração granular de emergência.")
+        return found_cands
+
+    if on_log:
+        on_log("⚠️ Nenhum candidato JSON válido pôde ser extraído da resposta do modelo.")
     return []
 
 
@@ -1634,10 +1652,17 @@ def analyze_episode(
         genre=content_type
     )
 
-    raw_response = call_ai_text(prompt, on_log=_log, max_tokens=8192, engine=engine, local_model=local_model)
+    s_key = f"director_{clean_media_query(context or os.path.basename(video_path))}"
+    raw_response = call_ai_text(prompt, on_log=_log, max_tokens=8192, engine=engine, local_model=local_model, session_key=s_key)
 
     _prog(90, "Formatando candidatos...")
     candidates = _parse_ai_candidates_json(raw_response, on_log=_log)
+
+    # Se Gemini Web retornou 0 candidatos, respeita a escolha do usuário e não chama a API oficial
+    if not candidates and engine in ("gemini_web", "web", "gemini_navegador"):
+        _log("⚠️ [DIRETOR IA] 0 cortes identificados pelo Gemini Web. Processo interrompido (API oficial não acionada conforme escolha de motor).")
+        return [], transcript, lore
+
     _log_director_sample(prompt, raw_response, candidates, {
         "call": "analyze", "mode": mode, "cut_mode": cut_mode, "genre": content_type,
         "video_duration": video_duration, "temperature": 0.3,
@@ -1759,10 +1784,16 @@ def analyze_episode_reroll(
     )
 
     _prog(60, "IA buscando novos trechos alternativos (temperatura dinâmica 0.8)...")
-    raw_response = call_ai_text(prompt, on_log=_log, max_tokens=8192, temperature=0.8, engine=engine, local_model=local_model)
+    s_key = f"director_{clean_media_query(context or os.path.basename(video_path))}"
+    raw_response = call_ai_text(prompt, on_log=_log, max_tokens=8192, temperature=0.8, engine=engine, local_model=local_model, session_key=s_key)
 
     _prog(85, "Formatando e filtrando novos candidatos contra repetições...")
     candidates = _parse_ai_candidates_json(raw_response, on_log=_log)
+
+    if not candidates and engine in ("gemini_web", "web", "gemini_navegador"):
+        _log("⚠️ [DIRETOR IA REROLL] 0 cortes identificados pelo Gemini Web. Processo interrompido (API oficial não acionada conforme escolha de motor).")
+        return []
+
     sample_params = {
         "call": "reroll", "mode": mode, "cut_mode": cut_mode, "genre": content_type,
         "video_duration": video_duration, "temperature": 0.8,

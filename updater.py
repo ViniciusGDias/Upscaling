@@ -213,6 +213,8 @@ def download_update_asset(
             except Exception:
                 pass
         os.replace(tmp_path, dest_path)
+        # Desbloqueia no Windows para que o SmartScreen não trate como download bloqueado
+        _unblock_file_windows(dest_path)
         return True, dest_path
     except Exception as e:
         if os.path.exists(tmp_path):
@@ -221,6 +223,42 @@ def download_update_asset(
             except Exception:
                 pass
         return False, str(e)
+
+
+def _unblock_file_windows(file_path: str):
+    """Remove alternate data stream Zone.Identifier and unblock file in Windows."""
+    if os.name != "nt":
+        return
+    try:
+        zone_stream = Path(f"{file_path}:Zone.Identifier")
+        if zone_stream.exists():
+            zone_stream.unlink()
+    except Exception:
+        pass
+
+    try:
+        subprocess.run(
+            ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", f"Unblock-File -LiteralPath '{file_path}' 2>$null"],
+            capture_output=True,
+            timeout=5
+        )
+    except Exception:
+        pass
+
+
+def open_folder_and_select_file(file_path: str):
+    """Open Windows Explorer with file selected."""
+    try:
+        p = Path(file_path).resolve()
+        if os.name == "nt":
+            if p.exists():
+                subprocess.Popen(["explorer.exe", f"/select,{str(p)}"])
+            else:
+                subprocess.Popen(["explorer.exe", str(p.parent)])
+        else:
+            webbrowser.open(str(p.parent))
+    except Exception:
+        pass
 
 
 def apply_update_and_restart(update_file_path: str) -> Tuple[bool, str]:
@@ -232,6 +270,9 @@ def apply_update_and_restart(update_file_path: str) -> Tuple[bool, str]:
     if not p.exists():
         return False, "Arquivo de atualização não encontrado."
 
+    # Desbloqueia preventivamente no Windows
+    _unblock_file_windows(str(p))
+
     ext = p.suffix.lower()
     app_dir = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
 
@@ -242,15 +283,30 @@ def apply_update_and_restart(update_file_path: str) -> Tuple[bool, str]:
         # Instalador Executável (Setup do Urahara)
         bat_content = f"""@echo off
 chcp 65001 >nul
-title Urahara Studio - Atualizando...
+title Urahara Studio - Instalador de Atualizacao
+cls
 echo ========================================================
-echo       URAHARA STUDIO - ATUALIZACAO AUTOMATICA
+echo       URAHARA STUDIO - INSTALANDO ATUALIZACAO
 echo ========================================================
-echo Aguardando encerramento do processo anterior...
-timeout /t 2 /nobreak >nul
+echo.
+echo [1/3] Fechando versoes anteriores do Urahara...
+taskkill /F /IM Urahara.exe >nul 2>&1
+ping 127.0.0.1 -n 2 >nul
 
-echo Iniciando instalacao da nova versao...
+echo [2/3] Liberando permissoes no Windows Defender...
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Unblock-File -LiteralPath '{update_file_path}' 2>$null" >nul 2>&1
+
+echo [3/3] Iniciando o Instalador Oficial...
+echo.
+echo ========================================================
+echo  AVISO DO WINDOWS (SMARTSCREEN):
+echo  Se o Windows exibir a tela azul "O Windows protegeu o seu computador":
+echo  1. Clique no link "Mais informacoes"
+echo  2. Em seguida, clique no botao "Executar assim mesmo"
+echo ========================================================
+echo.
 start "" "{update_file_path}"
+ping 127.0.0.1 -n 3 >nul
 exit
 """
     elif ext == ".zip":
@@ -262,10 +318,11 @@ title Urahara Studio - Atualizando...
 echo ========================================================
 echo       URAHARA STUDIO - ATUALIZACAO AUTOMATICA
 echo ========================================================
-echo Aguardando encerramento do processo anterior...
-timeout /t 2 /nobreak >nul
+echo [1/2] Aguardando encerramento do processo anterior...
+taskkill /F /IM Urahara.exe >nul 2>&1
+ping 127.0.0.1 -n 2 >nul
 
-echo Extraindo arquivos atualizados para: {app_dir}...
+echo [2/2] Extraindo arquivos atualizados para: {app_dir}...
 powershell -NoProfile -ExecutionPolicy Bypass -Command "Expand-Archive -Path '{update_file_path}' -DestinationPath '{app_dir}' -Force"
 
 if exist "{exe_target}" (
@@ -285,15 +342,20 @@ exit
         with open(bat_path, "w", encoding="utf-8") as f:
             f.write(bat_content)
 
-        creationflags = 0
-        if os.name == "nt":
-            creationflags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
-
+        creationflags = subprocess.CREATE_NEW_CONSOLE if os.name == "nt" else 0
         subprocess.Popen(["cmd.exe", "/c", str(bat_path)], creationflags=creationflags, close_fds=True)
-        time.sleep(0.5)
+        time.sleep(0.8)
         os._exit(0)
         return True, "Atualização disparada com sucesso."
     except Exception as e:
+        # Fallback de inicialização direta pelo shell do Windows
+        try:
+            if os.name == "nt" and ext == ".exe":
+                os.startfile(str(p))
+                time.sleep(1.0)
+                os._exit(0)
+        except Exception:
+            pass
         return False, f"Erro ao disparar atualizador: {e}"
 
 

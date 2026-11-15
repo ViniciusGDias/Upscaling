@@ -2,7 +2,7 @@
 ; Generates a professional single-file Setup.exe with instant-launch installed files
 
 #define MyAppName "Urahara"
-#define MyAppVersion "1.2.1"
+#define MyAppVersion "1.2.3"
 #define MyAppPublisher "Vinicius Dias"
 #define MyAppURL "https://github.com/ViniciusGDias/Upscaling"
 #define MyAppExeName "Urahara.exe"
@@ -20,10 +20,19 @@ DisableProgramGroupPage=yes
 OutputDir=setup_output
 OutputBaseFilename=Urahara_Setup_v{#MyAppVersion}
 SetupIconFile=app_icon.ico
-Compression=lzma2/ultra64
+Compression=lzma2/normal
 SolidCompression=yes
 WizardStyle=modern
 PrivilegesRequired=lowest
+CloseApplications=yes
+RestartApplications=no
+CloseApplicationsFilter=*.exe
+UninstallDisplayIcon={app}\app_icon.ico
+VersionInfoVersion={#MyAppVersion}
+VersionInfoCompany=Vinicius Dias
+VersionInfoDescription=Urahara Studio
+VersionInfoProductName=Urahara Studio
+VersionInfoProductVersion={#MyAppVersion}
 
 [Languages]
 Name: "brazilianportuguese"; MessagesFile: "compiler:Languages\BrazilianPortuguese.isl"

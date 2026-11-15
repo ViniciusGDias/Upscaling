@@ -12,6 +12,7 @@ import re
 import tempfile
 import subprocess
 import shutil
+from typing import Optional, Union, List, Dict, Any, Tuple
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -345,204 +346,72 @@ def _extract_chunk_bounds(chunk: dict):
 def detect_speech_segments(video_path: str, on_progress=None, on_log=None, ai_engine="auto"):
     """
     Extracts 16kHz mono audio and transcribes it to get word-level / segment-level timestamps.
-    Tries Groq Whisper API first (if key configured and not in local-only mode), then falls back to local faster_whisper.
+    Uses whisper_hub (Groq otimizado + fallback automático/100% GPU local faster-whisper large-v3).
     Returns: (all_words, full_text, duration)
     """
-    ffmpeg_bin = _get_ffmpeg_bin("ffmpeg")
-    real_duration = get_video_duration(video_path)
+    from whisper_hub import transcribe_audio_smart, get_media_duration_seconds
 
-    # Verifica se já temos a transcrição do vídeo em cache persistente de 24h
-    try:
-        from ai_cache_hub import ai_cache
-        cached_trans = ai_cache.get(str(video_path), "transcription")
-        if cached_trans and isinstance(cached_trans, dict):
-            words = cached_trans.get("words", [])
-            text = cached_trans.get("full_text", "")
-            dur = cached_trans.get("duration", real_duration)
-            # Validação de qualidade: se o cache contiver frases inteiras em vez de palavras individuais,
-            # consideramos obsoleto para obter a precisão milimétrica por palavra
-            is_stale_coarse = False
-            if words and len(words) <= 12:
-                multi_word = sum(1 for w in words if len(str(w.get("text", "")).strip().split()) >= 3)
-                if multi_word >= 2:
-                    is_stale_coarse = True
+    chosen_engine = (ai_engine or os.getenv("REFINER_AI_ENGINE", "auto")).strip().lower()
+    mode_override = "local_gpu" if chosen_engine == "ollama_local" else None
 
-            if words and not is_stale_coarse:
-                if on_log:
-                    on_log(f"[CACHE 24H] Transcrição Whisper recuperada instantaneamente ({len(words)} palavras, 0 tokens gastos)!")
-                if on_progress:
-                    on_progress(0.40, f"Transcrição carregada do Cache de IA: {len(words)} palavras.")
-                return words, text, dur
-            elif is_stale_coarse and on_log:
-                on_log("[WHISPER] Cache anterior continha apenas blocos agregados. Refazendo transcrição com precisão milimétrica por palavra...")
-    except Exception:
-        pass
+    res = transcribe_audio_smart(
+        media_path=str(video_path),
+        mode=mode_override,
+        language=None,
+        groq_model="whisper-large-v3",
+        local_model="large-v3",
+        use_cache=True,
+        cache_key_path=str(video_path),
+        require_word_timestamps=True,
+        on_log=on_log,
+        on_progress=on_progress,
+    )
 
-    if on_log:
-        on_log(f"[ÁUDIO] Extraindo áudio de alta precisão (16kHz mono)... [Duração: {real_duration:.1f}s]")
-    if on_progress:
-        on_progress(0.10, "Extraindo áudio do vídeo...")
+    words = res.get("words") or []
+    full_text = res.get("full_text") or ""
+    duration = float(res.get("duration") or 0.0)
+    if duration <= 0.0:
+        duration = get_media_duration_seconds(str(video_path))
+    return words, full_text, duration
 
-    temp_wav = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
-    temp_wav_path = temp_wav.name
-    temp_wav.close()
 
-    try:
-        cmd_audio = [
-            ffmpeg_bin, "-y", "-i", str(video_path),
-            "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le",
-            temp_wav_path
+
+def _read_audio_window_mono(audio_path_or_video: str, start_sec: float, dur_sec: float, ffmpeg_bin: str = "ffmpeg"):
+    """Reads a short mono 16kHz float32/float64 audio window from WAV or video file via soundfile/ffmpeg."""
+    if not audio_path_or_video or not os.path.exists(str(audio_path_or_video)) or dur_sec <= 0.05:
+        return None, 16000
+
+    is_wav = str(audio_path_or_video).lower().endswith(".wav")
+    sr = 16000
+    audio = None
+    if is_wav:
+        import soundfile as sf
+        with sf.SoundFile(str(audio_path_or_video)) as f:
+            sr = f.samplerate
+            start_frame = max(0, int(start_sec * sr))
+            frames_to_read = min(int(dur_sec * sr), max(0, len(f) - start_frame))
+            if frames_to_read > 0:
+                f.seek(start_frame)
+                audio = f.read(frames_to_read)
+                if len(audio.shape) > 1:
+                    import numpy as np
+                    audio = np.mean(audio, axis=1)
+    else:
+        cmd = [
+            ffmpeg_bin, "-y",
+            "-ss", f"{max(0.0, start_sec):.3f}",
+            "-i", str(audio_path_or_video),
+            "-t", f"{dur_sec:.3f}",
+            "-vn", "-ar", "16000", "-ac", "1",
+            "-f", "wav", "pipe:1"
         ]
-        subprocess.run(cmd_audio, capture_output=True, timeout=120, **_get_silent_subprocess_kwargs())
-
-        chosen_engine = (ai_engine or os.getenv("REFINER_AI_ENGINE", "auto")).strip().lower()
-
-        # 1. Try Groq Whisper API (whisper-large-v3) se não estiver forçado em 100% IA Local
-        groq_raw = os.getenv("GROQ_API_KEY", "").strip() if chosen_engine != "ollama_local" else ""
-        groq_key = groq_raw.splitlines()[0].strip().strip('"\'') if groq_raw else ""
-        if groq_key and groq_key.startswith("gsk_") and os.path.exists(temp_wav_path):
-            try:
-                import requests
-                file_size_mb = os.path.getsize(temp_wav_path) / (1024 * 1024)
-                if file_size_mb <= 24:
-                    if on_log:
-                        on_log("[WHISPER] Transcrevendo áudio com Whisper Large v3 (Groq Nuvem - Precisão por Palavra)...")
-                    if on_progress:
-                        on_progress(0.20, "Transcrevendo falas via Groq Whisper Large v3...")
-                    url = "https://api.groq.com/openai/v1/audio/transcriptions"
-                    headers = {"Authorization": f"Bearer {groq_key}"}
-                    with open(temp_wav_path, "rb") as f:
-                        files = {"file": (os.path.basename(temp_wav_path), f, "audio/wav")}
-                        data = [
-                            ("model", "whisper-large-v3"),
-                            ("response_format", "verbose_json"),
-                            ("temperature", "0.0"),
-                            ("timestamp_granularities[]", "word"),
-                            ("timestamp_granularities[]", "segment"),
-                        ]
-                        resp = requests.post(url, headers=headers, files=files, data=data, timeout=90)
-                    if resp.status_code == 200:
-                        res_json = resp.json()
-                        all_words = []
-                        raw_words = res_json.get("words", [])
-                        raw_segments = res_json.get("segments", [])
-                        if raw_words:
-                            for w in raw_words:
-                                s = _parse_time_seconds(w.get("start"))
-                                e = _parse_time_seconds(w.get("end"))
-                                wd = str(w.get("word", "")).strip()
-                                if s is not None and e is not None and wd:
-                                    all_words.append({"start": round(s, 3), "end": round(e, 3), "text": wd})
-                        elif raw_segments:
-                            for seg in raw_segments:
-                                s = _parse_time_seconds(seg.get("start"))
-                                e = _parse_time_seconds(seg.get("end"))
-                                txt = str(seg.get("text", "")).strip()
-                                if s is not None and e is not None and txt:
-                                    all_words.append({"start": round(s, 3), "end": round(e, 3), "text": txt})
-                        full_text = res_json.get("text", "").strip()
-                        duration = real_duration
-                        if all_words and on_log:
-                            on_log(f"[OK] Groq Whisper concluiu: {len(all_words)} palavras mapeadas com precisão milimétrica!")
-                        if all_words:
-                            try:
-                                from ai_cache_hub import ai_cache
-                                ai_cache.set(str(video_path), "transcription", {
-                                    "words": all_words,
-                                    "full_text": full_text,
-                                    "duration": duration
-                                })
-                            except Exception:
-                                pass
-                            return all_words, full_text, duration
-            except Exception as e_groq:
-                if on_log:
-                    on_log(f"[AVISO] Groq Whisper indisponível ({e_groq}). Tentando Whisper local...")
-
-        # 2. Try local Faster-Whisper
-        if on_log:
-            on_log("[WHISPER] Analisando falas com Faster-Whisper local...")
-        if on_progress:
-            on_progress(0.25, "Transcrevendo falas e diálogos com Whisper local...")
-
-        try:
-            from faster_whisper import WhisperModel
-            device = "cpu"
-            compute_type = "int8"
-            try:
-                import ctranslate2
-                if ctranslate2.get_cuda_device_count() > 0:
-                    device = "cuda"
-                    compute_type = "float16"
-            except Exception:
-                pass
-
-            if on_log:
-                on_log(f"   Modelo Whisper: base | Dispositivo: {device.upper()} ({compute_type})")
-
-            try:
-                model = WhisperModel("base", device=device, compute_type=compute_type)
-            except Exception:
-                model = WhisperModel("base", device="cpu", compute_type="int8")
-
-            segments_iter, info = model.transcribe(temp_wav_path, beam_size=5, word_timestamps=True)
-
-            all_words = []
-            full_text_parts = []
-
-            for seg in list(segments_iter):
-                if seg.words:
-                    for w in seg.words:
-                        all_words.append({
-                            "start": round(w.start, 3),
-                            "end": round(w.end, 3),
-                            "text": w.word.strip()
-                        })
-                else:
-                    all_words.append({
-                        "start": round(seg.start, 3),
-                        "end": round(seg.end, 3),
-                        "text": seg.text.strip()
-                    })
-                full_text_parts.append(seg.text.strip())
-
-            duration = info.duration if info else real_duration
-            if duration <= 0.0:
-                duration = real_duration
-
-            if on_log:
-                on_log(f"[OK] Whisper local concluiu: {len(all_words)} palavras mapeadas em {duration:.1f}s.")
-            if on_progress:
-                on_progress(0.40, f"Transcrição concluída: {len(all_words)} palavras mapeadas.")
-
-            try:
-                from ai_cache_hub import ai_cache
-                ai_cache.set(str(video_path), "transcription", {
-                    "words": all_words,
-                    "full_text": " ".join(full_text_parts),
-                    "duration": duration
-                })
-            except Exception:
-                pass
-
-            return all_words, " ".join(full_text_parts), duration
-
-        except Exception as err_local:
-            if on_log:
-                on_log(f"[AVISO] Whisper local não disponível: {err_local}. Prosseguindo com análise estrutural e fatiamento inteligente...")
-            return [], "", real_duration
-
-    except Exception as err:
-        if on_log:
-            on_log(f"[AVISO] Erro na extração de áudio: {err}")
-        return [], "", real_duration
-    finally:
-        if os.path.exists(temp_wav_path):
-            try:
-                os.remove(temp_wav_path)
-            except Exception:
-                pass
-
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, **_get_silent_subprocess_kwargs())
+        wav_bytes, _ = proc.communicate(timeout=15)
+        if proc.returncode == 0 and wav_bytes:
+            import io
+            import soundfile as sf
+            audio, sr = sf.read(io.BytesIO(wav_bytes))
+    return audio, sr
 
 
 def align_opening_segment_to_acoustic_speech(
@@ -564,38 +433,8 @@ def align_opening_segment_to_acoustic_speech(
     seg_end = float(opening_segment.get("end", seg_start + 5.0))
     search_dur = min(8.0, max(1.5, seg_end - seg_start))
 
-    is_wav = str(audio_path_or_video).lower().endswith(".wav")
-    audio = None
-    sr = 16000
-
     try:
-        if is_wav:
-            import soundfile as sf
-            with sf.SoundFile(str(audio_path_or_video)) as f:
-                sr = f.samplerate
-                start_frame = max(0, int(seg_start * sr))
-                frames_to_read = min(int(search_dur * sr), max(0, len(f) - start_frame))
-                if frames_to_read > 0:
-                    f.seek(start_frame)
-                    audio = f.read(frames_to_read)
-                    if len(audio.shape) > 1:
-                        import numpy as np
-                        audio = np.mean(audio, axis=1)
-        else:
-            cmd = [
-                ffmpeg_bin, "-y",
-                "-ss", f"{seg_start:.3f}",
-                "-i", str(audio_path_or_video),
-                "-t", f"{search_dur:.3f}",
-                "-vn", "-ar", "16000", "-ac", "1",
-                "-f", "wav", "pipe:1"
-            ]
-            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, **_get_silent_subprocess_kwargs())
-            wav_bytes, _ = proc.communicate(timeout=15)
-            if proc.returncode == 0 and wav_bytes:
-                import io
-                import soundfile as sf
-                audio, sr = sf.read(io.BytesIO(wav_bytes))
+        audio, sr = _read_audio_window_mono(audio_path_or_video, seg_start, search_dur, ffmpeg_bin=ffmpeg_bin)
     except Exception as e:
         if on_log:
             on_log(f"[AVISO ONSET] Falha ao verificar silêncio acústico: {e}")
@@ -643,6 +482,79 @@ def align_opening_segment_to_acoustic_speech(
             opening_segment["start"] = new_start
 
     return opening_segment
+
+
+def align_closing_segment_to_acoustic_tail(
+    closing_segment: dict,
+    audio_path_or_video: str,
+    video_duration: float,
+    ffmpeg_bin: str = "ffmpeg",
+    max_extend: float = 1.1,
+    remaining_cap_budget: Optional[float] = None,
+    on_log=None,
+) -> dict:
+    """
+    Protege reações acústicas (risada, grito, explosão, impacto) logo após a última palavra
+    para evitar corte abrupto no desfecho, respeitando video_duration e orçamento máximo (ex: 59.0s).
+    """
+    if not closing_segment or not audio_path_or_video or not os.path.exists(str(audio_path_or_video)):
+        return closing_segment
+
+    seg_end = float(closing_segment.get("end", 0.0))
+    allowed_extra = max_extend
+    if remaining_cap_budget is not None:
+        allowed_extra = min(allowed_extra, max(0.0, float(remaining_cap_budget)))
+    if video_duration > 0:
+        allowed_extra = min(allowed_extra, max(0.0, float(video_duration) - seg_end))
+
+    if allowed_extra < 0.18:
+        return closing_segment
+
+    pre_probe = 0.25
+    probe_start = max(0.0, seg_end - pre_probe)
+    probe_dur = (seg_end - probe_start) + allowed_extra
+    try:
+        audio, sr = _read_audio_window_mono(audio_path_or_video, probe_start, probe_dur, ffmpeg_bin=ffmpeg_bin)
+    except Exception:
+        return closing_segment
+
+    if audio is None or len(audio) == 0:
+        return closing_segment
+
+    import numpy as np
+    win_size = int(sr * 0.05)
+    step = int(sr * 0.02)
+    if win_size <= 0 or step <= 0 or len(audio) < win_size:
+        return closing_segment
+
+    rms_vals = []
+    offsets = []
+    for idx in range(0, len(audio) - win_size, step):
+        chunk = audio[idx : idx + win_size]
+        rms_vals.append(float(np.sqrt(np.mean(chunk**2))))
+        offsets.append(probe_start + idx / sr)
+
+    if not rms_vals:
+        return closing_segment
+
+    max_rms = max(rms_vals)
+    if max_rms < 0.012:
+        return closing_segment
+
+    thresh = max(0.014, max_rms * 0.28)
+    last_active_time = seg_end
+    for t, r in zip(offsets, rms_vals):
+        if t > seg_end and r >= thresh:
+            last_active_time = t + 0.05
+
+    if last_active_time > seg_end + 0.12:
+        new_end = round(min(seg_end + allowed_extra, last_active_time + 0.14), 3)
+        if new_end > seg_end + 0.12:
+            if on_log:
+                on_log(f"🔊 [PROTEÇÃO DE REAÇÃO FINAL] Pico sonoro/risada detectado após a fala; final estendido {seg_end:.2f}s -> {new_end:.2f}s (+{new_end - seg_end:.2f}s).")
+            closing_segment["end"] = new_end
+
+    return closing_segment
 
 
 def detect_visual_action_blocks(video_path: str, on_log=None):
@@ -1441,6 +1353,235 @@ def _get_local_model_candidates(requested_model: str = "") -> list:
     return candidates
 
 
+def _parse_timestamp_seconds(val: Any) -> Optional[float]:
+    """Converte int, float, string ('12.5', '12.5s', '01:23', '01:02:03') para float em segundos."""
+    if val is None:
+        return None
+    if isinstance(val, (int, float)):
+        return float(val)
+    s = str(val).strip().strip('"\'').lower()
+    if not s:
+        return None
+    if ":" in s:
+        try:
+            parts = [p.strip() for p in s.split(":")]
+            if len(parts) == 2:
+                return int(parts[0]) * 60 + float(parts[1])
+            elif len(parts) == 3:
+                return int(parts[0]) * 3600 + int(parts[1]) * 60 + float(parts[2])
+        except Exception:
+            pass
+    clean = re.sub(r"[^\d.]", "", s)
+    if clean:
+        try:
+            return float(clean)
+        except Exception:
+            pass
+    return None
+
+
+def _parse_mastercut_ai_json(text: str) -> Optional[Union[dict, list]]:
+    """
+    Parser JSON multi-camada ultra-resiliente para o Mastercut.
+    Sanitiza trailing commas, remove blocos markdown, limpa comentários,
+    converte aspas simples e recupera objetos granulares.
+    """
+    if not text:
+        return None
+    raw = text.strip()
+
+    # 1. Limpa blocos de código markdown
+    if "```json" in raw:
+        raw = raw.split("```json", 1)[1].split("```", 1)[0].strip()
+    elif "```" in raw:
+        raw = raw.split("```", 1)[1].split("```", 1)[0].strip()
+
+    # 2. Sanitiza comentários e trailing commas
+    def _sanitize(s: str) -> str:
+        s = re.sub(r'//.*?\n', '\n', s)
+        s = re.sub(r'/\*.*?\*/', '', s, flags=re.DOTALL)
+        s = re.sub(r',\s*([\]}])', r'\1', s)
+        return s
+
+    clean_raw = _sanitize(raw)
+
+    # Tier 1: Parse direto
+    try:
+        return json.loads(clean_raw)
+    except Exception:
+        pass
+
+    # Tier 1.5: Aspas simples convertidas
+    try:
+        single_quote_conv = re.sub(r"'([^'\\]*(?:\\.[^'\\]*)*)'", r'"\1"', clean_raw)
+        return json.loads(single_quote_conv)
+    except Exception:
+        pass
+
+    # Tier 2: Busca por objeto { ... } mais amplo
+    m_obj = re.search(r'(\{[\s\S]*\})', clean_raw)
+    if m_obj:
+        try:
+            return json.loads(m_obj.group(1))
+        except Exception:
+            try:
+                single_conv = re.sub(r"'([^'\\]*(?:\\.[^'\\]*)*)'", r'"\1"', m_obj.group(1))
+                return json.loads(single_conv)
+            except Exception:
+                pass
+
+    # Tier 3: Busca por lista [ ... ] mais ampla
+    m_arr = re.search(r'(\[[\s\S]*\])', clean_raw)
+    if m_arr:
+        try:
+            return json.loads(m_arr.group(1))
+        except Exception:
+            try:
+                single_conv = re.sub(r"'([^'\\]*(?:\\.[^'\\]*)*)'", r'"\1"', m_arr.group(1))
+                return json.loads(single_conv)
+            except Exception:
+                pass
+
+    # Tier 4: Recuperação granular por regex de objetos com start/end
+    seg_matches = re.findall(
+        r'\{[^{}]*?(?:["\'](?:start|inicio|start_time|inicio_tempo)["\'][^{}]*?["\'](?:end|fim|end_time|fim_tempo)["\']|["\'](?:end|fim|end_time|fim_tempo)["\'][^{}]*?["\'](?:start|inicio|start_time|inicio_tempo)["\'])[^{}]*?\}',
+        raw
+    )
+    if seg_matches:
+        recovered = []
+        for sm in seg_matches:
+            sanitized_sm = _sanitize(sm)
+            try:
+                item = json.loads(sanitized_sm)
+                if isinstance(item, dict):
+                    recovered.append(item)
+            except Exception:
+                try:
+                    sq = re.sub(r"'([^'\\]*(?:\\.[^'\\]*)*)'", r'"\1"', sanitized_sm)
+                    item = json.loads(sq)
+                    if isinstance(item, dict):
+                        recovered.append(item)
+                except Exception:
+                    pass
+        if recovered:
+            return {"timeline": recovered}
+
+    return None
+
+
+def _normalize_timeline_cuts(cuts_list: list) -> list:
+    """Normaliza cortes em dicts com start e end válidos em float."""
+    if not isinstance(cuts_list, list):
+        return []
+    normalized = []
+    for c in cuts_list:
+        if not isinstance(c, dict):
+            continue
+        s = c.get("start", c.get("inicio", c.get("start_time", c.get("start_seconds"))))
+        e = c.get("end", c.get("fim", c.get("end_time", c.get("end_seconds"))))
+        if s is None or e is None:
+            for r_field in ("range", "estimated_range", "time_range", "timestamps"):
+                r_val = c.get(r_field)
+                if r_val and isinstance(r_val, str) and any(sep in r_val for sep in ("->", " - ", "–", " a ")):
+                    parts = re.split(r"->| - |–| a ", r_val)
+                    if len(parts) >= 2:
+                        s = parts[0].strip()
+                        e = parts[1].strip()
+                        break
+        if s is not None and e is not None:
+            s_f = _parse_timestamp_seconds(s)
+            e_f = _parse_timestamp_seconds(e)
+            if s_f is not None and e_f is not None and e_f > s_f:
+                c_copy = dict(c)
+                c_copy["start"] = s_f
+                c_copy["end"] = e_f
+                normalized.append(c_copy)
+    return normalized
+
+
+def _extract_timeline_and_options(data: Any) -> Tuple[Optional[list], Optional[dict]]:
+    """
+    Parser universal para extrair a timeline e o roteiro, suportando tanto formato unitário
+    quanto múltiplas opções adaptativas ao tom da cena para clipes longos (>= 70s / 3-4 min).
+    """
+    if not data:
+        return None, None
+
+    raw_options = None
+    if isinstance(data, list):
+        if len(data) > 0 and isinstance(data[0], dict) and any(k in data[0] for k in ("ai_viral", "mastercut", "segments", "cortes", "cuts", "timeline", "trechos", "momentos", "titulo", "title")):
+            raw_options = data
+        else:
+            norm = _normalize_timeline_cuts(data)
+            return norm if norm else None, None
+    elif isinstance(data, dict):
+        raw_options = (
+            data.get("opcoes") or data.get("options") or data.get("variacoes") or
+            data.get("candidates") or data.get("cenas") or data.get("candidatos") or
+            data.get("cortes_alternativos")
+        )
+
+    if isinstance(raw_options, list) and len(raw_options) > 0:
+        parsed_candidates = []
+        for idx, opt in enumerate(raw_options, 1):
+            if isinstance(opt, dict):
+                t_cand = (
+                    opt.get("ai_viral") or opt.get("mastercut") or opt.get("segments") or
+                    opt.get("cortes") or opt.get("cuts") or opt.get("timeline") or
+                    opt.get("trechos") or opt.get("momentos")
+                )
+                if t_cand is None:
+                    for k, v in opt.items():
+                        if isinstance(v, list) and len(v) > 0 and isinstance(v[0], dict):
+                            if any(key in v[0] for key in ("start", "inicio", "start_time", "inicio_tempo", "start_seconds")):
+                                t_cand = v
+                                break
+                r_cand = (
+                    opt.get("roteiro_da_cena") or opt.get("roteiro") or opt.get("storyboard") or
+                    opt.get("script") or opt.get("cena")
+                )
+                title = opt.get("titulo") or opt.get("title") or f"Opção {idx}"
+                norm_c = _normalize_timeline_cuts(t_cand) if isinstance(t_cand, list) else []
+                if norm_c:
+                    parsed_candidates.append({
+                        "title": title,
+                        "timeline": norm_c,
+                        "roteiro": r_cand if isinstance(r_cand, dict) else {}
+                    })
+        if parsed_candidates:
+            primary = parsed_candidates[0]
+            pri_timeline = primary["timeline"]
+            pri_roteiro = primary["roteiro"] if isinstance(primary["roteiro"], dict) else {}
+            pri_roteiro["candidate_options"] = parsed_candidates
+            return pri_timeline, pri_roteiro
+
+    if isinstance(data, dict):
+
+
+        # Formato unitário tradicional
+        roteiro = (
+            data.get("roteiro_da_cena") or data.get("roteiro") or data.get("storyboard") or
+            data.get("script") or data.get("cena")
+        )
+        timeline = (
+            data.get("ai_viral") or data.get("mastercut") or data.get("segments") or
+            data.get("cortes") or data.get("cuts") or data.get("timeline") or
+            data.get("trechos") or data.get("momentos")
+        )
+        if not timeline:
+            for k, v in data.items():
+                if isinstance(v, list) and len(v) > 0 and isinstance(v[0], dict):
+                    if any(key in v[0] for key in ("start", "inicio", "start_time", "inicio_tempo", "start_seconds")):
+                        timeline = v
+                        break
+
+        norm_t = _normalize_timeline_cuts(timeline) if isinstance(timeline, list) else []
+        if norm_t:
+            return norm_t, roteiro if isinstance(roteiro, dict) else None
+
+    return None, None
+
+
 def _call_ollama_local_timeline(prompt: str, on_log=None, local_model: str = "") -> tuple:
     """
     Executa a seleção de cortes do Mastercut 100% localmente via Ollama na GPU RTX 5060.
@@ -1476,38 +1617,14 @@ def _call_ollama_local_timeline(prompt: str, on_log=None, local_model: str = "")
             if resp.status_code == 200:
                 content = resp.json().get("message", {}).get("content", "")
                 if content:
-                    json_str = content
-                    if is_reasoning and "<think>" in content:
-                        import re
-                        m = re.search(r'\{.*\}', content, re.DOTALL)
-                        if m:
-                            json_str = m.group(0)
-
-                    data = json.loads(json_str)
-                    timeline = None
-                    roteiro = None
-                    if isinstance(data, list):
-                        timeline = data
-                    elif isinstance(data, dict):
-                        roteiro = (
-                            data.get("roteiro_da_cena") or
-                            data.get("roteiro") or
-                            data.get("storyboard") or
-                            data.get("script") or
-                            data.get("cena")
-                        )
-                        timeline = (
-                            data.get("ai_viral") or
-                            data.get("mastercut") or
-                            data.get("segments") or
-                            data.get("cortes") or
-                            data.get("cuts") or
-                            data.get("timeline")
-                        )
+                    data = _parse_mastercut_ai_json(content)
+                    timeline, roteiro = _extract_timeline_and_options(data)
                     if timeline and isinstance(timeline, list) and len(timeline) > 0:
                         dur_call = time.time() - t0
                         if on_log:
-                            on_log(f"✅ [100% IA LOCAL] Roteirista Ollama ({target_model}) desenhou Mastercut com {len(timeline)} cortes em {dur_call:.1f}s na RTX 5060!")
+                            opts = roteiro.get("candidate_options") if isinstance(roteiro, dict) else None
+                            opt_msg = f" com {len(opts)} opções independentes" if opts and len(opts) > 1 else ""
+                            on_log(f"✅ [100% IA LOCAL] Roteirista Ollama ({target_model}) desenhou Mastercut{opt_msg} ({len(timeline)} cortes) em {dur_call:.1f}s na RTX 5060!")
                             if roteiro and isinstance(roteiro, dict):
                                 on_log("[ROTEIRISTA IA LOCAL] Roteiro Dramático Estruturado:")
                                 if roteiro.get("premissa"):
@@ -1540,6 +1657,9 @@ def _call_ollama_local_timeline(prompt: str, on_log=None, local_model: str = "")
     return None, None
 
 
+
+
+
 def call_ai_mastercut_timeline(
     all_words,
     video_duration,
@@ -1557,6 +1677,7 @@ def call_ai_mastercut_timeline(
     is_dorama=False,
     ai_engine="auto",
     local_model="",
+    video_path="",
     on_log=None
 ):
 
@@ -1625,6 +1746,16 @@ def call_ai_mastercut_timeline(
         except Exception as e:
             if on_log:
                 on_log(f"[AVISO METADATA] Falha na busca de metadados para '{clean_work_title}': {e}")
+
+    # Fallback / Inteligência detalhada de episódio a partir do nome do arquivo
+    if not extra_meta and video_path:
+        try:
+            from metadata_enricher import build_episode_intelligence
+            ep_intel = build_episode_intelligence(os.path.basename(video_path), on_log=on_log)
+            if ep_intel:
+                extra_meta = ep_intel
+        except Exception:
+            pass
 
     ctx_parts = []
     if clean_work_title:
@@ -1732,14 +1863,15 @@ MISSÃO OBRIGATÓRIA DE CORREÇÃO:
     short_clip_directive = ""
     if target_duration_mode == "viral_59s":
         short_clip_directive = f"""
-⚡ **DIRETRIZ OBRIGATÓRIA: VIRAL FLOW 59s (VÍDEO DE ALTA RETENÇÃO DE ~50s A 58.5s - TETO RÍGIDO 59.0s)**:
-- O vídeo original tem {video_duration:.1f}s (mais de 2 minutos).
+⚡ **DIRETRIZ OBRIGATÓRIA: VIRAL FLOW 59s (VÍDEO ÚNICO CIRÚRGICO DE ~50s A 58.5s - TETO RÍGIDO 59.0s)**:
+- O vídeo original tem {video_duration:.1f}s. Concentre 100% da sua inteligência editorial em UM ÚNICO corte perfeito!
 - A SUA META DE DURAÇÃO TOTAL É ENTRE {min_dur:.1f}s E {max_dur:.1f}s (Alvo ideal: 52.0s a 58.5s)!
-- ⛔ PROIBIDO RETORNAR MENOS DE 48 SEGUNDOS! Em um vídeo de 2min a 4min há história de sobra para preencher o tempo. Retornar 20s ou 30s é uma FALHA GRAVE!
+- ⛔ PROIBIDO RETORNAR MENOS DE 45 SEGUNDOS se houver história/diálogo disponível!
 - ⛔ PROIBIDO ULTRAPASSAR 59.0 SEGUNDOS ($total <= 59.0s$).
-- 🚨 NUNCA SELECIONE CONVERSAS MORNAS DE EXPOSIÇÃO DO INÍCIO (ex: explicações teóricas, bate-papo de apresentação). Corte direto para o mistério/desafio!
-- 🚨 O CLÍMAX É O PONTO ALTO DA CENA: reserve o maior tempo para o clímax (o feito, o espanto de todos e a punchline final).
-- Selecione 3 a 4 blocos dinâmicos e concisos (10s a 22s cada) que mantenham a atenção no ápice sem blocos monótonos arrastados.
+- **ADAPTABILIDADE AO ESTILO DA CENA (SEM FÓRMULA ENGESSADA)**:
+  * **Comédia / Diálogo / Drama:** Preserve o fluxo contínuo da construção até a piada ou clímax. NÃO quebre o ritmo com saltos artificiais se a cena já funciona em bloco contínuo — corte apenas silêncios mortos ou enrolações reais fora do arco principal.
+  * **Ação / Batalha / Revelação:** Elimine exposições mornas e mantenha a sequência de ação e o clímax completos com fôlego e reações.
+  * **Zero Spoiler no Início & Contexto Claro:** Quem não viu o episódio precisa entender o que está em jogo nos primeiros segundos, sem entregar o final logo no segundo 0.
 """
     elif video_duration <= 65.0:
         short_clip_directive = f"""
@@ -1812,28 +1944,20 @@ MISSÃO OBRIGATÓRIA DE CORREÇÃO:
    - Termine no ápice da discussão, na revelação chocante ou na troca de olhares definitiva. NUNCA deixe a frase pela metade no final do clipe! O desfecho deve ter impacto absoluto."""
     elif target_duration_mode == "viral_59s" or editorial_mode == "viral_59":
         director_title = "SUPER SENIOR EDITOR CINEMÁTICO VIRAL 59s para YouTube Shorts, Reels e TikTok"
-        golden_rules = f"""⛔ REGRAS DE OURO DA ENGENHARIA VIRAL FLOW 59s (FOCO NO CLÍMAX & RITMO ANTI-TÉDIO):
-1. **ELIMINE A EXPOSIÇÃO MORNA DO INÍCIO (ZERO ENROLAÇÃO)**:
-   - Se os personagens passarem o primeiro minuto apenas conversando parados, apresentando regras teóricas, medindo atributos ou batendo papo morno de introdução: CORTE FORA ESSA GORDURA!
-   - Vá DIRETO para o momento em que surge o elemento que desperta curiosidade imediata (o objeto misterioso/lendário, a provocação, o perigo ou o desafio).
-2. **FOCO ABSOLUTO NO CLÍMAX (A MELHOR PARTE DA CENA)**:
-   - Qual é o grande momento de choque, humor ou triunfo desta cena?
-   - O CLÍMAX (o momento em que o feito impossível é executado, a revelação acontece, todos entram em choque e a punchline final é disparada) É O CORAÇÃO DO CORTE!
-   - Este ápice DEVE ter o maior tempo de tela (~18s a 26s) e entrar COMPLETO, com todas as reações de espanto dos outros personagens e a frase final definitiva ("mic drop" / "É o quê?!"). NUNCA deixe o clímax corrido!
-3. **RITMO VIRAL DINÂMICO COM SALTOS NO TEMPO (NUNCA GERE BLOCOS CONTÍGUOS COLADOS DE 90s)**:
-   - PROIBIDO selecionar blocos colados (ex: 80s-105s, 105s-137s, 137s-174s) que quando somados formam um bloco contínuo monótono de 90 segundos!
-   - Você DEVE SALTAR as explicações secundárias e enrolações do meio para que haja saltos temporais entre o gancho e o clímax!
-   - Monte uma progressão ágil de 3 a 4 blocos dinâmicos (cada um com 10s a 22s) separados por saltos no tempo:
-     * Bloco 1 (Gancho / O Mistério ou Desafio: ~10s a 16s): A apresentação do desafio ou da lenda.
-     --- SALTO NO TEMPO (pula explicações do meio) ---
-     * Bloco 2 (A Tensão / A Provocação / A Dúvida: ~10s a 16s): A explicação de que ninguém consegue e a provocação de que ele vai tentar.
-     --- SALTO NO TEMPO ---
-     * Bloco 3 (O Clímax Chocante + Reação e Desfecho: ~18s a 26s): A execução do feito com facilidade, o choque de todos e o desfecho marcante.
+        golden_rules = f"""⛔ REGRAS DE OURO DA ENGENHARIA VIRAL FLOW 59s (QUALIDADE CIRÚRGICA & RETENÇÃO NATURAL):
+1. **ABERTURA SEM ENROLAÇÃO (PRENDA NOS PRIMEIROS 3 SEGUNDOS)**:
+   - Elimine introduções mortas ou conversa fiada que não contribui para o arco escolhido.
+   - Comece na fala ou ação exata que já dá contexto e desperta curiosidade sem entregar spoiler do desfecho.
+2. **RESPEITE A CADÊNCIA DO GÊNERO DA CENA**:
+   - Se a cena é uma troca de diálogos, comédia ou drama que depende da sequência contínua para ter graça ou impacto emocional: mantenha 1 ou 2 blocos contínuos íntegros (sem retalhar nem forçar saltos no tempo).
+   - Se o vídeo bruto tem 3+ minutos com partes lentas no meio: condense em 2 a 4 blocos coesos pulando apenas as partes mornas, mas sempre garantindo que a transição faça 100% de sentido narrativo.
+3. **CLÍMAX COMPLETO COM RESPIRO**:
+   - O momento de maior impacto (golpe final, revelação, reação de choque ou punchline) deve entrar inteiro, com as reações necessárias para o público sentir o peso da cena.
 4. **DURAÇÃO TOTAL RIGOROSA ENTRE {min_dur:.1f}s E {max_dur:.1f}s (TETO INEGOCIÁVEL: 59.0s)**:
-   - A soma total dos blocos no JSON DEVE totalizar entre {min_dur:.1f}s e {max_dur:.1f}s.
+   - A soma total dos segmentos no JSON DEVE ficar entre {min_dur:.1f}s e {max_dur:.1f}s.
    - ⛔ PROIBIDO ULTRAPASSAR 59.0 SEGUNDOS ($total <= 59.0s$).
 5. **FECHAMENTO PERFEITO NO FINAL (MIC DROP COMPLETO)**:
-   - NUNCA termine no meio de uma frase! O último segmento deve encerrar na frase de maior impacto com a oração completa."""
+   - NUNCA termine no meio de uma frase! O último segmento deve encerrar na frase de impacto com a oração completa."""
     else:
         director_title = "SUPER SENIOR EDITOR CINEMÁTICO E VIRAL para YouTube Shorts, Reels e TikTok"
         golden_rules = """⛔ REGRAS DE OURO DA ENGENHARIA NARRATIVA VIRAL:
@@ -1847,11 +1971,81 @@ MISSÃO OBRIGATÓRIA DE CORREÇÃO:
 3. **FECHAMENTO PERFEITO NO FINAL (MIC DROP COMPLETO)**:
    - NUNCA termine no meio de uma frase! O desfecho deve ter a frase de impacto ou reação conclusiva completa com excelência."""
 
+    multi_opt_directive = ""
+    multi_opt_banner = ""
+    if video_duration >= 160.0 and target_duration_mode != "viral_59s" and editorial_mode != "viral_59":
+        multi_opt_banner = f"""
+🚨 REGRA MANDATÓRIA DE MÚLTIPLAS OPÇÕES (VÍDEO LONGO DE {video_duration:.1f}s >= 160s):
+Este vídeo bruto tem {video_duration:.1f} segundos (material longo suficiente para mais de um arco viral independente).
+Você DEVE OBRIGATORIAMENTE retornar entre 2 e 3 OPÇÕES COMPLETAS E INDEPENDENTES de refino dentro da chave 'opcoes' no JSON.
+- Cada opção deve ser um vídeo fechado com início, meio e mic drop conclusivo (duração total <= 59.0s).
+- PROIBIDO retornar apenas 1 opção ou colocar 'ai_viral' solto na raiz do JSON quando o vídeo tiver mais de 160 segundos!
+"""
+        multi_opt_directive = f"""
+🌟 **OPÇÕES MÚLTIPLAS DE VÍDEO REFINADO (VÍDEO LONGO: {video_duration:.1f}s)**:
+Como este clipe bruto tem mais de 1 minuto ({video_duration:.1f}s), ele contém material rico suficiente para MAIS DE UMA opção de vídeo viral completo!
+Retorne entre 2 e 3 OPÇÕES COMPLETAS E INDEPENDENTES de refino (cada opção com duração total <= 59.0s).
+- **Adaptabilidade ao Tom da Cena (Sem Fórmula Rígida)**:
+  * Não force uma fórmula engessada se a cena não pedir.
+  * Se a cena for triste/dramática o tempo todo: traga 2 ou 3 momentos distintos de alto impacto emocional, tensão e lágrimas que caibam cada um em até 59s.
+  * Se a cena tiver variedade (mistura de comédia, provocação, ação ou clímax): cada opção pode explorar um ângulo ou momento diferente (ex: Opção 1: Foco no Embate Principal; Opção 2: Foco no Diálogo/Revelação; Opção 3: Foco no Clímax de Ação).
+  * Cada opção deve ser um vídeo fechado com início, meio e mic drop conclusivo, com seus próprios cortes cronológicos e seu próprio roteiro!
+"""
+        json_format_instruction = """Retorne EXCLUSIVAMENTE um objeto JSON no seguinte formato com 2 a 3 opções (sem comentários, apenas JSON puro):
+{
+  "opcoes": [
+    {
+      "titulo": "Opção 1: Foco do corte (ex: O Confronto Decisivo)",
+      "roteiro_da_cena": {
+        "premissa": "Resumo em 1 frase clara da essência desta opção",
+        "hook": "Fala ou momento escolhido para prender a atenção nos primeiros segundos",
+        "conflito_desenvolvimento": "O embate, argumento ou progressão de diálogo central",
+        "climax_fechamento": "Frase de impacto final ou fechamento que encerra a narrativa com maestria"
+      },
+      "ai_viral": [
+        {"start": 10.00, "end": 28.00, "framing": "wide", "text": "Bloco 1 (Gancho)"},
+        {"start": 35.00, "end": 58.00, "framing": "punch", "text": "Bloco 2 (Clímax e Mic drop)"}
+      ]
+    },
+    {
+      "titulo": "Opção 2: Foco do corte (ex: A Revelação Chocante)",
+      "roteiro_da_cena": {
+        "premissa": "Resumo em 1 frase clara da segunda opção",
+        "hook": "Gancho da segunda opção",
+        "conflito_desenvolvimento": "Desenvolvimento",
+        "climax_fechamento": "Fechamento"
+      },
+      "ai_viral": [
+        {"start": 62.00, "end": 85.00, "framing": "wide", "text": "Bloco 1"},
+        {"start": 92.00, "end": 118.00, "framing": "reaction", "text": "Bloco 2"}
+      ]
+    }
+  ]
+}"""
+    else:
+        multi_opt_directive = ""
+        multi_opt_banner = ""
+        json_format_instruction = """Retorne EXCLUSIVAMENTE um objeto JSON no seguinte formato (sem comentários, apenas JSON puro):
+{
+  "roteiro_da_cena": {
+    "premissa": "Resumo em 1 frase clara da essência da cena",
+    "hook": "Fala ou momento escolhido para prender a atenção nos primeiros segundos",
+    "conflito_desenvolvimento": "O embate, argumento ou progressão de diálogo central",
+    "climax_fechamento": "Frase de impacto final ou fechamento que encerra a narrativa com maestria"
+  },
+  "ai_viral": [
+    {"start": 85.00, "end": 108.00, "framing": "wide", "text": "Bloco 1 (Abertura com contexto e gancho natural)"},
+    {"start": 122.00, "end": 154.00, "framing": "punch", "text": "Bloco 2 (Desenvolvimento, clímax e desfecho completo)"}
+  ]
+}"""
+
     prompt = f"""Você é o {director_title}.
 Este clipe foi pré-selecionado pelo Diretor IA e representa uma cena de ouro.
 Seu objetivo é transformar esta cena em um **MASTERCUT VIRAL DE ALTA RETENÇÃO (>100%) E TOTALMENTE BLINDADO CONTRA CONTENT ID / REUSED CONTENT**.
+{multi_opt_banner}
 {ctx_block}
 {feedback_block}
+
 DADOS DO VÍDEO BRUTO:
 - Duração Original do Clipe: {video_duration:.1f} segundos (A LINHA DO TEMPO VAI ESTRITAMENTE DE 0.0s ATÉ {video_duration:.1f}s)
 
@@ -1894,85 +2088,58 @@ Agora recorte a linha do tempo selecionando APENAS os trechos de fala e reação
 - NUNCA corte no meio de uma frase ou palavra.
 - A duração total deve cumprir a meta obrigatória.
 
-Retorne EXCLUSIVAMENTE um objeto JSON no seguinte formato (sem comentários, apenas JSON puro):
-{{
-  "roteiro_da_cena": {{
-    "premissa": "Resumo em 1 frase clara da essência da cena",
-    "hook": "Fala ou momento escolhido para prender a atenção nos primeiros segundos",
-    "conflito_desenvolvimento": "O embate, argumento ou progressão de diálogo central",
-    "climax_fechamento": "Frase de impacto final ou fechamento que encerra a narrativa com maestria"
-  }},
-  "ai_viral": [
-    {{"start": 85.00, "end": 102.00, "framing": "wide", "text": "Bloco 1 (Gancho: O elemento de curiosidade / mistério / desafio imediato)"}},
-    {{"start": 128.00, "end": 144.00, "framing": "punch", "text": "Bloco 2 (Tensão: O desafio impossível / provocação que instiga o público)"}},
-    {{"start": 148.00, "end": 171.00, "framing": "reaction", "text": "Bloco 3 (O Clímax Absoluto: O feito chocante + reação espantada de todos e punchline final)"}}
-  ]
-}}
+{multi_opt_directive}
+
+{json_format_instruction}
 """
 
     chosen_engine = (ai_engine or os.getenv("REFINER_AI_ENGINE", "auto")).strip().lower()
     if chosen_engine in ("gemini_web", "web", "gemini_navegador"):
         if on_log:
-            on_log("🌐 [GEMINI WEB] Enviando linha do tempo para o Gemini Pro no navegador em segundo plano...")
+            on_log("🌐 [GEMINI WEB] Enviando linha do tempo para o Gemini no navegador em segundo plano...")
         try:
             from gemini_web_automator import ask_gemini_web
-            web_resp = ask_gemini_web(prompt, timeout=180, on_log=on_log)
+            from metadata_enricher import clean_media_query
+            clip_tag = Path(video_path).stem if video_path else ""
+            raw_ctx = clip_tag or clean_work_title or video_context or clean_scene_context or "mastercut"
+            s_key = f"refiner_{clean_media_query(raw_ctx)}"
+            web_resp = ask_gemini_web(prompt, timeout=240, on_log=on_log, session_key=s_key)
             if web_resp:
-                clean_w = web_resp.strip()
-                if "```json" in clean_w:
-                    clean_w = clean_w.split("```json", 1)[1].split("```", 1)[0]
-                elif "```" in clean_w:
-                    clean_w = clean_w.split("```", 1)[1].split("```", 1)[0]
-                clean_w = clean_w.strip()
-                
-                try:
-                    data = json.loads(clean_w)
-                except Exception:
-                    m = re.search(r'\{.*\}', clean_w, re.DOTALL)
-                    data = json.loads(m.group(0)) if m else None
-
+                data = _parse_mastercut_ai_json(web_resp)
                 if data:
-                    t_web = None
-                    r_web = None
-                    if isinstance(data, list):
-                        t_web = data
-                    elif isinstance(data, dict):
-                        r_web = (
-                            data.get("roteiro_da_cena") or
-                            data.get("roteiro") or
-                            data.get("storyboard") or
-                            data.get("script") or
-                            data.get("cena")
-                        )
-                        t_web = (
-                            data.get("ai_viral") or
-                            data.get("mastercut") or
-                            data.get("segments") or
-                            data.get("cortes") or
-                            data.get("cuts") or
-                            data.get("timeline")
-                        )
-                    if t_web and isinstance(t_web, list) and len(t_web) > 0:
+                    t_web, r_web = _extract_timeline_and_options(data)
+                    if t_web and len(t_web) > 0:
                         if on_log:
-                            on_log(f"✨ [GEMINI WEB] {len(t_web)} cortes refinados com sucesso pelo Gemini Pro!")
+                            on_log(f"✨ [GEMINI WEB] {len(t_web)} cortes refinados com sucesso pelo Gemini 4 Argon!")
                             if r_web and isinstance(r_web, dict):
-                                on_log("[ROTEIRISTA GEMINI PRO WEB] Roteiro Dramático Estruturado:")
-                                if r_web.get("premissa"):
-                                    on_log(f"   * Premissa: {r_web['premissa']}")
-                                if r_web.get("hook"):
-                                    on_log(f"   * Hook (Abertura): {r_web['hook']}")
-                                if r_web.get("climax_fechamento"):
-                                    on_log(f"   * Clímax/Fechamento: {r_web['climax_fechamento']}")
-                        return t_web, r_web
+                                cands = r_web.get("candidate_options", [])
+                                if len(cands) > 1:
+                                    on_log(f"🎬 [GEMINI WEB] {len(cands)} opções de vídeo refinado detectadas para esta cena!")
+                                    for idx, c in enumerate(cands, 1):
+                                        on_log(f"   * Opção {idx}: {c.get('title', 'Corte')} ({len(c.get('timeline', []))} segmentos)")
+                                elif r_web.get("premissa"):
+                                    on_log("[ROTEIRISTA GEMINI 4 ARGON] Roteiro Dramático Estruturado:")
+                                    on_log(f"   * Premissa: {r_web.get('premissa')}")
+                                    on_log(f"   * Hook: {r_web.get('hook')}")
+                        return t_web, {**(r_web or {}), "_ai_source": "Gemini Web"}
+                    if on_log:
+                        on_log("⚠️ [GEMINI WEB] Resposta do navegador não continha cortes em formato reconhecido.")
+            else:
+                if on_log:
+                    on_log("⚠️ [GEMINI WEB] Nenhuma resposta retornada pelo navegador.")
         except Exception as e:
             if on_log:
-                on_log(f"⚠️ [GEMINI WEB] Erro no processamento da resposta: {e}")
+                on_log(f"⚠️ [GEMINI WEB] Erro no processamento da resposta: {e}.")
+
+        if on_log:
+            on_log("🛑 [MOTOR RESTRITO] Motor 'Gemini Web' selecionado. A nuvem oficial (API paga) NÃO será acionada.")
+        return None, None
 
     if chosen_engine in ("ollama_local", "auto"):
         # Se for 100% local ou auto, tenta o Ollama Local na GPU RTX 5060 primeiro com contingência entre modelos locais!
         t_local, r_local = _call_ollama_local_timeline(prompt, on_log=on_log, local_model=local_model)
         if t_local:
-            return t_local, r_local
+            return t_local, {**(r_local or {}), "_ai_source": f"Ollama Local ({local_model or 'GPU'})"}
         if chosen_engine == "ollama_local":
             # O usuário escolheu EXCLUSIVAMENTE 'Ollama Local': NUNCA aciona o Gemini na nuvem!
             if on_log:
@@ -2052,44 +2219,26 @@ Retorne EXCLUSIVAMENTE um objeto JSON no seguinte formato (sem comentários, ape
                 )
                 text = response.text
                 if text:
-                    data = json.loads(text)
-                    timeline = None
-                    roteiro = None
-                    if isinstance(data, list):
-                        timeline = data
-                    elif isinstance(data, dict):
-                        roteiro = (
-                            data.get("roteiro_da_cena") or
-                            data.get("roteiro") or
-                            data.get("storyboard") or
-                            data.get("script") or
-                            data.get("cena")
-                        )
-                        timeline = (
-                            data.get("ai_viral") or
-                            data.get("mastercut") or
-                            data.get("segments") or
-                            data.get("cortes") or
-                            data.get("cuts") or
-                            data.get("timeline")
-                        )
-                    if timeline and isinstance(timeline, list) and len(timeline) > 0:
-                        if api_health is not None:
-                            api_health.mark_key_success(key)
-                            api_health.mark_model_success(model_name)
-                        if on_log:
-                            on_log(f"[OK] IA ({model_name}) desenhou Mastercut com {len(timeline)} cortes estratégicos!")
-                            if roteiro and isinstance(roteiro, dict):
-                                on_log("[ROTEIRISTA IA] Roteiro Dramático Estruturado:")
-                                if roteiro.get("premissa"):
-                                    on_log(f"   * Premissa: {roteiro['premissa']}")
-                                if roteiro.get("hook"):
-                                    on_log(f"   * Hook (Abertura): {roteiro['hook']}")
-                                if roteiro.get("conflito_desenvolvimento"):
-                                    on_log(f"   * Desenvolvimento: {roteiro['conflito_desenvolvimento']}")
-                                if roteiro.get("climax_fechamento"):
-                                    on_log(f"   * Climax/Fechamento: {roteiro['climax_fechamento']}")
-                        return timeline, roteiro
+                    data = _parse_mastercut_ai_json(text)
+                    if data:
+                        timeline, roteiro = _extract_timeline_and_options(data)
+                        if timeline and len(timeline) > 0:
+                            if api_health is not None:
+                                api_health.mark_key_success(key)
+                                api_health.mark_model_success(model_name)
+                            if on_log:
+                                on_log(f"[OK] IA ({model_name}) desenhou Mastercut com {len(timeline)} cortes estratégicos!")
+                                if roteiro and isinstance(roteiro, dict):
+                                    cands = roteiro.get("candidate_options", [])
+                                    if len(cands) > 1:
+                                        on_log(f"🎬 [IA] {len(cands)} opções completas de vídeo refinado detectadas!")
+                                        for idx, c in enumerate(cands, 1):
+                                            on_log(f"   * Opção {idx}: {c.get('title', 'Corte')} ({len(c.get('timeline', []))} segmentos)")
+                                    elif roteiro.get("premissa"):
+                                        on_log("[ROTEIRISTA IA] Roteiro Dramático Estruturado:")
+                                        on_log(f"   * Premissa: {roteiro.get('premissa')}")
+                                        on_log(f"   * Hook: {roteiro.get('hook')}")
+                            return timeline, {**(roteiro or {}), "_ai_source": f"Gemini Cloud ({model_name})"}
             except Exception as e:
                 err_s = str(e)
                 # 503 UNAVAILABLE / High demand spike
@@ -2138,41 +2287,15 @@ Retorne EXCLUSIVAMENTE um objeto JSON no seguinte formato (sem comentários, ape
                     resp = requests.post("https://api.groq.com/openai/v1/chat/completions", headers=headers, json=payload, timeout=45)
                     if resp.status_code == 200:
                         content = resp.json().get("choices", [{}])[0].get("message", {}).get("content", "")
-                        data = json.loads(content)
-                        timeline = None
-                        roteiro = None
-                        if isinstance(data, list):
-                            timeline = data
-                        elif isinstance(data, dict):
-                            roteiro = (
-                                data.get("roteiro_da_cena") or
-                                data.get("roteiro") or
-                                data.get("storyboard") or
-                                data.get("script") or
-                                data.get("cena")
-                            )
-                            timeline = (
-                                data.get("ai_viral") or
-                                data.get("mastercut") or
-                                data.get("segments") or
-                                data.get("cortes") or
-                                data.get("cuts") or
-                                data.get("timeline")
-                            )
-                        if timeline and isinstance(timeline, list) and len(timeline) > 0:
-                            if on_log:
-                                on_log(f"[OK] Sucesso via Groq Fallback ({g_model})! {len(timeline)} cortes encontrados.")
-                                if roteiro and isinstance(roteiro, dict):
-                                    on_log("[ROTEIRISTA IA] Roteiro Dramático Estruturado:")
-                                    if roteiro.get("premissa"):
-                                        on_log(f"   * Premissa: {roteiro['premissa']}")
-                                    if roteiro.get("hook"):
-                                        on_log(f"   * Hook (Abertura): {roteiro['hook']}")
-                                    if roteiro.get("conflito_desenvolvimento"):
-                                        on_log(f"   * Desenvolvimento: {roteiro['conflito_desenvolvimento']}")
-                                    if roteiro.get("climax_fechamento"):
-                                        on_log(f"   * Climax/Fechamento: {roteiro['climax_fechamento']}")
-                            return timeline, roteiro
+                        data = _parse_mastercut_ai_json(content)
+                        if data:
+                            timeline, roteiro = _extract_timeline_and_options(data)
+                            if timeline and len(timeline) > 0:
+                                if on_log:
+                                    on_log(f"[OK] Sucesso via Groq Fallback ({g_model})! {len(timeline)} cortes encontrados.")
+                                    if roteiro and isinstance(roteiro, dict):
+                                        cands = roteiro.get("candidate_options", [])
+                                return timeline, {**(roteiro or {}), "_ai_source": f"Groq ({g_model})"}
                 except Exception as e_sub:
                     if on_log:
                         on_log(f"[AVISO] Fallback Groq ({g_model}) falhou: {e_sub}")
@@ -2184,11 +2307,16 @@ Retorne EXCLUSIVAMENTE um objeto JSON no seguinte formato (sem comentários, ape
     return None, None
 
 
-def _strictly_cap_segments_duration(segments: list, max_cap: float = 59.0) -> list:
+def _strictly_cap_segments_duration(
+    segments: list,
+    max_cap: float = 59.0,
+    all_words: Optional[list] = None,
+) -> list:
     """
     Mathematical guarantee that total segment duration never exceeds max_cap (default 59.0s).
     Preserves the hook (first segment) and climax (last segment) while trimming excess
-    from intermediate segments or ends of long segments.
+    from intermediate segments or intro, snapping cut boundaries to complete spoken words
+    when `all_words` is available so sentences are not cut mid-word.
     """
     if not segments:
         return segments
@@ -2196,11 +2324,43 @@ def _strictly_cap_segments_duration(segments: list, max_cap: float = 59.0) -> li
     if total_dur <= max_cap:
         return segments
 
+    def _snap_end_before(seg_start: float, target_end: float) -> float:
+        if not all_words:
+            return round(target_end, 3)
+        # Prefer ending right after the last complete word (or punctuation boundary) <= target_end
+        candidates = [
+            w for w in all_words
+            if float(w.get("start", 0.0)) >= seg_start + 0.5
+            and float(w.get("end", 0.0)) <= target_end - 0.05
+        ]
+        if not candidates:
+            return round(target_end, 3)
+        punct_cands = [
+            w for w in candidates
+            if str(w.get("word") or w.get("text") or "").strip().endswith((".", "!", "?", "…"))
+            and (float(w.get("end", 0.0)) - seg_start) >= max(3.5, (target_end - seg_start) * 0.55)
+        ]
+        chosen = punct_cands[-1] if punct_cands else candidates[-1]
+        return round(min(target_end, float(chosen.get("end", target_end)) + 0.14), 3)
+
+    def _snap_start_after(target_start: float, seg_end: float) -> float:
+        if not all_words:
+            return round(target_start, 3)
+        candidates = [
+            w for w in all_words
+            if float(w.get("start", 0.0)) >= target_start - 0.10
+            and float(w.get("end", 0.0)) <= seg_end - 1.0
+        ]
+        if not candidates:
+            return round(target_start, 3)
+        return round(max(target_start, float(candidates[0].get("start", target_start)) - 0.08), 3)
+
     excess = total_dur - max_cap
     # Single segment case: preserve the climax at the end by trimming excess from the start!
     if len(segments) == 1:
         s0 = segments[0]
-        new_start = round(min(s0["end"] - 10.0, s0["start"] + excess), 3)
+        raw_start = min(s0["end"] - 10.0, s0["start"] + excess)
+        new_start = _snap_start_after(raw_start, s0["end"])
         return [{**s0, "start": new_start}]
 
     result = [dict(s) for s in segments]
@@ -2215,8 +2375,12 @@ def _strictly_cap_segments_duration(segments: list, max_cap: float = 59.0) -> li
             can_trim = max(0.0, seg_len - 5.0)
             trim_amt = min(remaining_excess, can_trim)
             if trim_amt > 0.05:
-                result[idx]["end"] = round(result[idx]["end"] - trim_amt, 3)
-                remaining_excess -= trim_amt
+                target_end = result[idx]["end"] - trim_amt
+                snapped_end = _snap_end_before(result[idx]["start"], target_end)
+                actual_trim = result[idx]["end"] - snapped_end
+                if actual_trim > 0.05:
+                    result[idx]["end"] = snapped_end
+                    remaining_excess -= actual_trim
 
     # Pass 2: If still excess, trim from the front of the first segment (intro), keeping the climax intact!
     if remaining_excess > 0.01 and len(result) >= 2:
@@ -2224,25 +2388,36 @@ def _strictly_cap_segments_duration(segments: list, max_cap: float = 59.0) -> li
         can_trim = max(0.0, first_len - 6.0)
         trim_amt = min(remaining_excess, can_trim)
         if trim_amt > 0.05:
-            result[0]["start"] = round(result[0]["start"] + trim_amt, 3)
-            remaining_excess -= trim_amt
+            target_start = result[0]["start"] + trim_amt
+            snapped_start = _snap_start_after(target_start, result[0]["end"])
+            actual_trim = snapped_start - result[0]["start"]
+            if actual_trim > 0.05:
+                result[0]["start"] = snapped_start
+                remaining_excess -= actual_trim
 
-    # Pass 3: If STILL excess, trim proportionally across all segments
-    if remaining_excess > 0.01:
-        current_total = sum(max(0.0, s["end"] - s["start"]) for s in result)
-        if current_total > max_cap:
-            scale = max_cap / current_total
-            rebuilt = []
-            for s in result:
-                d = (s["end"] - s["start"]) * scale
-                rebuilt.append({**s, "end": round(s["start"] + max(2.0, d), 3)})
-            result = rebuilt
+    # Pass 3: If STILL excess, drop middle segments until <= max_cap, then scale
+    while len(result) > 2 and sum(max(0.0, s["end"] - s["start"]) for s in result) > max_cap:
+        mid_idx = len(result) // 2
+        if mid_idx == 0:
+            mid_idx = 1
+        if mid_idx >= len(result) - 1:
+            break
+        result.pop(mid_idx)
+
+    current_total = sum(max(0.0, s["end"] - s["start"]) for s in result)
+    if current_total > max_cap:
+        scale = max_cap / current_total
+        rebuilt = []
+        for s in result:
+            d = max(0.5, (s["end"] - s["start"]) * scale)
+            rebuilt.append({**s, "end": _snap_end_before(s["start"], s["start"] + d)})
+        result = rebuilt
 
     # Final sanity check: force hard cut on last segment if floating point rounded up
     final_dur = sum(max(0.0, s["end"] - s["start"]) for s in result)
     if final_dur > max_cap and result:
         overflow = final_dur - max_cap
-        result[-1]["end"] = round(max(result[-1]["start"] + 1.0, result[-1]["end"] - overflow - 0.01), 3)
+        result[-1]["end"] = round(max(result[-1]["start"] + 0.5, result[-1]["end"] - overflow - 0.01), 3)
 
     return result
 
@@ -2280,6 +2455,30 @@ def _call_ollama_local_refiner(prompt: str, on_log=None, local_model: str = "") 
     return None
 
 
+def _parse_timestamp_seconds(val) -> Optional[float]:
+    """Converte valores de tempo numéricos ou strings '01:23', '85.5s' em float de segundos."""
+    if val is None:
+        return None
+    if isinstance(val, (int, float)):
+        return float(val)
+    if isinstance(val, str):
+        val = val.strip().replace("s", "").replace("S", "")
+        if ":" in val:
+            parts = val.split(":")
+            try:
+                if len(parts) == 2:
+                    return float(parts[0]) * 60 + float(parts[1])
+                elif len(parts) == 3:
+                    return float(parts[0]) * 3600 + float(parts[1]) * 60 + float(parts[2])
+            except (ValueError, TypeError):
+                return None
+        try:
+            return float(val)
+        except (ValueError, TypeError):
+            return None
+    return None
+
+
 def audit_and_refine_cut_double_check(
     candidate_segments: list,
     all_words: list,
@@ -2291,6 +2490,7 @@ def audit_and_refine_cut_double_check(
     max_duration_cap: float = 59.0,
     local_model: str = "",
     ai_engine: str = "auto",
+    video_path: str = "",
     on_log=None
 ) -> list:
     """
@@ -2364,25 +2564,22 @@ Cortes selecionados:
 [DIRETRIZES RIGOROSAS DA AUDITORIA CRÍTICA]
 {feedback_directive}1. 🎯 ALVO DE DURAÇÃO RIGOROSO: ENTRE 50.0s E 58.5s (TETO INEGOCIÁVEL: {max_duration_cap:.1f}s).
    - Se o vídeo original tem mais de 2 minutos ({video_duration:.1f}s), a duração final DEVE ficar entre 50.0s e 58.5s!
-   - Se a proposta da 1ª IA estiver com MENOS DE 50 SEGUNDOS (ex: 20s, 30s ou 35s), você DEVE EXPANDIR os cortes adicionando os blocos de diálogo cruciais da cena original para que a história dure entre 50.0s e 58.5s!
-   - ⛔ PROIBIDO APROVAR MENOS DE 48 SEGUNDOS se houver diálogos disponíveis!
-   - ⛔ PROIBIDO ULTRAPASSAR 59.0 SEGUNDOS ($total <= 59.0s$)! Se ultrapassar, enxugue para caber em 50s-58.5s.
-2. 🏆 FOCO NA MELHOR PARTE (O CLÍMAX ABSOLUTO):
-   - Se a proposta da 1ª IA gastar muito tempo em conversas mornas e paradas de introdução/regras e deixar o clímax corrido ou ausente: DESCARTE A INTRODUÇÃO MORNA!
-   - Puxe os cortes para o elemento de curiosidade (o mistério/desafio) + a provocação + o clímax com o feito chocante e a reação de espanto de todos!
-3. ✂️ RITMO DINÂMICO & TRANSIÇÕES SUAVES (SEM CORTES BRUSCOS):
-   - Organize em 3 a 4 blocos dinâmicos de 10s a 22s cada, em vez de um bloco único monótono e arrastado.
-   - Mantenha orações completas. Não corte no meio de uma frase.
-   - Início: Deve prender no segundo 0 com gancho de diálogo.
-   - Fim: O último corte DEVE terminar na fala definitiva de desfecho ("mic drop").
+   - Se a proposta da 1ª IA estiver com MENOS DE 45 SEGUNDOS (ex: 20s, 30s ou 35s), você DEVE EXPANDIR os cortes mantendo a coerência da cena original para que a história dure entre 50.0s e 58.5s!
+   - ⛔ PROIBIDO ULTRAPASSAR 59.0 SEGUNDOS ($total <= 59.0s$)! Se ultrapassar, enxugue para caber em 50s-58.5s sem cortar frases no meio.
+2. 🏆 CLAREZA NARRATIVA & FOCO NO CLÍMAX (ADAPTÁVEL AO ESTILO DA CENA):
+   - **Sem fórmula engessada:** Se a cena for comédia, romance/drama ou ação contínua que já flui bem sem saltos, NÃO picote só por picotar; mantenha o ritmo natural (setup ➔ punchline ou construção ➔ clímax).
+   - **Corte apenas gordura real:** Se a proposta da 1ª IA gastar tempo em exposição morna desconectada e deixar o clímax corrido, corte a enrolação inicial para dar espaço pleno ao clímax e às reações finais.
+   - **Zero Spoiler nos 3s Iniciais:** Garanta contexto suficiente logo no início sem entregar a graça ou o golpe final antes da hora.
+3. ✂️ TRANSIÇÕES LIMPA & MIC DROP COMPLETO:
+   - Mantenha orações completas. Nunca corte no meio de uma frase ou palavra.
+   - Fim: O último corte DEVE terminar após a fala/impacto conclusivo com respiro seguro.
 
 Retorne EXCLUSIVAMENTE um objeto JSON no formato:
 {{
   "auditoria": "Resumo em 1 frase da análise crítica e ajustes realizados",
   "ai_viral": [
-    {{"start": 85.00, "end": 102.00, "framing": "wide", "text": "Bloco 1 (Gancho ou mistério inicial)"}},
-    {{"start": 128.00, "end": 144.00, "framing": "punch", "text": "Bloco 2 (Escalada de tensão ou desafio)"}},
-    {{"start": 148.00, "end": 171.00, "framing": "reaction", "text": "Bloco 3 (O Clímax definitivo e punchline final)"}}
+    {{"start": 85.00, "end": 108.00, "framing": "wide", "text": "Bloco 1 (Abertura com contexto e gancho natural)"}},
+    {{"start": 122.00, "end": 154.00, "framing": "punch", "text": "Bloco 2 (Desenvolvimento, clímax e fechamento completo)"}}
   ]
 }}
 """
@@ -2413,50 +2610,65 @@ Retorne EXCLUSIVAMENTE um objeto JSON no formato:
 
         if str(ai_engine).lower() in ("gemini_web", "web", "gemini_navegador"):
             if on_log:
-                on_log("🌐 [GEMINI WEB] Executando auditoria crítica de cortes com Gemini Pro no navegador em segundo plano...")
+                on_log("🌐 [GEMINI WEB] Executando auditoria crítica de cortes com Gemini no navegador em segundo plano...")
             try:
                 from gemini_web_automator import ask_gemini_web
-                web_resp = ask_gemini_web(prompt, timeout=180, on_log=on_log)
+                from metadata_enricher import clean_media_query
+                raw_ctx = clean_work or video_context or (os.path.basename(video_path) if video_path else "") or clean_scene or "mastercut"
+                s_key = f"refiner_{clean_media_query(raw_ctx)}"
+                web_resp = ask_gemini_web(prompt, timeout=240, on_log=on_log, session_key=s_key)
                 if web_resp:
-                    clean_j = web_resp.strip()
-                    if "```json" in clean_j:
-                        clean_j = clean_j.split("```json", 1)[1].split("```", 1)[0]
-                    elif "```" in clean_j:
-                        clean_j = clean_j.split("```", 1)[1].split("```", 1)[0]
-                    clean_j = clean_j.strip()
-
-                    data = None
-                    try:
-                        data = json.loads(clean_j)
-                    except Exception:
-                        m_obj = re.search(r'(\{[\s\S]*\})', clean_j)
-                        if m_obj:
-                            try:
-                                data = json.loads(m_obj.group(1))
-                            except Exception:
-                                pass
-                        if not data:
-                            m_arr = re.search(r'(\[[\s\S]*\])', clean_j)
-                            if m_arr:
-                                try:
-                                    data = json.loads(m_arr.group(1))
-                                except Exception:
-                                    pass
-
+                    data = _parse_mastercut_ai_json(web_resp)
                     if data:
                         tl = None
                         if isinstance(data, list):
                             tl = data
                         elif isinstance(data, dict):
-                            tl = data.get("ai_viral") or data.get("cortes_aprovados") or data.get("timeline") or data.get("segments") or data.get("cortes")
+                            tl = (
+                                data.get("cortes_aprovados") or
+                                data.get("ai_viral") or
+                                data.get("timeline") or
+                                data.get("segments") or
+                                data.get("cortes") or
+                                data.get("cuts")
+                            )
+                            if not tl:
+                                for k, v in data.items():
+                                    if isinstance(v, list) and len(v) > 0 and isinstance(v[0], dict) and ("start" in v[0] or "inicio" in v[0]):
+                                        tl = v
+                                        break
                         if tl and isinstance(tl, list) and len(tl) > 0:
-                            reason = data.get("auditoria", "Auditoria concluída pelo Gemini Pro!") if isinstance(data, dict) else "Auditoria concluída pelo Gemini Pro!"
-                            if on_log:
-                                on_log(f"🔍 [AUDITOR GEMINI WEB] {reason}")
-                            return tl
+                            normalized_audited = []
+                            for c in tl:
+                                if not isinstance(c, dict):
+                                    continue
+                                s = c.get("start", c.get("inicio", c.get("start_time")))
+                                e = c.get("end", c.get("fim", c.get("end_time")))
+                                if s is None or e is None:
+                                    for r_field in ("range", "estimated_range", "time_range", "timestamps"):
+                                        r_val = c.get(r_field)
+                                        if r_val and isinstance(r_val, str) and any(sep in r_val for sep in ("->", " - ", "–", " a ")):
+                                            parts = re.split(r"->| - |–| a ", r_val)
+                                            if len(parts) >= 2:
+                                                s = parts[0].strip()
+                                                e = parts[1].strip()
+                                                break
+                                if s is not None and e is not None:
+                                    s_f = _parse_timestamp_seconds(s)
+                                    e_f = _parse_timestamp_seconds(e)
+                                    if s_f is not None and e_f is not None and e_f > s_f:
+                                        c_copy = dict(c)
+                                        c_copy["start"] = s_f
+                                        c_copy["end"] = e_f
+                                        normalized_audited.append(c_copy)
+                            if normalized_audited:
+                                reason = data.get("auditoria", "Auditoria concluída com sucesso pelo Gemini 4 Argon!") if isinstance(data, dict) else "Auditoria concluída pelo Gemini 4 Argon!"
+                                if on_log:
+                                    on_log(f"🔍 [AUDITOR GEMINI WEB] {reason}")
+                                return normalized_audited
 
                     if on_log:
-                        on_log("🔍 [AUDITOR GEMINI WEB] Cortes verificados e aprovados pelo Gemini Pro no navegador!")
+                        on_log("🔍 [AUDITOR GEMINI WEB] Cortes verificados e aprovados pelo Gemini 4 Argon no navegador!")
                     return candidate_segments
             except Exception as e:
                 if on_log:
@@ -2576,7 +2788,9 @@ Retorne EXCLUSIVAMENTE um objeto JSON no formato:
             on_log("[INFO] Aplicando auditoria determinística de precisão (Ajuste de bordas e teto de duração)...")
 
     # Final Mathematical Duration Ceiling Guarantee:
-    candidate_segments = _strictly_cap_segments_duration(candidate_segments, max_cap=max_duration_cap)
+    candidate_segments = _strictly_cap_segments_duration(
+        candidate_segments, max_cap=max_duration_cap, all_words=all_words
+    )
     final_dur = sum(max(0.0, s["end"] - s["start"]) for s in candidate_segments)
     if on_log:
         on_log(f"🛡️ [CHECK DO CHECK] Resultado final aprovado: {len(candidate_segments)} cortes | Duração: {final_dur:.2f}s (Teto: {max_duration_cap:.1f}s)")
@@ -3017,11 +3231,15 @@ def apply_hook_opening(
     h_end = None
     hook_text = "[Hook de Abertura / Teaser]"
 
-    # Option A: Visual scenes of high impact in second half
+    story_end_ceiling = (float(refined[-1].get("end", video_duration)) + 1.0) if refined else float(video_duration)
+
+    # Option A: Visual scenes of high impact inside selected story up to climax
     if visual_scenes:
         climax_scenes = [
             vs for vs in visual_scenes
-            if vs.get("importance") == "high" and vs.get("start", 0) >= video_duration * 0.35
+            if vs.get("importance") == "high"
+            and vs.get("start", 0) >= video_duration * 0.35
+            and vs.get("start", 0) <= story_end_ceiling
         ]
         if climax_scenes:
             best_vs = climax_scenes[-1]
@@ -3033,7 +3251,11 @@ def apply_hook_opening(
 
     # Option B: High-energy action block
     if h_start is None and action_blocks:
-        climax_actions = [ab for ab in action_blocks if ab.get("start", 0) >= video_duration * 0.35]
+        climax_actions = [
+            ab for ab in action_blocks
+            if ab.get("start", 0) >= video_duration * 0.35
+            and ab.get("start", 0) <= story_end_ceiling
+        ]
         if climax_actions:
             best_ab = climax_actions[-1]
             h_start = best_ab.get("start", 0.0)
@@ -3137,28 +3359,46 @@ def apply_viral_editor_structure(
     ]
     first_seg_speech = words_in_seg0[0]["start"] if words_in_seg0 else None
 
-    # Se a fala dentro do primeiro segmento começa rápido (até 2.5s de respiro):
-    has_early_speech = (first_seg_speech is not None and (first_seg_speech - seg0["start"]) <= 2.5)
+    # Verifica se há ação visual forte já nos primeiros segundos da abertura
+    has_opening_action = False
+    open_win_end = seg0["start"] + 4.5
+    for ab in (action_blocks or []):
+        if float(ab.get("end", 0.0)) >= seg0["start"] and float(ab.get("start", 9999.0)) <= open_win_end:
+            has_opening_action = True
+            break
+    if not has_opening_action:
+        for vs in (visual_scenes or []):
+            if vs.get("importance") == "high" and float(vs.get("end", 0.0)) >= seg0["start"] and float(vs.get("start", 9999.0)) <= open_win_end:
+                has_opening_action = True
+                break
 
-    if has_early_speech:
+    # Se a fala começa logo (até 4.5s) ou já existe ação visual marcante na abertura:
+    # Inicia direto na cena (sem colar teaser repetido do clímax que daria spoiler ou quebraria comédia/drama).
+    has_early_engagement = (
+        (first_seg_speech is not None and (first_seg_speech - seg0["start"]) <= 4.5)
+        or has_opening_action
+    )
+
+    if has_early_engagement:
         if on_log:
-            on_log("[VIRAL PRO] Início do vídeo já possui fala de impacto! Iniciando direto na ação (sem repetições).")
+            reason = "fala ativa inicial" if first_seg_speech is not None else "ação visual na abertura"
+            on_log(f"[VIRAL PRO] Abertura já tem {reason}! Iniciando direto na cena (sem teaser repetido / sem spoiler).")
 
         narrative = [{**s, "role": "story"} for s in refined]
-        # Corta qualquer respiro mudo antes da fala inicial para começar direto na voz
-        if first_seg_speech is not None and narrative:
+        # Corta apenas silêncio inicial morto se não houver ação visual ativa antes da fala
+        if first_seg_speech is not None and narrative and not has_opening_action:
             lead_silence = max(0.0, first_seg_speech - narrative[0]["start"])
-            if lead_silence >= 0.12:
+            if lead_silence >= 0.20:
                 trimmed_start = round(max(0.0, first_seg_speech - 0.08), 3)
                 if trimmed_start < narrative[0]["end"] - 0.5:
                     if on_log:
-                        on_log(f"   • Silêncio inicial cortado: começa no milissegundo {trimmed_start:.2f}s direto na voz!")
+                        on_log(f"   • Silêncio inicial cortado: começa em {trimmed_start:.2f}s direto na voz!")
                     narrative[0]["start"] = trimmed_start
 
-        narrative[0]["role"] = "story"  # Mantém role='story' para não disparar flash de teaser falso
+        narrative[0]["role"] = "story"
         narrative[0]["framing"] = "punch"
 
-        # Garante que o final encerra no ápice da última fala com respiro seguro (mic drop sem amputar palavra)
+        # Garante que o final encerra no ápice da última fala com respiro seguro (+0.35s) sem amputar sílaba
         if len(narrative) >= 1 and all_words:
             last_seg = narrative[-1]
             last_words = [w for w in all_words if last_seg["start"] <= w["start"] <= last_seg["end"]]
@@ -3166,16 +3406,18 @@ def apply_viral_editor_structure(
                 last_w = last_words[-1]
                 trail_silence = last_seg["end"] - last_w["end"]
                 if trail_silence >= 1.00:
-                    last_seg["end"] = round(min(video_duration, last_w["end"] + 0.40), 3)
+                    last_seg["end"] = round(min(video_duration, last_w["end"] + 0.38), 3)
+                elif 0.0 <= trail_silence < 0.28:
+                    last_seg["end"] = round(min(video_duration, last_w["end"] + 0.35), 3)
 
         if on_log:
-            on_log("[VIRAL PRO] Montagem Viral Pro finalizada: Início Explosivo + Pacing Ágil + Desfecho em Pico!")
+            on_log("[VIRAL PRO] Montagem Viral Pro finalizada: Início Limpo + Pacing Natural + Desfecho com Respiro!")
 
         return finalize_ordered_segments(narrative)
 
-    # 2. Se o início do vídeo for lento (>4.0s sem ninguém falar)
+    # 2. Se o início do vídeo for genuinamente vazio (>4.5s sem falas E sem ação visual):
     if on_log:
-        on_log("[VIRAL PRO] Início lento detectado (>4.0s sem falas). Extraindo teaser inicial mantendo o corpo da história completo...")
+        on_log("[VIRAL PRO] Início parado detectado (>4.5s sem falas nem ação). Extraindo teaser curto de impacto mantendo o corpo da história...")
 
     with_hook = apply_hook_opening(
         refined=refined,
@@ -3188,11 +3430,186 @@ def apply_viral_editor_structure(
 
     if on_log:
         on_log("[VIRAL PRO] Edição Viral Pro montada com sucesso: Teaser de impacto + Narrativa contextual completa!")
+    return with_hook
 
-    return finalize_ordered_segments(with_hook)
+def generate_fallback_multi_options(
+    all_words: list,
+    video_duration: float,
+    primary_segments: list,
+    target_duration_mode: str = "viral_59s",
+    editorial_mode: str = "viral_59",
+    is_dorama: bool = False
+) -> list:
+    """
+    Quando o vídeo tiver >= 70.0s e a IA tiver retornado apenas 1 opção (ou formato unitário),
+    sintetiza automaticamente Opção 2 (e Opção 3 se dur >= 110s) explorando os outros momentos de ouro
+    da cena para que o usuário sempre tenha opções completas de escolha.
+    """
+    if video_duration < 70.0:
+        return []
+
+    sentences = group_words_into_complete_sentences(all_words, is_dorama=is_dorama) if all_words else []
+    max_cap = 58.0 if (target_duration_mode == "viral_59s" or editorial_mode == "viral_59") else 60.0
+
+    cands = []
+
+    if not sentences:
+        if video_duration >= 110.0:
+            s2 = round(max(0.0, video_duration * 0.25), 2)
+            e2 = round(min(video_duration, s2 + max_cap), 2)
+            s3 = round(max(0.0, video_duration - max_cap), 2)
+            e3 = round(video_duration, 2)
+            cands.append({
+                "title": "Opção 2: Bloco Intermediário",
+                "timeline": [{"start": s2, "end": e2, "framing": "punch", "text": "[Ação Meio]"}],
+                "roteiro": {"premissa": "Foco no desenvolvimento intermediário da cena."}
+            })
+            cands.append({
+                "title": "Opção 3: Clímax & Desfecho",
+                "timeline": [{"start": s3, "end": e3, "framing": "reaction", "text": "[Clímax Final]"}],
+                "roteiro": {"premissa": "Foco no clímax e encerramento da cena."}
+            })
+        else:
+            s2 = round(max(0.0, video_duration - max_cap), 2)
+            e2 = round(video_duration, 2)
+            cands.append({
+                "title": "Opção 2: Desfecho da Cena",
+                "timeline": [{"start": s2, "end": e2, "framing": "punch", "text": "[Desfecho]"}],
+                "roteiro": {"premissa": "Foco na segunda metade da cena."}
+            })
+        return cands
+
+    p_starts = [s["start"] for s in primary_segments] if primary_segments else [0.0]
+    p_ends = [s["end"] for s in primary_segments] if primary_segments else [video_duration]
+    p_min = min(p_starts)
+    p_max = max(p_ends)
+
+    def _pack_sentences(sent_sublist, target_dur):
+        packed = []
+        cur_dur = 0.0
+        for st in sent_sublist:
+            s_d = st["end"] - st["start"]
+            if s_d <= 0.1:
+                continue
+            if cur_dur + s_d <= target_dur + 0.5:
+                idx = len(packed)
+                framing = "wide" if idx % 3 == 0 else ("punch" if idx % 3 == 1 else "reaction")
+                packed.append({
+                    "start": round(max(0.0, st["start"] - 0.08), 3),
+                    "end": round(min(video_duration, st["end"] + 0.22), 3),
+                    "text": st["text"],
+                    "framing": framing
+                })
+                cur_dur += s_d
+            elif cur_dur < 35.0 and len(packed) < 2:
+                packed.append({
+                    "start": round(max(0.0, st["start"] - 0.08), 3),
+                    "end": round(min(video_duration, st["end"] + 0.22), 3),
+                    "text": st["text"],
+                    "framing": "punch"
+                })
+                cur_dur += s_d
+                break
+            else:
+                break
+        return packed
+
+    if video_duration >= 110.0:
+        mid_sents = [st for st in sentences if st["start"] >= (video_duration * 0.18) and st["end"] <= (video_duration * 0.78)]
+        if not mid_sents:
+            mid_sents = [st for st in sentences if st["start"] >= (video_duration * 0.15)]
+        tl2 = _pack_sentences(mid_sents, max_cap)
+        if tl2:
+            cands.append({
+                "title": "Opção 2: Desenvolvimento & Tensão",
+                "timeline": tl2,
+                "roteiro": {
+                    "premissa": "Corte alternativo focado no confronto central e desenvolvimento da cena.",
+                    "hook": "Abertura no momento de virada do diálogo intermediário.",
+                    "conflito_desenvolvimento": "Troca de falas e escalada de tensão.",
+                    "climax_fechamento": "Encerramento com fala decisiva do meio da cena."
+                }
+            })
+
+        end_sents = [st for st in sentences if st["start"] >= max(0.0, video_duration - max_cap - 15.0)]
+        if end_sents:
+            tl3 = _pack_sentences(end_sents, max_cap)
+            if tl3:
+                cands.append({
+                    "title": "Opção 3: Clímax & Desfecho Final",
+                    "timeline": tl3,
+                    "roteiro": {
+                        "premissa": "Corte alternativo focado no clímax absoluto e frase de impacto final.",
+                        "hook": "Entrada na reta final da cena com tensão acelerada.",
+                        "conflito_desenvolvimento": "A revelação e impacto das consequências.",
+                        "climax_fechamento": "Mic drop definitivo da conclusão da cena."
+                    }
+                })
+    else:
+        if p_max <= video_duration * 0.70:
+            cand_sents = [st for st in sentences if st["start"] >= max(0.0, video_duration - max_cap - 5.0)]
+            title = "Opção 2: Clímax & Fechamento"
+            prem = "Corte alternativo focado na resolução e clímax da cena."
+        else:
+            cand_sents = [st for st in sentences if st["end"] <= min(video_duration, max_cap + 10.0)]
+            title = "Opção 2: Abertura & Confronto"
+            prem = "Corte alternativo focado na apresentação e gancho inicial."
+
+        if not cand_sents:
+            cand_sents = [st for st in sentences if st["start"] >= (video_duration * 0.25)]
+        tl2 = _pack_sentences(cand_sents, max_cap)
+        if tl2:
+            cands.append({
+                "title": title,
+                "timeline": tl2,
+                "roteiro": {
+                    "premissa": prem,
+                    "hook": "Abertura no momento chave deste trecho alternativo.",
+                    "conflito_desenvolvimento": "Desenvolvimento fluido das falas.",
+                    "climax_fechamento": "Desfecho com frase completa."
+                }
+            })
+
+    # Failsafe Absoluto: se por qualquer razão (ex: falas contínuas sem quebra) cands ainda estiver vazio,
+    # sintetiza fatiamento temporal de segurança para nunca deixar de apresentar opções múltiplas!
+    if not cands and video_duration >= 70.0:
+        if video_duration >= 110.0:
+            s2 = round(max(0.0, video_duration * 0.25), 2)
+            e2 = round(min(video_duration, s2 + max_cap), 2)
+            s3 = round(max(0.0, video_duration - max_cap), 2)
+            e3 = round(video_duration, 2)
+            cands.append({
+                "title": "Opção 2: Bloco Intermediário",
+                "timeline": [{"start": s2, "end": e2, "framing": "punch", "text": "[Ação Meio]"}],
+                "roteiro": {"premissa": "Foco no desenvolvimento intermediário da cena."}
+            })
+            cands.append({
+                "title": "Opção 3: Clímax & Desfecho Final",
+                "timeline": [{"start": s3, "end": e3, "framing": "reaction", "text": "[Clímax Final]"}],
+                "roteiro": {"premissa": "Foco no clímax e encerramento da cena."}
+            })
+        else:
+            if p_max <= video_duration * 0.65:
+                s2 = round(max(0.0, video_duration - max_cap), 2)
+                e2 = round(video_duration, 2)
+                t2_title = "Opção 2: Clímax & Fechamento"
+                t2_prem = "Foco no desfecho e clímax da segunda metade da cena."
+            else:
+                s2 = 0.0
+                e2 = round(min(video_duration, max_cap), 2)
+                t2_title = "Opção 2: Abertura & Confronto"
+                t2_prem = "Foco no momento inicial e apresentação da cena."
+            cands.append({
+                "title": t2_title,
+                "timeline": [{"start": s2, "end": e2, "framing": "punch", "text": "[Corte Alternativo]"}],
+                "roteiro": {"premissa": t2_prem}
+            })
+
+    return cands
 
 
 def build_refined_segments(
+
     all_words,
     video_duration,
     action_blocks=None,
@@ -3210,6 +3627,7 @@ def build_refined_segments(
     is_continuous_clip=False,
     is_dorama=False,
     audio_path=None,
+    video_path="",
     ai_engine="auto",
     local_model="",
     on_log=None
@@ -3257,6 +3675,7 @@ def build_refined_segments(
         is_dorama=is_dorama,
         ai_engine=ai_engine,
         local_model=local_model,
+        video_path=video_path,
         on_log=on_log
     )
 
@@ -3406,7 +3825,7 @@ def build_refined_segments(
     total_dur = sum(s["end"] - s["start"] for s in refined)
     if video_duration > 65.0 and total_dur > body_max + 0.5:
         if editorial_mode == "viral_59" or target_duration_mode == "viral_59s":
-            refined = _strictly_cap_segments_duration(refined, max_cap=body_max)
+            refined = _strictly_cap_segments_duration(refined, max_cap=body_max, all_words=all_words)
         elif len(refined) >= 2 and (refined[-1]["end"] - refined[-1]["start"]) < body_max:
             last_seg = refined[-1]
             last_dur = last_seg["end"] - last_seg["start"]
@@ -3481,6 +3900,7 @@ def build_refined_segments(
             max_duration_cap=59.0,
             local_model=local_model,
             ai_engine=ai_engine,
+            video_path=video_path,
             on_log=on_log
         )
 
@@ -3488,10 +3908,25 @@ def build_refined_segments(
     # Validação Final: sem overlap nem micro-engasgos, preservando a ordem editorial e blocos contínuos
     refined = finalize_ordered_segments(refined)
 
-    # ── ZERO SILÊNCIO NO FRAME 0 (Garantia Absoluta de Retenção Viral) ──
-    # Descarta segmentos iniciais sem fala e corta qualquer silêncio antes da primeira palavra falada (a menos que seja um momento solicitado pelo usuário)
+    def _seg_overlaps_action(seg: dict, window_end: Optional[float] = None) -> bool:
+        if not action_blocks or not seg:
+            return False
+        s_a = float(seg.get("start", 0.0))
+        e_a = float(seg.get("end", s_a))
+        if window_end is not None:
+            e_a = min(e_a, window_end)
+        return any(
+            float(ab.get("end", 0.0)) > s_a and float(ab.get("start", 0.0)) < e_a
+            for ab in action_blocks
+        )
+
+    # ── ZERO SILÊNCIO NO FRAME 0 (Garantia Absoluta de Retenção Viral, protegendo Ação Visual) ──
+    # Descarta segmentos iniciais sem fala (exceto quando há ação visual real) e corta silêncio morto pré-fala
     if refined and all_words and not user_feedback:
         while refined:
+            if _seg_overlaps_action(refined[0], window_end=refined[0]["start"] + 3.5):
+                refined[0]["has_opening_action"] = True
+                break
             sw = [w for w in all_words if (refined[0]["start"] - 0.20) <= w.get("start", 0.0) <= refined[0]["end"]]
             if sw:
                 break
@@ -3499,7 +3934,7 @@ def build_refined_segments(
                 on_log(f"[ANTI-SILÊNCIO] Descartando cena inicial sem fala: [{refined[0]['start']:.2f}s -> {refined[0]['end']:.2f}s]")
             refined.pop(0)
 
-        if refined:
+        if refined and not refined[0].get("has_opening_action"):
             sw = [w for w in all_words if (refined[0]["start"] - 0.20) <= w.get("start", 0.0) <= refined[0]["end"]]
             if sw:
                 first_w = sw[0]
@@ -3519,7 +3954,7 @@ def build_refined_segments(
                         refined[0]["start"] = new_s
 
     # Alinhamento Acústico Fino (caso audio_path esteja disponível nesta fase)
-    if refined and audio_path and os.path.exists(str(audio_path)):
+    if refined and audio_path and os.path.exists(str(audio_path)) and not refined[0].get("has_opening_action"):
         align_opening_segment_to_acoustic_speech(
             opening_segment=refined[0],
             audio_path_or_video=str(audio_path),
@@ -3554,18 +3989,43 @@ def build_refined_segments(
         is_dorama=is_dorama
     )
 
-    # Trava Final Rígida de Duração para Perfil 59s (Garantia Matemática Absoluta <= 59.0s)
-    if target_duration_mode == "viral_59s" or editorial_mode == "viral_59":
-        refined = _strictly_cap_segments_duration(refined, max_cap=59.0)
-        final_total = sum(max(0.0, s["end"] - s["start"]) for s in refined)
-        if on_log:
-            on_log(f"⚡ [VIRAL FLOW 59s] Duração consolidada com rigor absoluto: {final_total:.2f}s (Teto Garantido ≤ 59.0s)")
-
-    # Absolute ultimate failsafe: NEVER return empty!
+    # Absolute ultimate failsafe BEFORE duration cap: NEVER return empty!
     if not refined:
         refined = [{"start": 0.0, "end": round(video_duration, 3), "text": "[Mastercut Completo]", "framing": "wide"}]
 
+    # Trava Final Rígida de Duração para Perfil 59s (Garantia Matemática Absoluta <= 59.0s)
+    if target_duration_mode == "viral_59s" or editorial_mode == "viral_59":
+        refined = _strictly_cap_segments_duration(refined, max_cap=59.0, all_words=all_words)
+
+    final_total = sum(max(0.0, s["end"] - s["start"]) for s in refined)
+    if on_log:
+        ai_src = (roteiro or {}).get("_ai_source", "")
+        is_v59 = (target_duration_mode == "viral_59s" or editorial_mode == "viral_59")
+        if is_v59:
+            on_log(f"⚡ [VIRAL FLOW 59s] Duração consolidada com rigor absoluto: {final_total:.2f}s (Teto Garantido ≤ 59.0s)")
+        if needs_heuristic and not raw_parsed:
+            origin_label = "⚠️ Fallback Heurístico (IA indisponível ou cortes fora dos limites)"
+        elif needs_heuristic:
+            origin_label = f"🧠 IA ({ai_src or 'Motor IA'}) + Complemento Heurístico"
+        elif is_v59:
+            origin_label = f"🧠 IA ({ai_src or 'Motor IA'}) + Auditoria Dupla"
+        else:
+            origin_label = f"🧠 IA ({ai_src or 'Motor IA'})"
+        on_log(f"📌 [ORIGEM DO ROTEIRO] {origin_label}")
+        if refined:
+            on_log(f"📋 [MAPA FINAL DOS CORTES] {len(refined)} bloco(s) · Total: {final_total:.2f}s:")
+            for idx, seg in enumerate(refined, 1):
+                seg_dur = max(0.0, seg["end"] - seg["start"])
+                txt_prev = (seg.get("text") or seg.get("reason") or "").replace("\n", " ").strip()[:65]
+                on_log(f"   {idx}. [{seg['start']:.2f}s → {seg['end']:.2f}s] ({seg_dur:.1f}s) [{seg.get('framing', 'wide')}] {txt_prev}")
+
+    # Atualiza a Opção 1 no roteiro caso a IA tenha retornado múltiplas opções curadas;
+    # não sintetiza mais opções cegas por fatiamento automático (preserva 100% o corte cirúrgico da IA).
+    if isinstance(roteiro, dict) and isinstance(roteiro.get("candidate_options"), list) and len(roteiro["candidate_options"]) > 1:
+        roteiro["candidate_options"][0]["timeline"] = refined
+
     return refined, roteiro
+
 
 
 # ─── FFmpeg Video Assembly ────────────────────────────────────────────────────
@@ -3597,10 +4057,9 @@ def render_mastercut_video(
     has_audio = check_video_has_audio(source_path) or bool(pre_isolated_audio_path)
     video_duration = get_video_duration(source_path)
 
-    # ── ZERO SILÊNCIO ACÚSTICO NO FRAME 0 (Garantia Absoluta de Retenção Viral) ──
-    # Se houver áudio (seja o isolado por Demucs ou do vídeo), elimina qualquer vácuo de silêncio
+    # ── ZERO SILÊNCIO ACÚSTICO NO FRAME 0 (protegendo ação inicial) + PROTEÇÃO DE REAÇÃO FINAL ──
     audio_for_onset = pre_isolated_audio_path if (pre_isolated_audio_path and os.path.exists(pre_isolated_audio_path)) else source_path
-    if segments and has_audio and audio_for_onset:
+    if segments and has_audio and audio_for_onset and not segments[0].get("has_opening_action"):
         while segments:
             align_opening_segment_to_acoustic_speech(
                 opening_segment=segments[0],
@@ -3617,6 +4076,20 @@ def render_mastercut_video(
                 segments.pop(0)
             else:
                 break
+
+    audio_for_tail = source_path if check_video_has_audio(source_path) else audio_for_onset
+    if segments and audio_for_tail and os.path.exists(str(audio_for_tail)):
+        cur_sum = sum(max(0.0, s["end"] - s["start"]) for s in segments)
+        tail_budget = max(0.0, 59.0 - cur_sum) if editorial_mode == "viral_59" else None
+        align_closing_segment_to_acoustic_tail(
+            closing_segment=segments[-1],
+            audio_path_or_video=str(audio_for_tail),
+            video_duration=video_duration,
+            ffmpeg_bin=ffmpeg_bin,
+            max_extend=1.1,
+            remaining_cap_budget=tail_budget,
+            on_log=on_log,
+        )
 
 
     # Detect resolution
@@ -4036,6 +4509,24 @@ class MastercutPipeline:
         if not clean_work_title and not clean_scene_context and video_context:
             clean_work_title = video_context.strip()
 
+        # Detecção automática do título do anime/série caso o campo esteja vazio
+        if not clean_work_title and video_path:
+            try:
+                from metadata_enricher import _parse_episode_info, clean_media_query
+                raw_base = os.path.splitext(os.path.basename(video_path))[0]
+                # Remove sufixos de cortes do Diretor/Refinador (_parte001_..., _19m30s, _mastercut_...)
+                raw_base_stripped = re.sub(r'(?i)_parte\d+.*$', '', raw_base)
+                raw_base_stripped = re.sub(r'(?i)_(?:mastercut|highlight|corte|clip).*$', '', raw_base_stripped)
+                raw_base_stripped = re.sub(r'(?i)_\d+m\d+s.*$', '', raw_base_stripped)
+                raw_base_stripped = re.sub(r'(\(\d{4}\))_.*$', r'\1', raw_base_stripped).strip(' _-')
+                ep_parsed = _parse_episode_info(raw_base_stripped or os.path.basename(video_path))
+                if ep_parsed.get("anime_name"):
+                    clean_work_title = ep_parsed["anime_name"]
+                else:
+                    clean_work_title = clean_media_query(raw_base_stripped or os.path.basename(video_path))
+            except Exception:
+                pass
+
         if not is_dorama:
             ctx_lower = f"{clean_work_title} {clean_scene_context} {video_context}".lower()
             is_dorama = (
@@ -4109,6 +4600,11 @@ class MastercutPipeline:
                     on_log=on_log,
                     ai_engine=ai_engine
                 )
+                if on_log:
+                    if all_words:
+                        on_log(f"🎙️ [WHISPER] Transcrição finalizada: {len(all_words)} palavras mapeadas ({duration:.1f}s).")
+                    else:
+                        on_log("⚠️ [WHISPER] Atenção: 0 palavras mapeadas (cena silenciosa ou falha na transcrição).")
 
                 if self._cancelled:
                     raise InterruptedError("Operação cancelada pelo usuário.")
@@ -4171,6 +4667,7 @@ class MastercutPipeline:
                 is_continuous_clip=is_continuous_clip,
                 is_dorama=is_dorama,
                 audio_path=audio_source_for_whisper,
+                video_path=video_path,
                 ai_engine=ai_engine,
                 local_model=local_model,
                 on_log=on_log
@@ -4203,6 +4700,109 @@ class MastercutPipeline:
                 pre_isolated_audio_path=pre_isolated_audio
             )
             
+            # Multi-Option candidate compilation (for longer clips > 75s / 3-4 min)
+            candidate_options = roteiro.get("candidate_options", []) if isinstance(roteiro, dict) else []
+            rendered_options = []
+            
+            # Opção 1 sempre representa a renderização principal que acabou de concluir com sucesso
+            opt1_title = candidate_options[0].get("title", "Opção 1: Principal") if candidate_options else "Opção 1: Principal"
+            opt1_roteiro = candidate_options[0].get("roteiro", roteiro) if candidate_options else roteiro
+            opt1_dur = stats.get("duration_after", stats.get("duration", 0.0))
+            rendered_options.append({
+                "index": 1,
+                "title": opt1_title,
+                "duration": opt1_dur,
+                "duration_after": opt1_dur,
+                "output_path": output_path,
+                "segments": segments,
+                "roteiro": opt1_roteiro
+            })
+
+            if len(candidate_options) > 1 and target_duration_mode != "viral_59s" and editorial_mode != "viral_59":
+                if on_log:
+                    on_log(f"🎬 [OPÇÕES MÚLTIPLAS] Renderizando {len(candidate_options) - 1} opção(ões) alternativa(s) adaptada(s) ao tom da cena...")
+                
+                out_p_obj = Path(output_path)
+                parent_dir = out_p_obj.parent
+                stem = out_p_obj.stem
+                suffix = out_p_obj.suffix or ".mp4"
+
+                for cand_idx, cand in enumerate(candidate_options[1:], start=2):
+                    if self._cancelled:
+                        break
+                    cand_title = cand.get("title", f"Opção {cand_idx}")
+                    cand_raw_tl = cand.get("timeline", [])
+                    cand_roteiro = cand.get("roteiro", {})
+                    
+                    if not cand_raw_tl:
+                        continue
+                    
+                    # Normaliza e alinha cortes da opção alternativa
+                    cand_segs = []
+                    for c in cand_raw_tl:
+                        s_t, e_t, txt, framing = _extract_chunk_bounds(c)
+                        if s_t is not None and e_t is not None and e_t > s_t:
+                            s_t_r = round(max(0.0, s_t - 0.080), 3)
+                            e_t_r = round(min(duration, e_t + 0.250), 3)
+                            if e_t_r > s_t_r:
+                                cand_segs.append({
+                                    "start": s_t_r,
+                                    "end": e_t_r,
+                                    "text": txt,
+                                    "framing": framing
+                                })
+                    
+                    if not cand_segs:
+                        continue
+
+                    # Alinha com as frases do Whisper para não amputar falas
+                    if all_words:
+                        cand_segs = align_segments_to_speech_boundaries(cand_segs, all_words, duration)
+                    
+                    # Garante teto de 59s se estiver no modo viral_59
+                    if target_duration_mode == "viral_59s" or editorial_mode == "viral_59":
+                        cand_segs = _strictly_cap_segments_duration(cand_segs, max_cap=59.0)
+                    
+                    cand_out_name = f"{stem}_opcao_{cand_idx}{suffix}"
+                    cand_out_path = str(parent_dir / cand_out_name)
+                    
+                    if on_log:
+                        on_log(f"🎬 Renderizando {cand_title} -> {cand_out_name}...")
+
+                    try:
+                        cand_stats = render_mastercut_video(
+                            source_path=video_path,
+                            segments=cand_segs,
+                            output_path=cand_out_path,
+                            vocal_isolation=vocal_isolation,
+                            demucs_isolation=demucs_isolation,
+                            anti_copyright=anti_copyright,
+                            enable_loop=enable_loop,
+                            editorial_mode=editorial_mode,
+                            roteiro=cand_roteiro,
+                            on_progress=None,
+                            on_log=None,
+                            pre_isolated_audio_path=pre_isolated_audio
+                        )
+                        cand_dur = cand_stats.get("duration_after", cand_stats.get("duration", 0.0))
+                        rendered_options.append({
+                            "index": cand_idx,
+                            "title": cand_title,
+                            "duration": cand_dur,
+                            "duration_after": cand_dur,
+                            "output_path": cand_out_path,
+                            "segments": cand_segs,
+                            "roteiro": cand_roteiro
+                        })
+                    except Exception as e_opt:
+                        if on_log:
+                            on_log(f"⚠️ [OPÇÃO {cand_idx}] Aviso ao renderizar opção alternativa: {e_opt}")
+
+            if len(rendered_options) > 1:
+                stats["options"] = rendered_options
+                if on_log:
+                    on_log(f"✨ [SUCESSO TOTAL] {len(rendered_options)} opções de vídeo refinado prontas para escolha!")
+
             try:
                 if pre_isolated_audio and os.path.exists(pre_isolated_audio):
                     os.remove(pre_isolated_audio)

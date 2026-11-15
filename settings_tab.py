@@ -26,7 +26,9 @@ from settings_manager import (
     test_ollama_connection,
     AVAILABLE_GEMINI_MODELS,
     AVAILABLE_DIRECTOR_ENGINES,
+    AVAILABLE_GEMINI_WEB_MODELS,
     AVAILABLE_OLLAMA_MODELS,
+    AVAILABLE_WHISPER_MODES,
     get_all_selectable_ollama_models,
     get_installed_ollama_models,
 )
@@ -341,6 +343,84 @@ class SettingsTab(ctk.CTkFrame):
         )
         self.test_ollama_btn.pack(side="left", padx=(10, 0))
 
+        # Modelo do Gemini Web (Navegador)
+        gw_row = ctk.CTkFrame(card, fg_color="transparent")
+        gw_row.pack(fill="x", padx=16, pady=(4, 4))
+
+        ctk.CTkLabel(
+            gw_row,
+            text="Modelo Gemini Web:",
+            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+            text_color=COLORS["text_secondary"],
+            width=160,
+            anchor="w",
+        ).pack(side="left", padx=(0, 10))
+
+        self.gemini_web_combo = ctk.CTkComboBox(
+            gw_row,
+            values=[label for _, label in AVAILABLE_GEMINI_WEB_MODELS],
+            font=ctk.CTkFont(family="Segoe UI", size=11),
+            dropdown_font=ctk.CTkFont(family="Segoe UI", size=11),
+            fg_color="#0d0d0f",
+            border_color=COLORS["border"],
+            button_color=COLORS["border"],
+            button_hover_color=COLORS["border_active"],
+            text_color=COLORS["text_primary"],
+            dropdown_fg_color="#18181b",
+            dropdown_text_color=COLORS["text_primary"],
+            dropdown_hover_color="#27272a",
+            width=360,
+            corner_radius=6,
+        )
+        self.gemini_web_combo.pack(side="left")
+
+        # Checkbox da Cascata de Fallback Web
+        gw_fb_row = ctk.CTkFrame(card, fg_color="transparent")
+        gw_fb_row.pack(fill="x", padx=16, pady=(0, 8))
+
+        self.gemini_web_fb_chk = ctk.CTkCheckBox(
+            gw_fb_row,
+            text="Cascata Automática de Fallback (4 Argon ➔ 3.1 Pro ➔ 3.8 Flash ➔ 3.5 Flash Lite)",
+            font=ctk.CTkFont(family="Segoe UI", size=10),
+            text_color="#a1a1aa",
+            fg_color="#10b981",
+            hover_color="#059669",
+            checkmark_color="#ffffff",
+            border_color="#3f3f46",
+        )
+        self.gemini_web_fb_chk.pack(side="left", padx=(170, 0))
+
+        # Motor Whisper (Transcrição de Áudio / Legendas)
+        wh_row = ctk.CTkFrame(card, fg_color="transparent")
+        wh_row.pack(fill="x", padx=16, pady=(4, 8))
+
+        ctk.CTkLabel(
+            wh_row,
+            text="Motor Whisper (Falas):",
+            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+            text_color=COLORS["text_secondary"],
+            width=160,
+            anchor="w",
+        ).pack(side="left", padx=(0, 10))
+
+        self.whisper_mode_combo = ctk.CTkComboBox(
+            wh_row,
+            values=[label for _, label in AVAILABLE_WHISPER_MODES],
+            font=ctk.CTkFont(family="Segoe UI", size=11),
+            dropdown_font=ctk.CTkFont(family="Segoe UI", size=11),
+            fg_color="#0d0d0f",
+            border_color=COLORS["border"],
+            button_color=COLORS["border"],
+            button_hover_color=COLORS["border_active"],
+            text_color=COLORS["text_primary"],
+            dropdown_fg_color="#18181b",
+            dropdown_text_color=COLORS["text_primary"],
+            dropdown_hover_color="#27272a",
+            width=360,
+            corner_radius=6,
+        )
+        self.whisper_mode_combo.pack(side="left")
+
         # ── Fallback Gratuito Section (Anti-Parada) ──
         fallback_card = ctk.CTkFrame(
             card, fg_color="#131713",
@@ -652,6 +732,27 @@ class SettingsTab(ctk.CTkFrame):
             matched_local_label = self.selectable_ollama_models[0][1]
         self.local_model_combo.set(matched_local_label or "qwen2.5:7b")
 
+        cur_gw_model = settings.get("gemini_web_model", "4 Argon")
+        matched_gw_label = None
+        for code, label in AVAILABLE_GEMINI_WEB_MODELS:
+            if code.lower() in cur_gw_model.lower() or cur_gw_model.lower() in code.lower():
+                matched_gw_label = label
+                break
+        self.gemini_web_combo.set(matched_gw_label or AVAILABLE_GEMINI_WEB_MODELS[0][1])
+
+        if settings.get("gemini_web_fallback", True):
+            self.gemini_web_fb_chk.select()
+        else:
+            self.gemini_web_fb_chk.deselect()
+
+        cur_wh_mode = settings.get("whisper_mode", "auto")
+        matched_wh_label = None
+        for code, label in AVAILABLE_WHISPER_MODES:
+            if code == cur_wh_mode:
+                matched_wh_label = label
+                break
+        self.whisper_mode_combo.set(matched_wh_label or AVAILABLE_WHISPER_MODES[0][1])
+
         self.groq_entry.delete(0, "end")
         self.groq_entry.insert(0, settings.get("groq_key", ""))
 
@@ -682,6 +783,21 @@ class SettingsTab(ctk.CTkFrame):
         selected_local_label = self.local_model_combo.get()
         local_model_code = self.local_model_keys_by_label.get(selected_local_label, "qwen2.5:7b")
 
+        selected_gw_label = self.gemini_web_combo.get()
+        gw_model_code = "4 Argon"
+        for code, label in AVAILABLE_GEMINI_WEB_MODELS:
+            if label == selected_gw_label:
+                gw_model_code = code
+                break
+        gw_fallback_val = bool(self.gemini_web_fb_chk.get())
+
+        selected_wh_label = self.whisper_mode_combo.get()
+        whisper_mode_code = "auto"
+        for code, label in AVAILABLE_WHISPER_MODES:
+            if label == selected_wh_label:
+                whisper_mode_code = code
+                break
+
         groq_val = self.groq_entry.get().strip()
         if groq_val and (groq_val.startswith("AQ.") or groq_val.startswith("AIzaSy")):
             groq_val = ""
@@ -698,12 +814,15 @@ class SettingsTab(ctk.CTkFrame):
         success, msg = save_app_settings(
             gemini_keys_text=keys_text,
             gemini_model=model_code,
+            gemini_web_model=gw_model_code,
+            gemini_web_fallback=gw_fallback_val,
             groq_key=groq_val,
             openrouter_key=or_val,
             felo_key=felo_val,
             check_updates=True,
             director_engine=engine_code,
-            director_local_model=local_model_code
+            director_local_model=local_model_code,
+            whisper_mode=whisper_mode_code,
         )
 
         if success:
@@ -888,7 +1007,7 @@ class SettingsTab(ctk.CTkFrame):
         # 7. Gemini Web Automator
         gw = engines.get("gemini_web", {})
         if gw.get("logged_in"):
-            gw_detail = "Conectado com sucesso! Sessão Google ativa para automação com tokens ilimitados do chat web."
+            gw_detail = "Conectado com sucesso! Sessão Google ativa para automação com tokens ilimitados do chat web (Modelo: 4 Argon)."
             gw_btn_text = "Re-autenticar Conta"
         elif gw.get("chrome_installed"):
             gw_detail = "Google Chrome detectado. Faça login para usar a automação do Gemini Web."
@@ -897,6 +1016,18 @@ class SettingsTab(ctk.CTkFrame):
             gw_detail = "Google Chrome não encontrado nos caminhos padrão."
             gw_btn_text = "Instalar Google Chrome"
 
+        def _reset_gemini_web_chats():
+            try:
+                import gemini_web_automator
+                gemini_web_automator.clear_chat_session()
+                messagebox.showinfo(
+                    "Chats Resetados",
+                    "Todas as sessões de chat salvas do Gemini Web foram limpas com sucesso!\n"
+                    "As próximas análises iniciarão novos chats dedicados para cada anime/tópico."
+                )
+            except Exception as e:
+                messagebox.showerror("Erro ao Limpar", f"Não foi possível limpar os chats: {e}")
+
         self._render_engine_card(
             title="Gemini Web Automator (Navegador Pro em Segundo Plano)",
             desc="Executa o Gemini diretamente pelo navegador sem limites de tokens da API oficial.",
@@ -904,12 +1035,14 @@ class SettingsTab(ctk.CTkFrame):
             detail=gw_detail,
             action_btn_text=gw_btn_text,
             action_cmd=self._open_gemini_web_login,
+            secondary_btn_text="Limpar Chats Salvos" if gw.get("logged_in") else None,
+            secondary_cmd=_reset_gemini_web_chats if gw.get("logged_in") else None,
         )
 
     def _start_ollama_service(self):
         try:
             import subprocess
-            subprocess.Popen(["ollama", "serve"], creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
+            subprocess.Popen(["ollama", "serve"], creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0, cwd=os.path.expanduser("~"))
             self.after(1500, self.refresh_engine_status)
             messagebox.showinfo("Ollama", "Comando de inicialização do Ollama enviado!")
         except Exception as e:
@@ -1045,7 +1178,7 @@ class SettingsTab(ctk.CTkFrame):
         )
         web_btn.pack(side="right")
 
-    def _render_engine_card(self, title: str, desc: str, is_ok: bool, detail: str, action_btn_text: Optional[str] = None, action_cmd: Optional[Callable] = None):
+    def _render_engine_card(self, title: str, desc: str, is_ok: bool, detail: str, action_btn_text: Optional[str] = None, action_cmd: Optional[Callable] = None, secondary_btn_text: Optional[str] = None, secondary_cmd: Optional[Callable] = None):
         row = ctk.CTkFrame(self.engines_container, fg_color="#141416", corner_radius=8, border_width=1, border_color=COLORS["border"])
         row.pack(fill="x", pady=4)
 
@@ -1093,6 +1226,18 @@ class SettingsTab(ctk.CTkFrame):
                 command=action_cmd,
             )
             btn.pack(side="right", padx=(8, 0))
+
+        if secondary_btn_text and secondary_cmd:
+            sec_btn = ctk.CTkButton(
+                inner, text=secondary_btn_text,
+                font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
+                fg_color="#18181b",
+                hover_color=COLORS["border_active"],
+                text_color=COLORS["text_secondary"],
+                corner_radius=6, height=28,
+                command=secondary_cmd,
+            )
+            sec_btn.pack(side="right", padx=(8, 0))
 
     def _auto_download_ffmpeg(self):
         """Trigger automatic 1-click download of FFmpeg."""

@@ -11,6 +11,7 @@ Permite ao usuario:
 import os
 from pathlib import Path
 import customtkinter as ctk
+from tkinter import filedialog, messagebox
 import icon_manager
 import subtitle_preview_helper
 from video_preview_player import VideoPreviewPlayer
@@ -142,6 +143,39 @@ EFFECT_KEY_MAP = {
     "Texto Fixo (Sem Efeito)": "none",
 }
 
+MANGA_FEELINGS_PRESETS = [
+    ("auto", "🤖 IA Visual"),
+    ("domain_dark", "🌌 Cosmic"),
+    ("blade_stream", "⚔️ Katana"),
+    ("golden_god", "✨ Ouro"),
+    ("blood_ink", "🩸 Berserk"),
+    ("electric", "⚡ Raio"),
+    ("cyber_glitch", "👾 Glitch"),
+    ("comic_halftone", "💥 Gibi"),
+    ("emotional_tear", "💧 Lágrima"),
+    ("dramatic_silence", "🤫 Silêncio"),
+    ("silver_grief", "🌧️ Prata Triste"),
+    ("midnight_sorrow", "🌙 Meia-Noite"),
+    ("fading_echo", "🌫️ Eco Suave"),
+    ("broken_promise", "💔 Promessa"),
+    ("cold_solitude", "❄️ Solidão"),
+    ("sakura_bloom", "🌸 Sakura"),
+    ("golden_romance", "💛 Romance"),
+    ("heart_pulse", "💖 Pulso"),
+    ("velvet_kiss", "💋 Veludo"),
+    ("starlight_crush", "✨ Estelar"),
+    ("sweet_blush", "🍑 Rubor"),
+    ("eternal_vow", "💍 Juramento"),
+    ("cursed_aura", "🔮 Maldição"),
+    ("abyssal_void", "🕳️ Abismo"),
+    ("fire", "🔥 Fogo"),
+    ("offset_comic", "🎨 Pop 3D"),
+    ("shonen_badge", "🛡️ Badge"),
+    ("manga_bubble", "💬 Balão"),
+    ("slam", "🗡️ Slam"),
+]
+FEELING_LABELS = dict(MANGA_FEELINGS_PRESETS)
+
 
 def sec_to_str(seconds: float) -> str:
     m = int(seconds // 60)
@@ -179,6 +213,9 @@ class SubtitleEditorDialog(ctk.CTkToplevel):
         anti_copyright: bool = False,
         anti_copyright_mode: str = "advanced",
         on_music_volume_change: Optional[Callable[[float], None]] = None,
+        on_music_change: Optional[Callable[[Optional[str], float], None]] = None,
+        on_save_draft: Optional[Callable[..., None]] = None,
+        on_reset_to_whisper: Optional[Callable[[], None]] = None,
         **kwargs
     ):
         super().__init__(parent, **kwargs)
@@ -188,6 +225,9 @@ class SubtitleEditorDialog(ctk.CTkToplevel):
         self.configure(fg_color=COLORS["bg_dark"])
 
         self.on_confirm = on_confirm
+        self.on_music_change = on_music_change
+        self.on_save_draft = on_save_draft
+        self.on_reset_to_whisper = on_reset_to_whisper
         self.items = [dict(it) for it in items]
         self.video_duration = video_duration
         self.video_path = video_path
@@ -226,6 +266,27 @@ class SubtitleEditorDialog(ctk.CTkToplevel):
             font=ctk.CTkFont(size=18, weight="bold"),
             text_color=COLORS["accent"]
         ).grid(row=0, column=0, padx=16, pady=(12, 2), sticky="w")
+
+        if getattr(self, "on_reset_to_whisper", None):
+            def _do_reset():
+                if messagebox.askyesno(
+                    "Restaurar Whisper",
+                    "Deseja descartar as alterações manuais e restaurar a transcrição original do Whisper?"
+                ):
+                    self.destroy()
+                    if callable(self.on_reset_to_whisper):
+                        self.on_reset_to_whisper()
+
+            ctk.CTkButton(
+                header,
+                text="🔄 Restaurar Transcrição Original",
+                font=ctk.CTkFont(size=11, weight="bold"),
+                height=28,
+                fg_color="#27272a",
+                hover_color="#3f3f46",
+                text_color=COLORS["accent"],
+                command=_do_reset
+            ).grid(row=0, column=1, rowspan=2, padx=(0, 16), pady=10, sticky="e")
 
         sub_hint = "Corrija nomes de personagens, troque palavras ou ajuste o tempo das falas."
         if self.video_duration and self.video_duration > 0:
@@ -409,7 +470,7 @@ class SubtitleEditorDialog(ctk.CTkToplevel):
 
         ctk.CTkLabel(
             manga_toolbar_row,
-            text="💡 Dica: 2 falas consecutivas viram Linha 1 e 2 do mesmo card!",
+            text="💡 Dica: 2 falas consecutivas viram 1 card • Clique dir. no botão para trocar o estilo/animação!",
             font=ctk.CTkFont(size=10, slant="italic"),
             text_color="#94a3b8"
         ).pack(side="right", padx=10, pady=4)
@@ -446,101 +507,7 @@ class SubtitleEditorDialog(ctk.CTkToplevel):
             self.preview_player.pack(pady=(0, 6))
 
             # Barra de Prévia e Ajuste da Música de Fundo (BGM)
-            if self.music_path and os.path.exists(self.music_path):
-                music_name = Path(self.music_path).name
-                if len(music_name) > 30:
-                    music_name = music_name[:27] + "..."
-
-                bgm_ctrl = ctk.CTkFrame(
-                    player_frame,
-                    fg_color="#09090b",
-                    corner_radius=8,
-                    border_width=1,
-                    border_color="#27272a"
-                )
-                bgm_ctrl.pack(fill="x", padx=12, pady=(0, 8))
-                bgm_ctrl.grid_columnconfigure(2, weight=1)
-
-                lbl_info = ctk.CTkLabel(
-                    bgm_ctrl,
-                    text=f"🎵 Música: {music_name}",
-                    font=ctk.CTkFont(size=11, weight="bold"),
-                    text_color="#38bdf8"
-                )
-                lbl_info.grid(row=0, column=0, padx=(12, 10), pady=6, sticky="w")
-
-                init_pct = int(self.music_volume * 100)
-                self.lbl_bgm_volume = ctk.CTkLabel(
-                    bgm_ctrl,
-                    text=f"Volume BGM: {init_pct}%",
-                    font=ctk.CTkFont(size=11, weight="bold"),
-                    text_color="#e4e4e7"
-                )
-                self.lbl_bgm_volume.grid(row=0, column=1, padx=(0, 8), pady=6, sticky="w")
-
-                def _on_bgm_slider(val):
-                    pct = int(val)
-                    vol = pct / 100.0
-                    self.music_volume = vol
-                    self.lbl_bgm_volume.configure(text=f"Volume BGM: {pct}%")
-                    if self.preview_player:
-                        self.preview_player.set_bgm_volume(vol)
-                    if self.on_music_volume_change:
-                        try:
-                            self.on_music_volume_change(vol)
-                        except Exception:
-                            pass
-
-                self.bgm_slider = ctk.CTkSlider(
-                    bgm_ctrl,
-                    from_=0,
-                    to=100,
-                    number_of_steps=100,
-                    progress_color="#38bdf8",
-                    button_color="#38bdf8",
-                    button_hover_color="#0284c7",
-                    command=_on_bgm_slider,
-                    width=150
-                )
-                self.bgm_slider.set(init_pct)
-                self.bgm_slider.grid(row=0, column=2, padx=(0, 14), pady=6, sticky="ew")
-
-                def _toggle_bgm_mute():
-                    if self.preview_player:
-                        is_muted = self.preview_player.toggle_bgm_mute()
-                        self.music_muted = is_muted
-                        if is_muted:
-                            self.btn_bgm_mute.configure(
-                                text=" 🔇 Música Mutada (Foco na Fala)",
-                                image=icon_manager.get_icon("mute", size=(13, 13), color="#ef4444"),
-                                fg_color="#451a1a",
-                                hover_color="#7f1d1d",
-                                text_color="#fca5a5"
-                            )
-                        else:
-                            self.btn_bgm_mute.configure(
-                                text=" 🔊 Mutar Só a Música",
-                                image=icon_manager.get_icon("volume", size=(13, 13), color="#e4e4e7"),
-                                fg_color="#18181b",
-                                hover_color="#27272a",
-                                text_color="#e4e4e7"
-                            )
-
-                self.btn_bgm_mute = ctk.CTkButton(
-                    bgm_ctrl,
-                    text=" 🔊 Mutar Só a Música",
-                    image=icon_manager.get_icon("volume", size=(13, 13), color="#e4e4e7"),
-                    font=ctk.CTkFont(size=11, weight="bold"),
-                    fg_color="#18181b",
-                    hover_color="#27272a",
-                    text_color="#e4e4e7",
-                    border_width=1,
-                    border_color="#3f3f46",
-                    height=28,
-                    corner_radius=6,
-                    command=_toggle_bgm_mute
-                )
-                self.btn_bgm_mute.grid(row=0, column=3, padx=(0, 10), pady=6, sticky="e")
+            self._build_bgm_bar(player_frame)
 
             current_row += 1
 
@@ -604,25 +571,226 @@ class SubtitleEditorDialog(ctk.CTkToplevel):
         ctk.CTkButton(
             footer,
             text="Cancelar",
-            width=100,
+            width=90,
             height=44,
             fg_color=COLORS["bg_card"],
             hover_color=COLORS["bg_card_hover"],
             text_color=COLORS["text_secondary"],
             command=self.destroy
-        ).grid(row=0, column=4, padx=(0, 10), pady=6)
+        ).grid(row=0, column=4, padx=(0, 6), pady=6)
+
+        ctk.CTkButton(
+            footer,
+            text="💾 Salvar Edições",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            width=135,
+            height=44,
+            fg_color="#182c23",
+            hover_color="#223e32",
+            text_color="#34d399",
+            border_width=1,
+            border_color="#10b981",
+            command=self._save_draft_and_close
+        ).grid(row=0, column=5, padx=(0, 6), pady=6)
 
         ctk.CTkButton(
             footer,
             text="GERAR VÍDEO FINAL",
             image=icon_manager.get_icon("play", size=(16, 16), color="#09090b"), compound="left",
             height=44,
-            width=220,
-            font=ctk.CTkFont(size=14, weight="bold"),
+            width=190,
+            font=ctk.CTkFont(size=13, weight="bold"),
             fg_color=COLORS["accent_green"],
             hover_color=COLORS["accent_green_hover"],
             command=self._confirm_and_render
-        ).grid(row=0, column=5, padx=0, pady=6)
+        ).grid(row=0, column=6, padx=(0, 10), pady=6)
+
+    def _build_bgm_bar(self, parent):
+        """Cria e empacota a barra de controle de BGM interativa do player."""
+        self.bgm_ctrl = ctk.CTkFrame(
+            parent,
+            fg_color="#09090b",
+            corner_radius=8,
+            border_width=1,
+            border_color="#27272a"
+        )
+        self.bgm_ctrl.pack(fill="x", padx=12, pady=(0, 8))
+        self._refresh_bgm_bar()
+
+    def _refresh_bgm_bar(self):
+        """Atualiza a barra de BGM com controles para ouvir, trocar ou remover a música."""
+        for w in self.bgm_ctrl.winfo_children():
+            w.destroy()
+
+        has_music = bool(self.music_path and os.path.exists(self.music_path))
+        if has_music and self.music_path:
+            music_name = Path(self.music_path).name
+            display_name = music_name if len(music_name) <= 24 else music_name[:21] + "..."
+
+            left_frame = ctk.CTkFrame(self.bgm_ctrl, fg_color="transparent")
+            left_frame.pack(side="left", padx=10, pady=6)
+
+            ctk.CTkLabel(
+                left_frame,
+                text=f"🎵 {display_name}",
+                font=ctk.CTkFont(size=11, weight="bold"),
+                text_color="#38bdf8"
+            ).pack(side="left", padx=(0, 6))
+
+            ctk.CTkButton(
+                left_frame,
+                text="📁 Trocar",
+                font=ctk.CTkFont(size=11),
+                height=26, width=65,
+                fg_color="#18181b", hover_color="#27272a",
+                border_width=1, border_color="#3f3f46",
+                command=self._choose_music_file
+            ).pack(side="left", padx=(0, 4))
+
+            ctk.CTkButton(
+                left_frame,
+                text="✕",
+                font=ctk.CTkFont(size=11, weight="bold"),
+                height=26, width=28,
+                fg_color="#27272a", hover_color="#dc2626",
+                text_color="#f87171",
+                command=self._remove_music
+            ).pack(side="left", padx=(0, 8))
+
+            right_frame = ctk.CTkFrame(self.bgm_ctrl, fg_color="transparent")
+            right_frame.pack(side="right", padx=10, pady=6)
+
+            init_pct = int(self.music_volume * 100)
+            self.lbl_bgm_volume = ctk.CTkLabel(
+                right_frame,
+                text=f"Vol: {init_pct}%",
+                font=ctk.CTkFont(size=11, weight="bold"),
+                text_color="#e4e4e7"
+            )
+            self.lbl_bgm_volume.pack(side="left", padx=(0, 6))
+
+            def _on_bgm_slider(val):
+                pct = int(val)
+                vol = pct / 100.0
+                self.music_volume = vol
+                self.lbl_bgm_volume.configure(text=f"Vol: {pct}%")
+                if self.preview_player:
+                    self.preview_player.set_bgm_volume(vol)
+                if self.on_music_volume_change:
+                    try:
+                        self.on_music_volume_change(vol)
+                    except Exception:
+                        pass
+
+            self.bgm_slider = ctk.CTkSlider(
+                right_frame,
+                from_=0,
+                to=100,
+                number_of_steps=100,
+                progress_color="#38bdf8",
+                button_color="#38bdf8",
+                button_hover_color="#0284c7",
+                command=_on_bgm_slider,
+                width=110
+            )
+            self.bgm_slider.set(init_pct)
+            self.bgm_slider.pack(side="left", padx=(0, 8))
+
+            def _toggle_bgm_mute():
+                if self.preview_player:
+                    is_muted = self.preview_player.toggle_bgm_mute()
+                    self.music_muted = is_muted
+                    if is_muted:
+                        self.btn_bgm_mute.configure(
+                            text=" 🔇 Mutada",
+                            image=icon_manager.get_icon("mute", size=(12, 12), color="#ef4444"),
+                            fg_color="#451a1a",
+                            hover_color="#7f1d1d",
+                            text_color="#fca5a5"
+                        )
+                    else:
+                        self.btn_bgm_mute.configure(
+                            text=" 🔊 Mutar",
+                            image=icon_manager.get_icon("volume", size=(12, 12), color="#e4e4e7"),
+                            fg_color="#18181b",
+                            hover_color="#27272a",
+                            text_color="#e4e4e7"
+                        )
+
+            self.btn_bgm_mute = ctk.CTkButton(
+                right_frame,
+                text=" 🔊 Mutar" if not self.music_muted else " 🔇 Mutada",
+                image=icon_manager.get_icon("volume" if not self.music_muted else "mute", size=(12, 12), color="#e4e4e7" if not self.music_muted else "#ef4444"),
+                font=ctk.CTkFont(size=11, weight="bold"),
+                fg_color="#18181b" if not self.music_muted else "#451a1a",
+                hover_color="#27272a" if not self.music_muted else "#7f1d1d",
+                text_color="#e4e4e7" if not self.music_muted else "#fca5a5",
+                border_width=1,
+                border_color="#3f3f46",
+                height=26,
+                corner_radius=6,
+                command=_toggle_bgm_mute
+            )
+            self.btn_bgm_mute.pack(side="left")
+        else:
+            ctk.CTkLabel(
+                self.bgm_ctrl,
+                text="🎵 Nenhuma música de fundo ativa",
+                font=ctk.CTkFont(size=11),
+                text_color="#a1a1aa"
+            ).pack(side="left", padx=(12, 10), pady=6)
+
+            ctk.CTkButton(
+                self.bgm_ctrl,
+                text="🎵 + Adicionar Música de Fundo (MP3/WAV)",
+                font=ctk.CTkFont(size=11, weight="bold"),
+                fg_color="#064e3b",
+                hover_color="#047857",
+                border_width=1,
+                border_color="#10b981",
+                text_color="#34d399",
+                height=26,
+                corner_radius=6,
+                command=self._choose_music_file
+            ).pack(side="right", padx=(0, 10), pady=6)
+
+    def _choose_music_file(self):
+        """Abre diálogo para o usuário selecionar uma música de fundo e carrega imediatamente no player."""
+        f = filedialog.askopenfilename(
+            parent=self,
+            title="Selecione a Música de Fundo",
+            filetypes=[("Arquivos de Áudio", "*.mp3 *.wav *.m4a *.aac *.ogg *.flac"), ("Todos os arquivos", "*.*")]
+        )
+        if f and os.path.exists(f):
+            self.music_path = f
+            self._refresh_bgm_bar()
+            if self.preview_player:
+                self.preview_player.load_bgm(
+                    bgm_path=f,
+                    volume=self.music_volume,
+                    start_sec=str_to_sec(self.music_start),
+                    music_auto_ducking=self.music_auto_ducking,
+                    ducking_mode=self.ducking_mode,
+                    anti_copyright=self.anti_copyright,
+                    anti_copyright_mode=self.anti_copyright_mode
+                )
+            if self.on_music_change:
+                try:
+                    self.on_music_change(f, self.music_volume)
+                except Exception:
+                    pass
+
+    def _remove_music(self):
+        """Remove a música de fundo atual."""
+        self.music_path = None
+        self._refresh_bgm_bar()
+        if self.preview_player:
+            self.preview_player.load_bgm(None)
+        if self.on_music_change:
+            try:
+                self.on_music_change(None, self.music_volume)
+            except Exception:
+                pass
 
     def _populate_items(self):
         # Clear any existing rows
@@ -702,13 +870,14 @@ class SubtitleEditorDialog(ctk.CTkToplevel):
             "is_manga_cutout": bool(it.get("is_manga_cutout", False)),
             "manga_card_id": int(it.get("manga_card_id", 0)),
             "manga_line": int(it.get("manga_line", 0)),
+            "manga_feeling": str(it.get("manga_feeling", "")),
         }
 
         # Botão Recorte Mangá (Anime FX Pro)
         btn_manga = ctk.CTkButton(
             top_row,
             text="✂ Recorte",
-            width=96,
+            width=120,
             height=30,
             fg_color=COLORS["bg_card"],
             hover_color=COLORS["bg_card_hover"],
@@ -716,6 +885,7 @@ class SubtitleEditorDialog(ctk.CTkToplevel):
             font=ctk.CTkFont(size=10, weight="bold"),
             command=lambda rd=row_data: self._toggle_manga_cutout(rd)
         )
+        btn_manga.bind("<Button-3>", lambda e, rd=row_data: self._cycle_manga_feeling(rd))
         btn_manga.grid(row=0, column=2, padx=4, pady=2)
         row_data["btn_manga"] = btn_manga
 
@@ -978,13 +1148,41 @@ class SubtitleEditorDialog(ctk.CTkToplevel):
 
     def _toggle_manga_cutout(self, row_data: dict):
         row_data["is_manga_cutout"] = not row_data.get("is_manga_cutout", False)
+        if not row_data["is_manga_cutout"]:
+            row_data["manga_feeling"] = ""
         self._recompute_manga_cards()
+
+    def _cycle_manga_feeling(self, row_data: dict):
+        if not row_data.get("is_manga_cutout", False):
+            row_data["is_manga_cutout"] = True
+            self._recompute_manga_cards()
+            return
+
+        curr_f = row_data.get("manga_feeling", "")
+        keys = [k for k, _ in MANGA_FEELINGS_PRESETS]
+        try:
+            curr_idx = keys.index(curr_f)
+            next_f = keys[(curr_idx + 1) % len(keys)]
+        except ValueError:
+            next_f = keys[0]
+
+        row_data["manga_feeling"] = next_f
+        cid = row_data.get("manga_card_id", 0)
+        # Sincroniza a outra linha do mesmo card se for card de 2 linhas
+        if cid > 0:
+            for r in self.rows:
+                if r.get("manga_card_id") == cid and r.get("is_manga_cutout"):
+                    r["manga_feeling"] = next_f
+                    self._update_manga_btn_appearance(r)
+        else:
+            self._update_manga_btn_appearance(row_data)
 
     def _clear_manual_manga_selection(self):
         for r in self.rows:
             r["is_manga_cutout"] = False
             r["manga_card_id"] = 0
             r["manga_line"] = 0
+            r["manga_feeling"] = ""
         self._recompute_manga_cards()
 
     def _recompute_manga_cards(self):
@@ -996,13 +1194,20 @@ class SubtitleEditorDialog(ctk.CTkToplevel):
             if not r.get("is_manga_cutout", False):
                 r["manga_card_id"] = 0
                 r["manga_line"] = 0
+                r["manga_feeling"] = ""
                 self._update_manga_btn_appearance(r)
                 i += 1
                 continue
 
+            card_id += 1
+            # Por padrão usa "auto" (🤖 IA Visual) para que o Vision LLM escolha dinamicamente conforme cena e clímax
+            assigned_feeling = r.get("manga_feeling")
+            if not assigned_feeling:
+                assigned_feeling = "auto"
+            r["manga_feeling"] = assigned_feeling
+
             # r is selected: check if next row is also selected (consecutive lines form L1 & L2 of 1 card)
             if i + 1 < n and self.rows[i + 1].get("is_manga_cutout", False):
-                card_id += 1
                 r["manga_card_id"] = card_id
                 r["manga_line"] = 1
                 self._update_manga_btn_appearance(r)
@@ -1010,10 +1215,10 @@ class SubtitleEditorDialog(ctk.CTkToplevel):
                 r_next = self.rows[i + 1]
                 r_next["manga_card_id"] = card_id
                 r_next["manga_line"] = 2
+                r_next["manga_feeling"] = assigned_feeling  # Sincroniza L1 e L2 no mesmo feeling
                 self._update_manga_btn_appearance(r_next)
                 i += 2
             else:
-                card_id += 1
                 r["manga_card_id"] = card_id
                 r["manga_line"] = 0  # Single line card
                 self._update_manga_btn_appearance(r)
@@ -1028,6 +1233,8 @@ class SubtitleEditorDialog(ctk.CTkToplevel):
         is_selected = r.get("is_manga_cutout", False)
         card_id = r.get("manga_card_id", 0)
         line = r.get("manga_line", 0)
+        feeling_key = r.get("manga_feeling", "")
+        feeling_label = FEELING_LABELS.get(feeling_key, "🗡️ Slam")
 
         if not is_selected:
             btn.configure(
@@ -1042,17 +1249,17 @@ class SubtitleEditorDialog(ctk.CTkToplevel):
                 pass
         else:
             if line == 1:
-                lbl = f"✂ Card {card_id} (L1)"
+                lbl = f"✂ C{card_id} L1: {feeling_label}"
                 fg = "#064e3b"
                 hov = "#065f46"
                 txt_c = "#6ee7b7"
             elif line == 2:
-                lbl = f"✂ Card {card_id} (L2)"
+                lbl = f"✂ C{card_id} L2: {feeling_label}"
                 fg = "#065f46"
                 hov = "#047857"
                 txt_c = "#a7f3d0"
             else:
-                lbl = f"✂ Card {card_id}"
+                lbl = f"✂ C{card_id}: {feeling_label}"
                 fg = "#064e3b"
                 hov = "#065f46"
                 txt_c = "#6ee7b7"
@@ -1073,7 +1280,7 @@ class SubtitleEditorDialog(ctk.CTkToplevel):
             return
         if total_cards > 0:
             self.lbl_manga_status.configure(
-                text=f"Modo: Manual Ativo ({total_cards} card{'s' if total_cards > 1 else ''} marcado{'s' if total_cards > 1 else ''} — IA definirá os feelings)",
+                text=f"Modo: Manual Ativo ({total_cards} card{'s' if total_cards > 1 else ''} — Estilos e animações variados! Clique dir. no botão para trocar)",
                 text_color="#10b981"
             )
             if hasattr(self, "btn_clear_manga") and self.btn_clear_manga:
@@ -1104,7 +1311,7 @@ class SubtitleEditorDialog(ctk.CTkToplevel):
                 r["text_v"].set(new_text)
                 count += n
 
-    def _confirm_and_render(self):
+    def _build_final_items(self) -> List[Dict[str, Any]]:
         from subtitle_renderer import _interpolate_words
         final_items = []
         for r in self.rows:
@@ -1159,7 +1366,8 @@ class SubtitleEditorDialog(ctk.CTkToplevel):
                     "words": updated_words,
                     "is_manga_cutout": bool(r.get("is_manga_cutout", False)),
                     "manga_card_id": int(r.get("manga_card_id", 0)),
-                    "manga_line": int(r.get("manga_line", 0))
+                    "manga_line": int(r.get("manga_line", 0)),
+                    "manga_feeling": str(r.get("manga_feeling", ""))
                 })
             else:
                 interp = _interpolate_words(txt, s, e)
@@ -1174,9 +1382,36 @@ class SubtitleEditorDialog(ctk.CTkToplevel):
                     "words": interp,
                     "is_manga_cutout": bool(r.get("is_manga_cutout", False)),
                     "manga_card_id": int(r.get("manga_card_id", 0)),
-                    "manga_line": int(r.get("manga_line", 0))
+                    "manga_line": int(r.get("manga_line", 0)),
+                    "manga_feeling": str(r.get("manga_feeling", ""))
                 })
+        return final_items
 
+    def _save_draft_and_close(self):
+        """Salva as alterações feitas nas legendas e na música sem iniciar a renderização."""
+        final_items = self._build_final_items()
+        selected_style_label = self.style_var.get()
+        selected_style_key = STYLE_KEY_MAP.get(selected_style_label, "smart_situational")
+        selected_effect = self.effect_var.get()
+
+        self.destroy()
+
+        if callable(getattr(self, "on_save_draft", None)):
+            save_fn = self.on_save_draft
+            if save_fn is not None:
+                try:
+                    save_fn(final_items, self.music_path, self.music_volume)
+                except TypeError:
+                    try:
+                        save_fn(final_items)
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
+        messagebox.showinfo("Legendas Salvas", f"✓ {len(final_items)} falas salvas com sucesso!\nVocê pode reabrir a revisão a qualquer momento ou clicar em 'INICIAR PIPELINE'.")
+
+    def _confirm_and_render(self):
+        final_items = self._build_final_items()
         selected_style_label = self.style_var.get()
         selected_style_key = STYLE_KEY_MAP.get(selected_style_label, "smart_situational")
         selected_effect = self.effect_var.get()
@@ -1184,12 +1419,18 @@ class SubtitleEditorDialog(ctk.CTkToplevel):
         self.destroy()
         if self.on_confirm:
             try:
-                self.on_confirm(final_items, selected_style_key, selected_effect, self.music_volume)
+                self.on_confirm(final_items, selected_style_key, selected_effect, final_m_path=self.music_path, final_m_vol=self.music_volume)
             except TypeError:
-                self.on_confirm(final_items, selected_style_key, selected_effect)
+                try:
+                    self.on_confirm(final_items, selected_style_key, selected_effect, self.music_path, self.music_volume)
+                except TypeError:
+                    try:
+                        self.on_confirm(final_items, selected_style_key, selected_effect, self.music_volume)
+                    except TypeError:
+                        self.on_confirm(final_items, selected_style_key, selected_effect)
 
     def destroy(self):
-        if getattr(self, "_anim_timer", None):
+        if self._anim_timer is not None:
             try:
                 self.after_cancel(self._anim_timer)
             except Exception:

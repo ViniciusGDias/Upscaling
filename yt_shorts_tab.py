@@ -701,6 +701,21 @@ class YTShortsAnalyzerTab(ctk.CTkFrame):
         self.ent_character.insert(0, name)
         self._log(f"Personagem preenchido automaticamente: '{name}'")
 
+    def _send_caption_to_studio(self, caption_text: str):
+        """Envia a frase de gancho (texto do topo) diretamente para a barra branca do Studio."""
+        _copy_text_to_clipboard(self, caption_text)
+        try:
+            if self.main_app and hasattr(self.main_app, "studio_tab"):
+                st_tab = self.main_app.studio_tab
+                if hasattr(st_tab, "title_entry"):
+                    st_tab.title_entry.delete(0, "end")
+                    st_tab.title_entry.insert(0, caption_text)
+                    self._log(f"✓ Frase de topo enviada direto para o Studio: '{caption_text}'")
+                    return
+        except Exception as e:
+            self._log(f"Aviso ao enviar para o Studio: {e}")
+        self._log(f"✓ Frase copiada para área de transferência: '{caption_text}'")
+
     def _append_context_chip(self, chip_text: str):
         curr = self.txt_context.get("1.0", "end").strip()
         if curr.startswith("Ex: anime edit"):
@@ -859,6 +874,20 @@ class YTShortsAnalyzerTab(ctk.CTkFrame):
 
     def _render_results(self, data: dict):
         self._clear_results_panel()
+
+        # Tentativa de recuperação de emergência com json_repair se houve falha prévia de parse
+        if isinstance(data, dict) and data.get("parse_error") and data.get("raw_response"):
+            try:
+                from json_repair import repair_json
+                repaired_obj = repair_json(data["raw_response"], return_objects=True)
+                if isinstance(repaired_obj, dict) and ("video_analysis" in repaired_obj or "optimization" in repaired_obj):
+                    data = repaired_obj
+            except Exception:
+                pass
+
+        # Se temos dados úteis de análise, descarta flag de erro para permitir visualização
+        if isinstance(data, dict) and ("video_analysis" in data or "optimization" in data):
+            data.pop("parse_error", None)
 
         if not data or ("video_analysis" not in data and "optimization" not in data) or data.get("parse_error"):
             raw = str(data.get("raw_response", data) if data else "Resposta vazia da API")
@@ -1065,7 +1094,63 @@ class YTShortsAnalyzerTab(ctk.CTkFrame):
             btn_cp_h.pack(side="right")
 
         if opt.get("loop_strategy"):
-            ctk.CTkLabel(hook_box, text=f"Loop Infinito: {opt.get('loop_strategy', '')}", font=ctk.CTkFont(size=11), text_color="#a855f7", wraplength=460, justify="left").pack(anchor="w", padx=10, pady=(2, 6))
+            ctk.CTkLabel(hook_box, text=f"Loop / Replay de Anime: {opt.get('loop_strategy', '')}", font=ctk.CTkFont(size=11), text_color="#a855f7", wraplength=460, justify="left").pack(anchor="w", padx=10, pady=(2, 6))
+
+        # ── 1B. Consultor Estratégico do Canal (Grade 4x/Dia: 12h • 15h • 18h • 21h & Destrava 100k+) ──
+        cga = data.get("channel_growth_advisor") or {}
+        if cga and isinstance(cga, dict):
+            adv_card = ctk.CTkFrame(self.right_scroll, fg_color="#0f172a", corner_radius=10, border_width=1, border_color="#f59e0b")
+            adv_card.pack(fill="x", padx=5, pady=(2, 10))
+
+            adv_head = ctk.CTkFrame(adv_card, fg_color="transparent")
+            adv_head.pack(fill="x", padx=14, pady=(10, 4))
+            ctk.CTkLabel(
+                adv_head,
+                text="👑 Estrategista do Canal (Grade 12h • 15h • 18h • 21h + Destrava 100k+)",
+                font=ctk.CTkFont(size=13, weight="bold"),
+                text_color="#fbbf24"
+            ).pack(side="left")
+
+            slot_txt = cga.get("best_slot_4x", "")
+            if slot_txt:
+                s_box = ctk.CTkFrame(adv_card, fg_color="#1e293b", corner_radius=6)
+                s_box.pack(fill="x", padx=12, pady=3)
+                ctk.CTkLabel(s_box, text="🕒 Melhor Horário na Grade (12h / 15h / 18h / 21h):", font=ctk.CTkFont(size=11, weight="bold"), text_color="#38bdf8").pack(anchor="w", padx=10, pady=(5, 1))
+                ctk.CTkLabel(s_box, text=slot_txt, font=ctk.CTkFont(size=11), text_color="#f1f5f9", wraplength=460, justify="left").pack(anchor="w", padx=10, pady=(0, 6))
+
+            pair_txt = cga.get("pairing_strategy", "")
+            if pair_txt:
+                p_box = ctk.CTkFrame(adv_card, fg_color="#1e293b", corner_radius=6)
+                p_box.pack(fill="x", padx=12, pady=3)
+                ctk.CTkLabel(p_box, text="🔗 Pareamento 2+2 (Como postar 4/dia sem um vídeo roubar views do outro):", font=ctk.CTkFont(size=11, weight="bold"), text_color="#10b981").pack(anchor="w", padx=10, pady=(5, 1))
+                ctk.CTkLabel(p_box, text=pair_txt, font=ctk.CTkFont(size=11), text_color="#e2e8f0", wraplength=460, justify="left").pack(anchor="w", padx=10, pady=(0, 6))
+
+            replay_txt = cga.get("replay_bait_timestamp", "")
+            if replay_txt:
+                r_box = ctk.CTkFrame(adv_card, fg_color="#1e293b", corner_radius=6)
+                r_box.pack(fill="x", padx=12, pady=3)
+                ctk.CTkLabel(r_box, text="🔁 Loop Real p/ Anime (Corte Seco + Isca de Timestamp):", font=ctk.CTkFont(size=11, weight="bold"), text_color="#c084fc").pack(anchor="w", padx=10, pady=(5, 1))
+                ctk.CTkLabel(r_box, text=replay_txt, font=ctk.CTkFont(size=11), text_color="#e2e8f0", wraplength=460, justify="left").pack(anchor="w", padx=10, pady=(0, 6))
+
+            seo_kws = cga.get("search_seo_keywords", [])
+            if seo_kws:
+                kw_str = ", ".join(str(k) for k in seo_kws) if isinstance(seo_kws, list) else str(seo_kws)
+                k_box = ctk.CTkFrame(adv_card, fg_color="#1e293b", corner_radius=6)
+                k_box.pack(fill="x", padx=12, pady=3)
+                k_top = ctk.CTkFrame(k_box, fg_color="transparent")
+                k_top.pack(fill="x", padx=10, pady=(5, 1))
+                ctk.CTkLabel(k_top, text="🔍 Termos Exatos de Busca (Para aparecer na Pesquisa do YouTube):", font=ctk.CTkFont(size=11, weight="bold"), text_color="#facc15").pack(side="left")
+                btn_kw = ctk.CTkButton(k_top, text="Copiar Busca", width=85, height=20, font=ctk.CTkFont(size=10), fg_color="#16a34a", hover_color="#15803d")
+                btn_kw.configure(command=lambda t=kw_str, b=btn_kw: self._copy_to_clipboard(t, b, "Copiar Busca"))
+                btn_kw.pack(side="right")
+                ctk.CTkLabel(k_box, text=kw_str, font=ctk.CTkFont(size=11, weight="bold"), text_color="#fef08a", wraplength=460, justify="left").pack(anchor="w", padx=10, pady=(0, 6))
+
+            unlock_txt = cga.get("unlock_100k_plan", "")
+            if unlock_txt:
+                u_box = ctk.CTkFrame(adv_card, fg_color="#1e293b", corner_radius=6)
+                u_box.pack(fill="x", padx=12, pady=(3, 10))
+                ctk.CTkLabel(u_box, text="🚀 Diagnóstico Anti-Trava (Se travar em 1.5k vs. 25k views):", font=ctk.CTkFont(size=11, weight="bold"), text_color="#f87171").pack(anchor="w", padx=10, pady=(5, 1))
+                ctk.CTkLabel(u_box, text=unlock_txt, font=ctk.CTkFont(size=11), text_color="#e2e8f0", wraplength=460, justify="left").pack(anchor="w", padx=10, pady=(0, 6))
 
         # ── 2. A/B Testing de Títulos Interativo ──
         titles = data.get("titles", [])
@@ -1158,6 +1243,13 @@ class YTShortsAnalyzerTab(ctk.CTkFrame):
                 )
                 btn_cp.configure(command=lambda txt=cap_text, b=btn_cp: self._copy_to_clipboard(txt, b))
                 btn_cp.pack(side="right")
+
+                btn_st = ctk.CTkButton(
+                    c_header, text="Usar na Barra do Studio", width=138, height=26,
+                    font=ctk.CTkFont(size=10, weight="bold"), fg_color="#d97706", hover_color="#b45309",
+                    command=lambda txt=cap_text: self._send_caption_to_studio(txt)
+                )
+                btn_st.pack(side="right", padx=(0, 6))
 
                 # Texto de destaque em caixa alta e tamanho grande
                 ctk.CTkLabel(c_card, text=f'"{cap_text.upper()}"', font=ctk.CTkFont(size=14, weight="bold"), text_color="#facc15", wraplength=460, justify="left").pack(anchor="w", padx=12, pady=(4, 2))

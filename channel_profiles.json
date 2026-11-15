@@ -1,0 +1,51 @@
+{
+  "active_profile": "animax",
+  "profiles": {
+    "animax": {
+      "id": "animax",
+      "name": "Animax",
+      "handle": "@animax_97",
+      "verified": true,
+      "profile_png": "assets/Perfil_1.png",
+      "watermark_text": "@ANIMAX_97",
+      "watermark_opacity": 0.38,
+      "title_color": "#FFFFFF",
+      "cta_lines": [
+        "FINALMENTE O ALGORITMO TE TROUXE",
+        "PRO CANAL CERTO! 🚀 SE INSCREVE"
+      ],
+      "description": "Perfil clássico oficial Animax com selo de verificado e tema branco."
+    },
+    "vinny": {
+      "id": "vinny",
+      "name": "Vinny",
+      "handle": "@vinny.animes",
+      "verified": false,
+      "profile_png": "assets/Perfil_Vinny.png",
+      "watermark_text": "@VINNY.ANIMES",
+      "watermark_opacity": 0.38,
+      "title_color": "#00A8FF",
+      "cta_lines": [
+        "FINALMENTE ENCONTROU O",
+        "SEU CANAL DE ANIMES.",
+        "SE INSCREVE!"
+      ],
+      "description": "Perfil do canal Vinny com avatar circular Aizen e títulos em azul cyan vibrante."
+    },
+    "vinianimes": {
+      "id": "vinianimes",
+      "name": "ViniAnimes",
+      "handle": "@ViniAnime__s",
+      "verified": false,
+      "profile_png": "assets/Perfil_ViniAnimes.png",
+      "watermark_text": "@VINIANIMES",
+      "watermark_opacity": 0.38,
+      "title_color": "#FF1E27",
+      "cta_lines": [
+        "VOCÊ ENCONTROU SEU CANTINHO",
+        "DE ANIMES. SE INSCREVE!"
+      ],
+      "description": "Perfil do canal ViniAnimes com avatar circular Shizuku e títulos em vermelho carmesim."
+    }
+  }
+}

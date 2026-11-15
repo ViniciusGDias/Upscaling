@@ -119,16 +119,21 @@ SHARPEN_OPTIONS = {
     "Extremo (Super Nitidez)": "unsharp=9:9:1.5:9:9:0.0",
 }
 
-# Color Enhancements (saturation, contrast, brightness)
+# Color Enhancements (saturation, contrast, brightness, gamma)
+# Calibrado com compensação de gama e proteção de sombras (Shadow Lift) para evitar esmagamento em cenas escuras
 COLOR_ENHANCEMENTS = {
     "Nenhum": None,
-    "Falso HDR (Cores e Contraste)": "eq=saturation=1.25:contrast=1.15:gamma=1.05",
-    "Cyberpunk (Neon)": "colorchannelmixer=rr=1.2:gg=0.8:bb=1.2,eq=saturation=1.3:contrast=1.1",
-    "Quente (Pôr do Sol)": "colorchannelmixer=rr=1.1:bb=0.9,eq=saturation=1.2",
-    "Frio (Inverno/Matrix)": "colorchannelmixer=rr=0.9:bb=1.1,eq=saturation=1.1",
-    "Cinema (Saturação +15%)": "eq=saturation=1.15:contrast=1.1:brightness=0.0",
-    "Vibrante (Saturação +30%)": "eq=saturation=1.3:contrast=1.15:brightness=0.02",
-    "Vintage (Preto e Branco)": "hue=s=0,eq=contrast=1.2",
+    "✨ HDR Inteligente (Preserva Sombras & Noite)": "eq=saturation=1.24:contrast=1.06:brightness=0.02:gamma=1.14",
+    "🌙 Cenas Escuras & Noite (Clarear Sombras + Cores)": "eq=saturation=1.20:contrast=1.02:brightness=0.05:gamma=1.25",
+    "🌌 Noite de Anime / Dark Action (Anti-Esmagamento)": "eq=saturation=1.28:contrast=1.05:brightness=0.03:gamma=1.18",
+    "🔥 Anime Vívido (Sem Escurecer)": "eq=saturation=1.28:contrast=1.03:brightness=0.02:gamma=1.10",
+    "Falso HDR (Cores e Contraste)": "eq=saturation=1.25:contrast=1.08:brightness=0.02:gamma=1.12",
+    "Cinema (Saturação +15%)": "eq=saturation=1.18:contrast=1.04:brightness=0.01:gamma=1.08",
+    "Vibrante (Saturação +30%)": "eq=saturation=1.30:contrast=1.06:brightness=0.02:gamma=1.10",
+    "Cyberpunk (Neon)": "colorchannelmixer=rr=1.15:gg=0.85:bb=1.15,eq=saturation=1.25:contrast=1.05:gamma=1.12",
+    "Quente (Pôr do Sol)": "colorchannelmixer=rr=1.1:bb=0.9,eq=saturation=1.2:gamma=1.08",
+    "Frio (Inverno/Matrix)": "colorchannelmixer=rr=0.9:bb=1.1,eq=saturation=1.1:gamma=1.08",
+    "Vintage (Preto e Branco)": "hue=s=0,eq=contrast=1.12:gamma=1.06",
 }
 
 # Denoising options (hqdn3d filter)

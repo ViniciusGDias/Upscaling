@@ -319,6 +319,10 @@ def detect_anime_sensitive_timeline(
             on_log(msg)
 
     try:
+        try:
+            import manga_fx_engine  # Garante DLLs CUDA/cuDNN carregadas para ONNX GPU
+        except Exception:
+            pass
         from imgutils.detect import detect_with_booru_yolo
     except ImportError:
         log("AVISO: dghs-imgutils não disponível para detecção de anime.")
@@ -584,18 +588,31 @@ def process_video_visual_censorship(
     from subtitle_renderer import _find_ffmpeg
     ffmpeg = _find_ffmpeg()
 
-    cmd = [
+    cmd_nvenc = [
         ffmpeg, "-y",
         "-i", tmp_out,
         "-i", input_path,
-        "-c:v", "libx264", "-preset", "fast", "-crf", "18",
+        "-c:v", "h264_nvenc", "-preset", "p4", "-rc", "vbr", "-cq", "18", "-b:v", "0", "-pix_fmt", "yuv420p",
         "-map", "0:v:0",
         "-map", "1:a:0?",
         "-c:a", "copy",
         output_path
     ]
-    res = subprocess.run(cmd, capture_output=True, text=True,
+    res = subprocess.run(cmd_nvenc, capture_output=True, text=True,
                          creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+    if res.returncode != 0:
+        cmd_cpu = [
+            ffmpeg, "-y",
+            "-i", tmp_out,
+            "-i", input_path,
+            "-c:v", "libx264", "-preset", "fast", "-crf", "18",
+            "-map", "0:v:0",
+            "-map", "1:a:0?",
+            "-c:a", "copy",
+            output_path
+        ]
+        res = subprocess.run(cmd_cpu, capture_output=True, text=True,
+                             creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
 
     try:
         if os.path.exists(tmp_out):

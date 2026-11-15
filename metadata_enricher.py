@@ -165,18 +165,28 @@ def _safe_log(on_log, msg: str):
 def clean_media_query(query: str) -> str:
     """
     Cleans episode/season suffixes (e.g., 'S01E05', 'Ep 270', 'Episodio 12', 'Part 2')
+    as well as file extensions, audio tags (Dublado/Legendado), and resolution tags
     so that search APIs can find the exact anime or series title.
     """
     if not query:
         return ""
     q = query.strip()
-    # Remove patterns like S01E35, E05, Ep 20, Episódio 5, Episode 12, Chapter 50
-    q = re.sub(r'(?i)\b(S\d+)?E\d+\b|\bepis[óo]dio\s*\d+\b|\bepisode\s*\d+\b|\bep\.?\s*\d+\b', '', q)
+    # Strip file extensions if present
+    q = re.sub(r'\.(mp4|mkv|avi|mov|wmv|flv|webm|ts|m4v)$', '', q, flags=re.I)
+    # Strip tags like Dublado, Legendado, Dual Audio, etc.
+    q = re.sub(r'(?i)\b(dublado|legendado|dual\s*audio|pt[\-_]?br|multi[\-_]?audio|raw|fhd|hd|1080p|720p|4k)\b', '', q)
+    # If there's an S01E01 or similar season/episode marker, take everything before it
+    m_sep = re.search(r'(?i)(?:^|[\b_\s\-])S(\d+)\s*E(\d+)(?:[\b_\s\-]|$)', q)
+    if m_sep and m_sep.start() > 2:
+        q = q[:m_sep.start()].strip()
+    else:
+        # Remove patterns like S01E35, E05, Ep 20, Episódio 5, Episode 12, Chapter 50
+        q = re.sub(r'(?i)(?:\b|_)(S\d+)?E\d+(?:\b|_)|(?:\b|_)(?:epis[óo]dio|episode|ep\.?)\s*\d+(?:\b|_)', ' ', q)
     # Remove trailing season/part specifications if followed by numbers
     q = re.sub(r'(?i)\b(temporada|season|part|parte)\s*\d+\b', '', q)
     # Remove standalone episode numbers like "#270"
     q = re.sub(r'#\d+', '', q)
-    # Remove trailing dashes, colons, or punctuation
+    # Remove trailing dashes, underscores, colons, or punctuation
     q = re.sub(r'[\-_:\s]+$', '', q).strip()
     return q if len(q) >= 2 else query.strip()
 
@@ -189,7 +199,8 @@ def _parse_episode_info(context: str) -> Dict[str, Any]:
     """
     Extracts anime name and episode number from context string.
     Handles formats: 'Os Cavaleiros do Zodíaco E39', 'Bleach Ep 270', 'Naruto Episódio 133',
-    'One Piece #1000', 'DBZ S04E20', 'JJK 2x17', 'Attack on Titan Episode 80', 'Bleach 270'.
+    'One Piece #1000', 'DBZ S04E20', 'JJK 2x17', 'Attack on Titan Episode 80', 'Bleach 270',
+    and standard release filenames like 'Anime_Dublado - S01E01_Nome_do_Ep.mp4'.
     
     Returns: {"anime_name": str, "episode_number": int|None, "season": int|None, "episode_title": str}
     """
@@ -202,8 +213,8 @@ def _parse_episode_info(context: str) -> Dict[str, Any]:
     ep_title = ""
     anime_name = text
 
-    # Pattern 1: S01E05, S2E17, S01 E39 (season + episode)
-    m = re.search(r'(?i)\bS(\d+)\s*E(\d+)\b', text)
+    # Pattern 1: S01E05, S2E17, S01 E39, S01E01_O_... (season + episode)
+    m = re.search(r'(?i)(?:^|[\b_\s\-])S(\d+)\s*E(\d+)(?:[\b_\s\-]|$)', text)
     if m:
         season = int(m.group(1))
         episode = int(m.group(2))
@@ -215,7 +226,7 @@ def _parse_episode_info(context: str) -> Dict[str, Any]:
 
     # Pattern 2: 2x17 (season x episode)
     if not episode:
-        m = re.search(r'(?i)\b(\d+)\s*x\s*(\d+)\b', text)
+        m = re.search(r'(?i)(?:^|[\b_\s\-])(\d+)\s*x\s*(\d+)(?:[\b_\s\-]|$)', text)
         if m:
             season = int(m.group(1))
             episode = int(m.group(2))
@@ -227,7 +238,7 @@ def _parse_episode_info(context: str) -> Dict[str, Any]:
 
     # Pattern 3: E39, E 39, Episódio 270, Episode 80, Ep 20, Ep. 5, Cap 12
     if not episode:
-        m = re.search(r'(?i)\b(?:epis[oó]dio|episode|ep\.?|e|cap[ií]tulo|cap\.?)\s*(\d+)\b', text)
+        m = re.search(r'(?i)(?:^|[\b_\s\-])(?:epis[oó]dio|episode|ep\.?|e|cap[ií]tulo|cap\.?)\s*(\d+)(?:[\b_\s\-]|$)', text)
         if m:
             episode = int(m.group(1))
             prefix = text[:m.start()].strip()
@@ -255,8 +266,17 @@ def _parse_episode_info(context: str) -> Dict[str, Any]:
             anime_name = text[:m.start()]
 
     # Clean the extracted anime name
-    anime_name = re.sub(r'[\-_:\s]+$', '', anime_name).strip()
-    anime_name = re.sub(r'^\s*[\-_:]\s*', '', anime_name).strip()
+    if anime_name:
+        anime_name = re.sub(r'\.(mp4|mkv|avi|mov|wmv|flv|webm|ts|m4v)$', '', anime_name, flags=re.I)
+        anime_name = re.sub(r'(?i)\b(dublado|legendado|dual\s*audio|pt[\-_]?br|multi[\-_]?audio|raw|fhd|hd|1080p|720p|4k)\b', '', anime_name)
+        anime_name = re.sub(r'[\-_:\s]+$', '', anime_name).strip()
+        anime_name = re.sub(r'^\s*[\-_:]\s*', '', anime_name).strip()
+
+    # Clean episode title if extracted
+    if ep_title:
+        ep_title = re.sub(r'\.(mp4|mkv|avi|mov|wmv|flv|webm|ts|m4v)$', '', ep_title, flags=re.I)
+        ep_title = re.sub(r'(?i)_\d+m\d+s.*$', '', ep_title)
+        ep_title = re.sub(r'^[ \-_:]+', '', ep_title).replace('_', ' ').strip()
 
     return {
         "anime_name": anime_name,
@@ -329,20 +349,18 @@ POPULAR_ANIME_TRANSLATION_MAP = {
 }
 
 
-def fetch_jikan_anime_id(anime_name: str, timeout: float = 8.0, on_log: Optional[Callable] = None) -> Optional[int]:
-    """Search Jikan v4 for an anime and return its MAL ID. Retries once on failure."""
+def fetch_jikan_anime_id(anime_name: str, timeout: float = 2.0, on_log: Optional[Callable] = None) -> Optional[int]:
+    """Search Jikan v4 for an anime and return its MAL ID. Fast failover if down."""
     clean_q = clean_media_query(anime_name)
     if not clean_q:
         return None
 
     # Normalizar para título internacional reconhecido pelo MyAnimeList
     search_q = POPULAR_ANIME_TRANSLATION_MAP.get(clean_q.lower(), clean_q)
-    _safe_log(on_log, f"🔍 Buscando MAL ID para: '{search_q}'...")
-    params = urllib.parse.urlencode({"q": search_q, "limit": 3, "order_by": "members", "sort": "desc"})
+    params = urllib.parse.urlencode({"q": search_q, "limit": 1})
     url = f"https://api.jikan.moe/v4/anime?{params}"
 
-    # Try twice (Jikan sometimes 504s on first request)
-    for attempt in range(2):
+    try:
         data = _fetch_url_json(url, timeout=timeout)
         if data and data.get("data"):
             best = data["data"][0]
@@ -350,18 +368,17 @@ def fetch_jikan_anime_id(anime_name: str, timeout: float = 8.0, on_log: Optional
             title = best.get("title", "")
             _safe_log(on_log, f"✓ MAL ID encontrado: {mal_id} ({title})")
             return mal_id
-        if attempt == 0:
-            _safe_log(on_log, f"⚠️ Jikan timeout — tentando novamente...")
-            time.sleep(1.0)
+    except Exception:
+        pass
 
-    _safe_log(on_log, f"⚠️ Jikan API indisponível (timeout). Prosseguindo com outras fontes...")
+    _safe_log(on_log, f"⚠️ Jikan indisponível (timeout rápido). Prosseguindo com AniList e Fandom...")
     return None
 
 
 def fetch_jikan_episode_details(
     mal_id: int,
     episode_number: int,
-    timeout: float = 4.0,
+    timeout: float = 2.0,
     on_log: Optional[Callable] = None
 ) -> Optional[Dict[str, Any]]:
     """
@@ -815,36 +832,35 @@ def build_episode_intelligence(
     anilist_data = None
     mal_id = None
 
-    # ── Source 1: Jikan v4 — Anime search + Episode-specific endpoint ──
+    # ── Source 1: AniList GraphQL — Instant, rich characters & detailed description ──
     try:
-        mal_id = fetch_jikan_anime_id(anime_name, timeout=4.0, on_log=on_log)
-        if mal_id:
-            time.sleep(0.4)  # Jikan rate limit: 4 req/sec
-            jikan_episode = fetch_jikan_episode_details(mal_id, episode_number, timeout=4.0, on_log=on_log)
+        anilist_data = fetch_anilist_episode_info(anime_name, episode_number, timeout=3.5, on_log=on_log)
     except Exception as e:
-        _safe_log(on_log, f"⚠️ Erro no Jikan Episode: {e}")
+        _safe_log(on_log, f"⚠️ Erro no AniList: {e}")
 
-    # ── Source 2: Fandom Wiki — Fights, techniques, characters ──
+    # ── Source 2: Fandom Wiki — Fights, techniques, canon/filler, characters ──
     try:
         wiki_slug = _resolve_fandom_wiki_slug(anime_name)
         if wiki_slug:
-            fandom_data = fetch_fandom_episode_page(wiki_slug, episode_number, timeout=5.0, on_log=on_log)
+            fandom_data = fetch_fandom_episode_page(wiki_slug, episode_number, timeout=4.5, on_log=on_log)
         else:
             _safe_log(on_log, f"⚠️ Wiki Fandom não mapeada para '{anime_name}' (slug não encontrado)")
     except Exception as e:
         _safe_log(on_log, f"⚠️ Erro no Fandom Wiki: {e}")
 
-    # ── Source 3: AniList GraphQL — Characters and detailed description ──
+    # ── Source 3: Kitsu — General anime metadata baseline ──
     try:
-        anilist_data = fetch_anilist_episode_info(anime_name, episode_number, timeout=4.0, on_log=on_log)
-    except Exception as e:
-        _safe_log(on_log, f"⚠️ Erro no AniList: {e}")
-
-    # ── Source 4: Kitsu/Jikan general anime metadata (always useful as baseline) ──
-    try:
-        anime_meta = fetch_anime_metadata(anime_name, timeout=3.5, on_log=on_log)
+        anime_meta = fetch_anime_metadata(anime_name, timeout=3.0, on_log=on_log)
     except Exception:
         pass
+
+    # ── Source 4: Jikan v4 (Opcional / Fallback rápido) ──
+    try:
+        mal_id = fetch_jikan_anime_id(anime_name, timeout=2.0, on_log=on_log)
+        if mal_id:
+            jikan_episode = fetch_jikan_episode_details(mal_id, episode_number, timeout=2.0, on_log=on_log)
+    except Exception as e:
+        _safe_log(on_log, f"⚠️ Erro no Jikan Episode: {e}")
 
     # ═══════════════════════════════════════════════════════════════════
     # ASSEMBLE: Build the Episode Intelligence Block
@@ -1077,9 +1093,33 @@ def fetch_anime_metadata(query_or_title: str, timeout: float = 3.5, on_log: Opti
                     else:
                         _safe_log(on_log, f"⚠️ Kitsu retornou resultado irrelevante ('{canonical}') — ignorando.")
     except Exception as e:
-        _safe_log(on_log, f"Aviso Kitsu API ({e}) - tentando fallback MyAnimeList...")
+        _safe_log(on_log, f"Aviso Kitsu API ({e}) - tentando fallback AniList...")
 
-    # ── Attempt 2: Jikan API (MyAnimeList REST) ──
+    # ── Attempt 2: AniList GraphQL API (Instantâneo, alta disponibilidade) ──
+    try:
+        _safe_log(on_log, f"🌐 Consultando AniList para metadados: '{clean_q}'...")
+        al = fetch_anilist_episode_info(clean_q, episode_number=1, timeout=3.5, on_log=on_log)
+        if al and al.get("title"):
+            item = {
+                "type": "anime",
+                "source": "AniList GraphQL",
+                "title": al.get("title") or clean_q,
+                "title_english": al.get("title") or clean_q,
+                "title_japanese": al.get("title_native", ""),
+                "synopsis": al.get("description", ""),
+                "score": al.get("score", "N/A"),
+                "status": "Em Exibição / Completo",
+                "age_rating": "14+",
+                "genres": al.get("genres") or "Anime",
+            }
+            _memory_cache[cache_key] = item
+            _save_cache()
+            _safe_log(on_log, f"✓ Metadados encontrados no AniList: '{item['title']}' (Nota: {item['score']})")
+            return item
+    except Exception as e:
+        _safe_log(on_log, f"Aviso AniList ({e}) - tentando fallback MyAnimeList...")
+
+    # ── Attempt 3: Jikan API (MyAnimeList REST - rápido) ──
     try:
         _safe_log(on_log, f"⛩️ Consultando MyAnimeList (Jikan v4) para: '{clean_q}'...")
 
@@ -1093,7 +1133,7 @@ def fetch_anime_metadata(query_or_title: str, timeout: float = 3.5, on_log: Opti
             }
         )
 
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with urllib.request.urlopen(req, timeout=2.0) as resp:
             if resp.status == 200:
                 data = json.loads(resp.read().decode("utf-8"))
                 results = data.get("data", [])

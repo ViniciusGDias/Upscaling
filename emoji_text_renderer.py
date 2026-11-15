@@ -99,8 +99,8 @@ def split_text_and_emojis(text: str) -> List[Tuple[str, bool]]:
 def measure_mixed_text(
     draw: ImageDraw.ImageDraw,
     text: str,
-    main_font: ImageFont.ImageFont,
-    emoji_font: Optional[ImageFont.ImageFont] = None,
+    main_font: Any,
+    emoji_font: Optional[Any] = None,
     spacing: int = 4
 ) -> Tuple[int, int]:
     """Mede largura e altura total do texto misturado com emojis."""
@@ -121,8 +121,8 @@ def render_mixed_text(
     draw: ImageDraw.ImageDraw,
     pos: Tuple[int, int],
     text: str,
-    main_font: ImageFont.ImageFont,
-    emoji_font: Optional[ImageFont.ImageFont] = None,
+    main_font: Any,
+    emoji_font: Optional[Any] = None,
     fill_color: Any = "#ffffff",
     stroke_color: Any = None,
     stroke_width: int = 0,

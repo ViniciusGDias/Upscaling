@@ -797,7 +797,21 @@ class InstagramAnalyzerTab(ctk.CTkFrame):
     def _render_results(self, data: dict):
         self._clear_results_panel()
 
-        if not data or ("video_analysis" not in data and "optimization" not in data and "suggested_captions" not in data) or data.get("parse_error"):
+        # Tentativa de recuperação de emergência com json_repair se houve falha prévia de parse
+        if isinstance(data, dict) and data.get("parse_error") and data.get("raw_response"):
+            try:
+                from json_repair import repair_json
+                repaired_obj = repair_json(data["raw_response"], return_objects=True)
+                if isinstance(repaired_obj, dict) and ("video_analysis" in repaired_obj or "optimization" in repaired_obj or "captions" in repaired_obj or "suggested_captions" in repaired_obj):
+                    data = repaired_obj
+            except Exception:
+                pass
+
+        # Se temos dados úteis de análise, descarta flag de erro para permitir visualização
+        if isinstance(data, dict) and ("video_analysis" in data or "optimization" in data or "captions" in data or "suggested_captions" in data):
+            data.pop("parse_error", None)
+
+        if not data or ("video_analysis" not in data and "optimization" not in data and "suggested_captions" not in data and "captions" not in data) or data.get("parse_error"):
             raw = str(data.get("raw_response", data) if data else "Resposta vazia da API")
             err_msg = data.get("error_msg", "Formato de resposta incompleto ou truncado") if isinstance(data, dict) else str(data)
             self._render_error_card(err_msg, raw_response=raw)

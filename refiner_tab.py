@@ -5,6 +5,7 @@ and transferring it directly to the Upscaling pipeline if approved.
 """
 
 import os
+import re
 import time
 import threading
 import subprocess
@@ -845,6 +846,9 @@ class RefinerMastercutTab(ctk.CTkFrame):
             command=lambda: self.scroll._parent_canvas.yview_moveto(0.0),
         ).pack(side="right")
 
+        self.options_frame = ctk.CTkFrame(r_inner, fg_color="transparent")
+        # Será empacotado dinamicamente quando a IA retornar múltiplas opções para vídeos > 75s
+
         self.stats_label = ctk.CTkLabel(
             r_inner, text="Duração: 00:00 -> 00:00 (-0.0%) | 0 cortes",
             font=ctk.CTkFont(family="Segoe UI", size=12),
@@ -1053,6 +1057,35 @@ class RefinerMastercutTab(ctk.CTkFrame):
         # Checa se o arquivo é um corte contínuo gerado pelo Diretor IA
         self._check_and_apply_cut_origin(filepath)
 
+    def _apply_autofill_entry(self, entry_widget, new_val: str, last_attr: str):
+        """Preenche campo automaticamente se estiver vazio ou com valor auto-preenchido anterior."""
+        if not entry_widget:
+            return
+        cur_val = entry_widget.get().strip()
+        prev_auto = getattr(self, last_attr, None)
+        if new_val and (not cur_val or (prev_auto is not None and cur_val == prev_auto)):
+            entry_widget.delete(0, "end")
+            entry_widget.insert(0, new_val)
+            setattr(self, last_attr, new_val)
+        elif not new_val and prev_auto is not None and cur_val == prev_auto:
+            entry_widget.delete(0, "end")
+            setattr(self, last_attr, None)
+
+    def _map_origin_to_climax_key(self, origin: dict) -> str:
+        ctype = str(origin.get("content_type", "") or "").lower()
+        genre = str(origin.get("genre", "") or "").lower()
+        if ctype == "comedy" or any(k in genre for k in ("coméd", "comed", "humor", "engraç")):
+            return "comedy"
+        if ctype == "action" or re.search(r"\b(?:a[çc][aã]o|action)\b", genre) or any(k in genre for k in ("luta", "batalh", "fight", "shonen")):
+            return "action"
+        if ctype == "romance" or any(k in genre for k in ("romanc", "love", "química")):
+            return "romance"
+        if any(k in genre for k in ("drama", "dorama", "emoç", "emoc", "sad", "trist")):
+            return "drama"
+        if any(k in genre for k in ("choqu", "shock", "revela", "plot")):
+            return "shock"
+        return "auto"
+
     def _check_and_apply_cut_origin(self, filepath: str):
         """Consulta o cache persistente do AICacheHub para verificar se o vídeo é corte contínuo."""
         try:
@@ -1061,17 +1094,36 @@ class RefinerMastercutTab(ctk.CTkFrame):
             if origin and origin.get("is_continuous"):
                 dur = origin.get("continuous_duration", 0.0) or (self.current_video_info.duration if self.current_video_info else 0.0)
                 ep = origin.get("source_episode", "Episódio")
-                title = origin.get("title", "") or origin.get("anime", "") or origin.get("source_title", "")
-                title_str = f" ('{title}')" if title else ""
+                scene_title = str(origin.get("title", "") or "").strip()
+                scene_reason = str(origin.get("reason", "") or "").strip()
+                anime_name = str(
+                    origin.get("anime_name")
+                    or origin.get("anime")
+                    or origin.get("source_title")
+                    or origin.get("work_context")
+                    or scene_title
+                    or ""
+                ).strip()
+                title_str = f" ('{scene_title or anime_name}')" if (scene_title or anime_name) else ""
 
-                if title and hasattr(self, "work_title_entry") and not self.work_title_entry.get().strip():
-                    self.work_title_entry.delete(0, "end")
-                    self.work_title_entry.insert(0, title)
+                if hasattr(self, "work_title_entry"):
+                    self._apply_autofill_entry(self.work_title_entry, anime_name, "_last_autofilled_work_title")
+
+                scene_parts = [p for p in (scene_title, scene_reason) if p and p != anime_name]
+                scene_ctx_auto = " — ".join(scene_parts)
+                if hasattr(self, "scene_context_entry"):
+                    self._apply_autofill_entry(self.scene_context_entry, scene_ctx_auto, "_last_autofilled_scene_ctx")
+
+                climax_key = self._map_origin_to_climax_key(origin)
+                if hasattr(self, "climax_type_var") and hasattr(self, "climax_values_map"):
+                    target_climax_lbl = self.climax_values_map.get(climax_key, self.climax_values_map["auto"])
+                    self.climax_type_var.set(target_climax_lbl)
+                    self._on_climax_type_change(target_climax_lbl)
 
                 msg = (
                     f"Origem Identificada: Trecho contínuo de {dur:.1f}s extraído de '{ep}'{title_str}.\n"
-                    "O Diretor IA salvou este corte como contínuo bruto. A proteção Anti-Copyright 2026 "
-                    "(Zoom Dinâmico com Respiração, Granulação Cinematográfica e Micro-EQ Anti-SoundMatch) foi ativada automaticamente!"
+                    "O Diretor IA salvou contexto da obra, motivo da cena e gênero no cache. "
+                    "Obra, Clímax e Proteção Anti-Copyright 2026 foram restaurados automaticamente!"
                 )
                 self.continuous_origin_desc.configure(text=msg)
                 if hasattr(self, "continuous_origin_card") and not self.continuous_origin_card.winfo_ismapped():
@@ -1086,6 +1138,10 @@ class RefinerMastercutTab(ctk.CTkFrame):
                 if "copyright_risk" in self.info_labels:
                     self.info_labels["copyright_risk"].configure(text="🟢 Seguro (Dinâmico)", text_color="#10b981")
             else:
+                if hasattr(self, "work_title_entry"):
+                    self._apply_autofill_entry(self.work_title_entry, "", "_last_autofilled_work_title")
+                if hasattr(self, "scene_context_entry"):
+                    self._apply_autofill_entry(self.scene_context_entry, "", "_last_autofilled_scene_ctx")
                 dur = self.current_video_info.duration if self.current_video_info else 0.0
                 if dur >= 20.0:
                     if "copyright_risk" in self.info_labels:
@@ -1619,9 +1675,124 @@ class RefinerMastercutTab(ctk.CTkFrame):
         else:
             self.script_card.pack_forget()
 
+        # Se houver opções alternativas geradas pela IA (vídeos > 75s / 3-4 min), renderiza os botões de seleção
+        options = stats.get("options")
+        if options and len(options) > 1:
+            self._render_options_selector(options)
+        else:
+            if hasattr(self, "options_frame"):
+                self.options_frame.pack_forget()
+
         self.result_card.pack(fill="x", pady=(0, 10))
         self.after(150, lambda: self.scroll._parent_canvas.yview_moveto(0.55))
         self._log(f"[OK] Concluído com sucesso em {time.time() - self._start_time:.1f}s!")
+
+    def _render_options_selector(self, options: list):
+        """Renders modern segmented option buttons when multiple refined cuts are generated."""
+        for w in self.options_frame.winfo_children():
+            w.destroy()
+
+        self.options_frame.pack(fill="x", pady=(2, 8), before=self.stats_label)
+
+        header_lbl = ctk.CTkLabel(
+            self.options_frame,
+            text=f"✨ {len(options)} Opções de Vídeo Geradas pela IA (Escolha o corte ideal):",
+            font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
+            text_color="#10b981",
+            anchor="w"
+        )
+        header_lbl.pack(fill="x", pady=(0, 4))
+
+        btns_row = ctk.CTkFrame(self.options_frame, fg_color="transparent")
+        btns_row.pack(fill="x")
+
+        self._option_buttons = []
+        for idx, opt in enumerate(options):
+            dur_val = opt.get("duration_after") if opt.get("duration_after") is not None else opt.get("duration", 0.0)
+            dur_str = format_time(dur_val)
+            title = opt.get("title", f"Opção {idx + 1}")
+            display_title = title if len(title) <= 28 else title[:26] + "..."
+            btn_text = f"🎬 {display_title} ({dur_str})"
+
+            is_active = (idx == 0)
+            btn = ctk.CTkButton(
+                btns_row,
+                text=btn_text,
+                font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold" if is_active else "normal"),
+                fg_color="#10b981" if is_active else COLORS["bg_dark"],
+                hover_color="#059669" if is_active else COLORS["bg_card_hover"],
+                text_color="#09090b" if is_active else COLORS["text_primary"],
+                border_width=1,
+                border_color="#10b981" if is_active else COLORS["border"],
+                height=32,
+                corner_radius=6,
+                command=lambda o=opt, i=idx: self._select_option(o, i)
+            )
+            btn.pack(side="left", padx=(0, 6), expand=True, fill="x")
+            self._option_buttons.append(btn)
+
+    def _select_option(self, option: dict, active_idx: int):
+        """Switches active Mastercut output path, stats, and narrative script to the selected option."""
+        opt_path = option.get("output_path")
+        if not opt_path or not os.path.exists(opt_path):
+            return
+
+        self.output_path = opt_path
+        if hasattr(self, "output_entry"):
+            self.output_entry.delete(0, "end")
+            self.output_entry.insert(0, opt_path)
+
+        # Update button highlights
+        if hasattr(self, "_option_buttons"):
+            for idx, btn in enumerate(self._option_buttons):
+                if idx == active_idx:
+                    btn.configure(
+                        fg_color="#10b981",
+                        hover_color="#059669",
+                        text_color="#09090b",
+                        border_color="#10b981",
+                        font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold")
+                    )
+                else:
+                    btn.configure(
+                        fg_color=COLORS["bg_dark"],
+                        hover_color=COLORS["bg_card_hover"],
+                        text_color=COLORS["text_primary"],
+                        border_color=COLORS["border"],
+                        font=ctk.CTkFont(family="Segoe UI", size=11, weight="normal")
+                    )
+
+        # Update stats label
+        dur_val = option.get("duration_after") if option.get("duration_after") is not None else option.get("duration", 0.0)
+        dur_after = format_time(dur_val)
+        segs = len(option.get("segments", []))
+        try:
+            sz = round(os.path.getsize(opt_path) / (1024 * 1024), 1)
+        except Exception:
+            sz = 0.0
+        self.stats_label.configure(
+            text=f"Opção Selecionada: {option.get('title', 'Corte')} | Duração: {dur_after} | {segs} cortes | Tamanho: {sz} MB"
+        )
+
+        # Update script card
+        roteiro = option.get("roteiro")
+        if roteiro and isinstance(roteiro, dict):
+            lines = []
+            if roteiro.get("premissa"):
+                lines.append(f"• Premissa: {roteiro['premissa']}")
+            if roteiro.get("hook"):
+                lines.append(f"• Hook (Abertura): {roteiro['hook']}")
+            if roteiro.get("conflito_desenvolvimento"):
+                lines.append(f"• Desenvolvimento: {roteiro['conflito_desenvolvimento']}")
+            if roteiro.get("climax_fechamento"):
+                lines.append(f"• Clímax/Fechamento: {roteiro['climax_fechamento']}")
+            script_text = "\n".join(lines) if lines else "Roteiro narrativo desta opção."
+            self.script_body_label.configure(text=script_text)
+            self.script_card.pack(fill="x", pady=(0, 12), before=self.result_btn_row)
+        else:
+            self.script_card.pack_forget()
+
+        self._log(f"🎬 [OPÇÃO SELECIONADA] {option.get('title')} ({dur_after}) pronta para pré-visualização ou envio ao Studio!")
 
     def _on_process_cancelled(self):
         self.is_processing = False

@@ -302,9 +302,14 @@ def create_static_overlay(
     font_path = font_queens if Path(font_queens).exists() else font_alt
 
     # 1. Foto de perfil circular (tamanho padrao calibrado 225px)
-    profile_path = _resolve_asset_path("Perfil_1.png")
+    req_profile = style.get("channel_header", {}).get("profile_png", "assets/Perfil_1.png")
+    profile_path = _resolve_asset_path(req_profile)
     if not Path(profile_path).exists():
-        profile_path = _resolve_asset_path("Perfil 1.png")
+        p_cand = Path(req_profile)
+        if p_cand.exists():
+            profile_path = str(p_cand)
+        else:
+            profile_path = _resolve_asset_path(Path(req_profile).name)
 
     px, py = 15, 88
     size = style.get("channel_header", {}).get("size_px", 225)
@@ -314,6 +319,10 @@ def create_static_overlay(
     if Path(profile_path).exists():
         try:
             p_img = Image.open(profile_path).convert("RGBA")
+            pw, ph = p_img.size
+            if pw != ph:
+                min_side = min(pw, ph)
+                p_img = p_img.crop(((pw - min_side) // 2, (ph - min_side) // 2, (pw + min_side) // 2, (ph + min_side) // 2))
             p_img = p_img.resize((size, size), Image.Resampling.LANCZOS)
             mask = Image.new("L", (size, size), 0)
             mask_draw = ImageDraw.Draw(mask)
@@ -336,19 +345,22 @@ def create_static_overlay(
     ty_name = py + 35
     ty_handle = ty_name + 46
 
-    draw.text((tx + 2, ty_name + 2), "Animax", fill=(0, 0, 0, 220), font=font_name)
-    draw.text((tx, ty_name), "Animax", fill=(255, 255, 255, 255), font=font_name)
+    channel_name = style.get("channel_header", {}).get("name", "Animax")
+    draw.text((tx + 2, ty_name + 2), channel_name, fill=(0, 0, 0, 220), font=font_name)
+    draw.text((tx, ty_name), channel_name, fill=(255, 255, 255, 255), font=font_name)
 
-    # Selo verificado
-    bbox = draw.textbbox((tx, ty_name), "Animax", font=font_name)
-    check_x = bbox[2] + 18
-    check_y = ty_name + 18
-    check_r = 13
-    draw.ellipse((check_x - check_r - 1, check_y - check_r - 1, check_x + check_r + 1, check_y + check_r + 1), fill=(0, 0, 0, 200))
-    draw.ellipse((check_x - check_r, check_y - check_r, check_x + check_r, check_y + check_r), fill=(255, 255, 255, 255))
-    draw.line([(check_x - 6, check_y), (check_x - 2, check_y + 5), (check_x + 6, check_y - 4)], fill=(0, 0, 0, 255), width=3)
+    # Selo verificado (dinâmico por perfil)
+    is_verified = bool(style.get("channel_header", {}).get("verified", True))
+    if is_verified:
+        bbox = draw.textbbox((tx, ty_name), channel_name, font=font_name)
+        check_x = bbox[2] + 18
+        check_y = ty_name + 18
+        check_r = 13
+        draw.ellipse((check_x - check_r - 1, check_y - check_r - 1, check_x + check_r + 1, check_y + check_r + 1), fill=(0, 0, 0, 200))
+        draw.ellipse((check_x - check_r, check_y - check_r, check_x + check_r, check_y + check_r), fill=(255, 255, 255, 255))
+        draw.line([(check_x - 6, check_y), (check_x - 2, check_y + 5), (check_x + 6, check_y - 4)], fill=(0, 0, 0, 255), width=3)
 
-    # Handle @animax_97
+    # Handle (ex: @animax_97, @vinny.animes, @ViniAnime__s)
     handle_txt = style.get("channel_header", {}).get("handle", "@animax_97")
     draw.text((tx + 2, ty_handle + 2), handle_txt, fill=(0, 0, 0, 220), font=font_handle)
     draw.text((tx, ty_handle), handle_txt, fill=(200, 200, 205, 255), font=font_handle)
@@ -362,7 +374,7 @@ def create_static_overlay(
     def draw_stroked_text(pos, text, font, fill_color, stroke_color, stroke_width):
         draw.text(pos, text, font=font, fill=fill_color, stroke_width=stroke_width, stroke_fill=stroke_color)
 
-    def _balance_wrap_title(text: str, font: ImageFont.ImageFont, emoji_font: Optional[ImageFont.ImageFont] = None, max_line_w: int = 940) -> list[str]:
+    def _balance_wrap_title(text: str, font: Any, emoji_font: Optional[Any] = None, max_line_w: int = 940) -> list[str]:
         words = text.split()
         if not words:
             return []
@@ -463,6 +475,19 @@ def create_static_overlay(
                 line_h = max(48, int(round(52 * scale)))
                 y_start = 310
 
+        # Cor do título dinâmica configurada no perfil (ex: Branco Animax, Azul Vinny, Vermelho ViniAnimes)
+        raw_title_color = style.get("title_overlay", {}).get("color", "#FFFFFF")
+        def _parse_rgba(c_val):
+            if isinstance(c_val, (list, tuple)):
+                return tuple(c_val)
+            if isinstance(c_val, str) and c_val.startswith("#"):
+                h = c_val.lstrip("#")
+                if len(h) == 6:
+                    return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16), 255)
+            return (255, 255, 255, 255)
+
+        title_fill_color = _parse_rgba(raw_title_color)
+
         for idx, line in enumerate(t_lines):
             t_w, _ = measure_mixed_text(draw, line, title_font, emoji_title_font)
             curr_y = y_start + (idx * line_h)
@@ -473,14 +498,16 @@ def create_static_overlay(
                 line,
                 main_font=title_font,
                 emoji_font=emoji_title_font,
-                fill_color=(255, 255, 255, 255),
+                fill_color=title_fill_color,
                 stroke_color=(0, 0, 0, 255),
                 stroke_width=6
             )
 
-    # 4. Watermark @ANIMAX_97 - Ampliada para 62px conforme calibracao do video 3
+    # 4. Watermark configurável pelo perfil - Ampliada para 62px conforme calibração
     wm_text = style.get("watermark_text", {}).get("text", "@ANIMAX_97")
     wm_size = style.get("watermark_text", {}).get("size_px", 62)
+    wm_opacity_float = float(style.get("watermark_text", {}).get("opacity", 0.38))
+    wm_alpha = int(255 * max(0.10, min(1.0, wm_opacity_float)))
     try:
         wm_font = ImageFont.truetype(font_path, wm_size)
     except Exception:
@@ -492,43 +519,49 @@ def create_static_overlay(
     if title_text and t_lines:
         last_title_bottom = y_start + ((len(t_lines) - 1) * line_h) + (line_h // 2)
         wm_y = max(460, last_title_bottom + 25)
-    draw_stroked_text(((width - wm_w) / 2, wm_y), wm_text, wm_font, (255, 255, 255, 105), (0, 0, 0, 70), 3)
+    draw_stroked_text(((width - wm_w) / 2, wm_y), wm_text, wm_font, (255, 255, 255, wm_alpha), (0, 0, 0, int(wm_alpha * 0.65)), 3)
 
-    # 5. CTA Inferior em 2 linhas com suporte universal a emojis
+    # 5. CTA Inferior flexível (1, 2 ou 3 linhas) com suporte universal a emojis
     cta_style = style.get("cta_bar", {})
-    cta_l1 = cta_style.get("line1", "FINALMENTE O ALGORITIMO TE TROUXE")
-    cta_l2 = cta_style.get("line2", "PRO CANAL CERTO! 🚀 SE INSCREVE")
+    raw_lines = cta_style.get("lines")
+    if not raw_lines:
+        raw_lines = [
+            cta_style.get("line1", "FINALMENTE O ALGORITMO TE TROUXE"),
+            cta_style.get("line2", "PRO CANAL CERTO! 🚀 SE INSCREVE")
+        ]
+        if cta_style.get("line3"):
+            raw_lines.append(cta_style.get("line3"))
+    cta_lines = [str(l).strip() for l in raw_lines if l and str(l).strip()]
+
+    if len(cta_lines) == 3:
+        cta_font_sz, cta_emoji_sz = 40, 34
+        start_cta_y, cta_step = 1565, 58
+    elif len(cta_lines) == 1:
+        cta_font_sz, cta_emoji_sz = 46, 40
+        start_cta_y, cta_step = 1620, 0
+    else:  # 2 linhas padrão Animax
+        cta_font_sz, cta_emoji_sz = 44, 38
+        start_cta_y, cta_step = 1590, 65
 
     try:
-        cta_font = ImageFont.truetype(font_path, 44)
+        cta_font = ImageFont.truetype(font_path, cta_font_sz)
     except Exception:
         cta_font = font_name
+    cta_emoji_font = get_emoji_font(cta_emoji_sz)
 
-    cta_emoji_font = get_emoji_font(38)
-
-    c1_w, _ = measure_mixed_text(draw, cta_l1, cta_font, cta_emoji_font)
-    render_mixed_text(
-        draw,
-        ((width - c1_w) // 2, 1590),
-        cta_l1,
-        main_font=cta_font,
-        emoji_font=cta_emoji_font,
-        fill_color=(255, 255, 255, 255),
-        stroke_color=(0, 0, 0, 255),
-        stroke_width=6
-    )
-
-    c2_w, _ = measure_mixed_text(draw, cta_l2, cta_font, cta_emoji_font)
-    render_mixed_text(
-        draw,
-        ((width - c2_w) // 2, 1655),
-        cta_l2,
-        main_font=cta_font,
-        emoji_font=cta_emoji_font,
-        fill_color=(255, 255, 255, 255),
-        stroke_color=(0, 0, 0, 255),
-        stroke_width=6
-    )
+    for c_idx, c_txt in enumerate(cta_lines):
+        c_w, _ = measure_mixed_text(draw, c_txt, cta_font, cta_emoji_font)
+        c_y = start_cta_y + (c_idx * cta_step)
+        render_mixed_text(
+            draw,
+            ((width - c_w) // 2, c_y),
+            c_txt,
+            main_font=cta_font,
+            emoji_font=cta_emoji_font,
+            fill_color=(255, 255, 255, 255),
+            stroke_color=(0, 0, 0, 255),
+            stroke_width=6
+        )
 
     img.save(output_png_path, "PNG")
     return output_png_path
@@ -1867,6 +1900,8 @@ def build_kinetic_kawaii_dialogues(item: Dict[str, Any], pop_animation: bool = T
 
     start = float(item.get("start", 0.0))
     end = float(item.get("end", 0.0))
+    anim = r"\t(0,65,\fscx115\fscy122)\t(65,135,\fscx100\fscy100)"
+    kawaii_tags = r"\c&H00D5A5FF&\3c&H00602080&\blur2\bord5\shad2"
     wrapped = wrap_words_to_lines(words)
     if idx % 2 == 0:
         wrapped += " ✨"
@@ -2179,9 +2214,11 @@ def analyze_dialogue_positions(
     cap = None
     fps = 24.0
     face_cascade = None
+    cv2 = None
     if video_path and os.path.exists(video_path):
         try:
-            import cv2
+            import cv2 as _cv2
+            cv2 = _cv2
             cap = cv2.VideoCapture(video_path)
             fps = cap.get(cv2.CAP_PROP_FPS) or 24.0
 
@@ -2193,8 +2230,9 @@ def analyze_dialogue_positions(
                 os.path.join(base_dir, "_internal", "cv2", "data", "haarcascade_frontalface_default.xml"),
                 os.path.join(base_dir, "cv2", "data", "haarcascade_frontalface_default.xml"),
             ]
-            if hasattr(cv2, "data") and hasattr(cv2.data, "haarcascades"):
-                cascade_candidates.append(os.path.join(cv2.data.haarcascades, "haarcascade_frontalface_default.xml"))
+            cv2_data = getattr(cv2, "data", None)
+            if cv2_data is not None and hasattr(cv2_data, "haarcascades"):
+                cascade_candidates.append(os.path.join(cv2_data.haarcascades, "haarcascade_frontalface_default.xml"))
             if getattr(sys, "frozen", False):
                 meipass = getattr(sys, "_MEIPASS", "")
                 if meipass:
@@ -2240,7 +2278,7 @@ def analyze_dialogue_positions(
         has_face = False
         face_is_huge = False
 
-        if cap is not None and face_cascade is not None and not face_cascade.empty():
+        if cv2 is not None and cap is not None and face_cascade is not None and not face_cascade.empty():
             try:
                 mid_t = (st + et) / 2.0
                 frame_no = int(mid_t * fps)
@@ -2645,8 +2683,10 @@ def render_video_with_style(
     include_anime_fx: bool = True,
     use_local_ai: bool = True,
     local_ai_model: str = "qwen2.5:7b",
+    manga_theme: str = "geral",
     on_log: Optional[Callable] = None,
     on_progress: Optional[Callable] = None,
+    style: Optional[dict] = None,
 ) -> bool:
     """
     Renderiza o video final com o pipeline completo do estilo Animax:
@@ -2665,7 +2705,8 @@ def render_video_with_style(
 
     ffmpeg = _find_ffmpeg()
     ffprobe = _find_ffprobe()
-    style = load_style()
+    if style is None:
+        style = load_style()
     tmp_dir = tempfile.mkdtemp(prefix="animax_render_")
 
     try:
@@ -2745,31 +2786,52 @@ def render_video_with_style(
                     log_callback=log,
                     use_local_ai=use_local_ai,
                     local_ai_model=local_ai_model,
+                    video_path=input_path,
+                    manga_theme=manga_theme,
                 )
 
-                # 1. Recortes de Mangá Clímax Diversificados (Radial Power, Eyes Panel, Lateral Sticker)
+                # 1. Recortes de Mangá Clímax Diversificados (Acelerados na GPU CUDA + Paralelismo Multi-Thread)
                 events_to_process = fx_schedule.get("manga_events", [])
                 if not events_to_process and fx_schedule.get("manga_climax"):
                     events_to_process = [fx_schedule["manga_climax"]]
 
-                for ev_idx, m_ev in enumerate(events_to_process):
-                    m_s = float(m_ev["start"])
-                    m_e = float(m_ev["end"])
-                    etype = m_ev.get("event_type", "lateral_sticker_punch")
-                    m_l1 = m_ev.get("line1", "")
-                    m_l2 = m_ev.get("line2", "")
-                    log(f"Anime FX Pro: Gerando Mangá [{etype}] ({ev_idx+1}/{len(events_to_process)}) no momento {m_s:.1f}s-{m_e:.1f}s ('{m_l1}' / '{m_l2}')...")
-                    try:
-                        import manga_fx_engine
-                        ui_img = Image.open(overlay_png) if os.path.exists(overlay_png) else None
-                        seg_clip_path = os.path.join(tmp_dir, f"ai_manga_segment_{ev_idx}.mp4")
-                        res_clip = manga_fx_engine.generate_manga_event_clip(
-                            video_path=input_path,
-                            event_dict=m_ev,
-                            output_clip_path=seg_clip_path,
-                            static_ui_img=ui_img
-                        )
-                        if res_clip and os.path.exists(res_clip):
+                if events_to_process:
+                    import concurrent.futures
+                    import manga_fx_engine
+                    gpu_label = getattr(manga_fx_engine, "_GPU_DEVICE_NAME", "GPU CUDA")
+                    max_workers = min(4, max(1, len(events_to_process)))
+                    log(f"⚡ [GPU CUDA] Gerando {len(events_to_process)} recortes de Mangá em paralelo ({max_workers} workers | {gpu_label})...")
+                    base_ui_img = Image.open(overlay_png).convert("RGBA") if os.path.exists(overlay_png) else None
+
+                    def _render_single_manga_clip(task_tuple):
+                        idx_ev, ev_item = task_tuple
+                        ms = float(ev_item["start"])
+                        me_sec = float(ev_item["end"])
+                        etp = ev_item.get("event_type", "lateral_sticker_punch")
+                        ml1 = ev_item.get("line1", "")
+                        ml2 = ev_item.get("line2", "")
+                        log(f"Anime FX Pro [GPU]: Gerando Mangá [{etp}] ({idx_ev+1}/{len(events_to_process)}) em {ms:.1f}s-{me_sec:.1f}s ('{ml1}' / '{ml2}')...")
+                        try:
+                            ui_copy = base_ui_img.copy() if base_ui_img is not None else None
+                            seg_path = os.path.join(tmp_dir, f"ai_manga_segment_{idx_ev}.mp4")
+                            r_clip = manga_fx_engine.generate_manga_event_clip(
+                                video_path=input_path,
+                                event_dict=ev_item,
+                                output_clip_path=seg_path,
+                                static_ui_img=ui_copy
+                            )
+                            return (idx_ev, ms, me_sec, etp, r_clip, None)
+                        except Exception as ex_m:
+                            return (idx_ev, ms, me_sec, etp, None, ex_m)
+
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
+                        rendered_results = list(pool.map(_render_single_manga_clip, enumerate(events_to_process)))
+
+                    rendered_results.sort(key=lambda x: x[0])
+                    for ev_idx, m_s, m_e, etype, res_clip, err_m in rendered_results:
+                        if err_m is not None:
+                            log(f"Aviso ao gerar Manga AI [{etype}]: {err_m}")
+                        elif res_clip and os.path.exists(res_clip):
                             manga_clips.append({
                                 "clip": res_clip,
                                 "start": m_s,
@@ -2778,11 +2840,9 @@ def render_video_with_style(
                             })
                             manga_intervals.append((m_s, m_e))
                             anime_fx_inputs.extend(["-itsoffset", f"{m_s:.3f}", "-i", res_clip])
-                            log(f"Anime FX Pro: Segmento de Mangá [{etype}] ({ev_idx+1}/{len(events_to_process)}) gerado com sucesso!")
+                            log(f"Anime FX Pro [GPU]: Segmento de Mangá [{etype}] ({ev_idx+1}/{len(events_to_process)}) pronto!")
                         else:
                             log(f"Aviso Anime FX Pro: Não foi possível gerar clipe para [{etype}] ({m_s:.1f}s-{m_e:.1f}s).")
-                    except Exception as me:
-                        log(f"Aviso ao gerar Manga AI [{etype}]: {me}")
 
                 # 2. Flash Negativo / Invert Pulse (0.18s de alta tensão sem pausar o vídeo)
                 if fx_schedule.get("negative_flashes"):
@@ -2851,7 +2911,11 @@ def render_video_with_style(
         blur_strength = style.get("video_style", {}).get("blur_strength", 30)
 
         if include_blur_sides:
-            bg_filter = f"[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,gblur=sigma={blur_strength}[bg]"
+            fast_sigma = max(4, int(round(blur_strength / 3.0)))
+            bg_filter = (
+                f"[0:v]scale=360:640:force_original_aspect_ratio=increase,crop=360:640,"
+                f"gblur=sigma={fast_sigma},scale=1080:1920:flags=bilinear[bg]"
+            )
             overlay_fg = f"[bg][fg]overlay=0:{y_overlay}[v1]"
         else:
             bg_filter = "color=c=black:s=1080x1920:d=1[bg]"
@@ -2913,7 +2977,7 @@ def render_video_with_style(
             # Calibração Proporcional: volume da música calibrado com base no volume médio do vídeo
             try:
                 vid_stats = detect_audio_levels(input_path)
-                mus_stats = detect_audio_levels(music_path)
+                mus_stats = detect_audio_levels(str(music_path))
                 v_mean = vid_stats.get("mean_volume", -20.0)
                 m_mean = mus_stats.get("mean_volume", -12.0)
                 m_max = mus_stats.get("max_volume", 0.0)
@@ -2976,7 +3040,32 @@ def render_video_with_style(
             else:
                 af = "[0:a]volume=1.0[aout]"
 
-        cmd = [
+        cmd_nvenc = [
+            ffmpeg,
+            "-hwaccel", "auto",
+            *inputs,
+            "-filter_complex", f"{vf};{af}",
+            "-map", "[vout]",
+            "-map", "[aout]",
+            "-map_metadata", "-1",
+            "-map_chapters", "-1",
+            "-fflags", "+bitexact",
+            "-c:v", "h264_nvenc",
+            "-preset", "p4",
+            "-rc", "vbr",
+            "-cq", "18",
+            "-b:v", "0",
+            "-spatial_aq", "1",
+            "-temporal_aq", "1",
+            "-pix_fmt", "yuv420p",
+            "-c:a", "aac",
+            "-b:a", "192k",
+            "-r", "60",
+            "-y",
+            output_path
+        ]
+
+        cmd_cpu = [
             ffmpeg,
             *inputs,
             "-filter_complex", f"{vf};{af}",
@@ -2995,16 +3084,25 @@ def render_video_with_style(
             output_path
         ]
 
-        log("Iniciando renderizacao com FFmpeg...")
+        log("⚡ [GPU NVENC] Iniciando renderização acelerada na Placa de Vídeo (h264_nvenc 60 FPS)...")
         if on_progress:
-            on_progress(20, "Processando video...")
+            on_progress(20, "Renderizando na GPU (NVENC)...")
 
         p = subprocess.run(
-            cmd,
+            cmd_nvenc,
             capture_output=True,
             text=True,
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
         )
+
+        if p.returncode != 0:
+            log("Aviso: NVENC indisponível ou ocupado — acionando fallback automático para CPU (libx264)...")
+            p = subprocess.run(
+                cmd_cpu,
+                capture_output=True,
+                text=True,
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+            )
 
         if p.returncode != 0:
             err = p.stderr[-800:] if p.stderr else "Erro desconhecido"

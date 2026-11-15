@@ -32,6 +32,9 @@ from video_trimmer import (
 )
 
 import urahara_theme
+import channel_profile_manager as cpm
+from channel_profile_dialog import ChannelProfileDialog
+from ai_cache_hub import ai_cache
 
 COLORS = {
     **urahara_theme.COLORS,
@@ -107,7 +110,8 @@ class StudioPipelineTab(ctk.CTkFrame):
         self.custom_censor_regions: List[Dict[str, Any]] = []
         self.include_anime_fx = ctk.BooleanVar(value=True)
         self.anime_fx_use_local_ai = ctk.BooleanVar(value=True)
-        self.anime_fx_model = ctk.StringVar(value="qwen2.5:7b")
+        self.anime_fx_model = ctk.StringVar(value="qwen2.5vl:3b")
+        self.anime_fx_theme = ctk.StringVar(value="🌟 Geral / Dinâmico (Padrão IA)")
 
         # Variáveis de Corte e Aparo de Vídeo (Início, Fim e Meio)
         self.trim_enabled = ctk.BooleanVar(value=False)
@@ -122,9 +126,17 @@ class StudioPipelineTab(ctk.CTkFrame):
         self.output_dir = ctk.StringVar(value="")
         self._last_output_path: Optional[str] = None
 
+        # Cache e persistência das edições manuais de legendas
+        self._last_edited_items: Optional[List[Dict[str, Any]]] = None
+        self._last_edited_video_path: Optional[str] = None
+
         self._anim_timer = None
         self._anim_frames = []
         self._anim_frame_idx = 0
+
+        self.channel_profile_var = ctk.StringVar(value=cpm.get_active_profile().get("name", "Animax"))
+        self._profile_avatar_ctk = None
+        self.step_watermark_sublabel = None
 
         # Traces para atualização em tempo real do resumo de cortes
         self.trim_enabled.trace_add("write", lambda *a: self._update_trim_summary())
@@ -133,6 +145,13 @@ class StudioPipelineTab(ctk.CTkFrame):
         self.trim_end_at.trace_add("write", lambda *a: self._update_trim_summary())
         self.trim_exclude.trace_add("write", lambda *a: self._update_trim_summary())
         self.input_path.trace_add("write", lambda *a: self._on_input_path_changed())
+
+        # Traces para sincronização contínua da BGM com o player do Studio
+        self.include_music.trace_add("write", lambda *a: self._sync_player_bgm())
+        self.music_path.trace_add("write", lambda *a: self._sync_player_bgm())
+        self.music_auto_ducking.trace_add("write", lambda *a: self._sync_player_bgm())
+        self.music_ducking_mode.trace_add("write", lambda *a: self._sync_player_bgm())
+        self.music_start.trace_add("write", lambda *a: self._sync_player_bgm())
 
         self._build_ui()
 
@@ -246,6 +265,59 @@ class StudioPipelineTab(ctk.CTkFrame):
                                    font=ctk.CTkFont(size=12, weight="bold"),
                                    command=self._run_training)
         train_btn.grid(row=1, column=1, padx=20, pady=(0, 14), sticky="e")
+
+        # Row 2: Seletor de Perfil do Canal (Animax, Vinny, ViniAnimes, etc.)
+        self.profile_bar = ctk.CTkFrame(header, fg_color=COLORS["bg_dark"], corner_radius=10, border_width=1, border_color=COLORS["border"])
+        self.profile_bar.grid(row=2, column=0, columnspan=2, padx=16, pady=(0, 14), sticky="ew")
+        self.profile_bar.grid_columnconfigure(3, weight=1)
+
+        self.lbl_profile_thumb = ctk.CTkLabel(self.profile_bar, text="", width=38, height=38)
+        self.lbl_profile_thumb.grid(row=0, column=0, padx=(10, 8), pady=8)
+
+        ctk.CTkLabel(self.profile_bar, text="Canal Ativo:", font=ctk.CTkFont(size=12, weight="bold"),
+                     text_color=COLORS["text_primary"]).grid(row=0, column=1, padx=(0, 6), pady=8)
+
+        self.profile_option_menu = ctk.CTkOptionMenu(
+            self.profile_bar,
+            values=self._get_profile_menu_values(),
+            variable=self.channel_profile_var,
+            command=self._on_profile_dropdown_changed,
+            width=165,
+            height=32,
+            fg_color=COLORS["bg_card"],
+            button_color=COLORS["border"],
+            dropdown_fg_color=COLORS["bg_card"]
+        )
+        self.profile_option_menu.grid(row=0, column=2, padx=(0, 10), pady=8)
+
+        badges_frame = ctk.CTkFrame(self.profile_bar, fg_color="transparent")
+        badges_frame.grid(row=0, column=3, padx=4, pady=8, sticky="w")
+
+        self.lbl_profile_handle = ctk.CTkLabel(badges_frame, text="", font=ctk.CTkFont(size=11, weight="bold"), text_color=COLORS["accent_secondary"])
+        self.lbl_profile_handle.pack(side="left", padx=(0, 8))
+
+        self.lbl_profile_color_badge = ctk.CTkLabel(badges_frame, text="", font=ctk.CTkFont(size=10, weight="bold"), corner_radius=4, padx=6, pady=2)
+        self.lbl_profile_color_badge.pack(side="left", padx=(0, 8))
+
+        self.lbl_profile_wm_badge = ctk.CTkLabel(badges_frame, text="", font=ctk.CTkFont(size=11), text_color=COLORS["text_secondary"])
+        self.lbl_profile_wm_badge.pack(side="left")
+
+        self.profile_manage_btn = ctk.CTkButton(
+            self.profile_bar,
+            text="⚙️ Gerenciar Perfis...",
+            image=icon_manager.get_icon("sliders", size=(13, 13)), compound="left",
+            width=140,
+            height=30,
+            fg_color=COLORS["bg_card"],
+            hover_color=COLORS["bg_card_hover"],
+            border_width=1,
+            border_color=COLORS["border"],
+            text_color=COLORS["text_primary"],
+            font=ctk.CTkFont(size=11, weight="bold"),
+            command=self._open_channel_profiles_dialog
+        )
+        self.profile_manage_btn.grid(row=0, column=4, padx=(8, 12), pady=8, sticky="e")
+
 
         # Input/Output section
         io_frame = ctk.CTkFrame(self.scroll, fg_color=COLORS["bg_card"], corner_radius=12)
@@ -424,17 +496,18 @@ class StudioPipelineTab(ctk.CTkFrame):
 
         ctk.CTkLabel(
             p_header,
-            text="🎬 Player de Vídeo (Conferência de Legendas & Cortes):",
+            text="🎬 Player de Vídeo (Conferência de Legendas, Cortes & Música de Fundo):",
             font=ctk.CTkFont(size=12, weight="bold"),
             text_color=COLORS["accent_secondary"]
         ).grid(row=0, column=0, sticky="w")
 
-        ctk.CTkLabel(
+        self.player_bgm_status = ctk.CTkLabel(
             p_header,
-            text="Assista ao vídeo e confira as falas em tempo real",
-            font=ctk.CTkFont(size=10),
+            text="🎵 BGM: Desativada",
+            font=ctk.CTkFont(size=11, weight="bold"),
             text_color=COLORS["text_secondary"]
-        ).grid(row=0, column=1, sticky="e")
+        )
+        self.player_bgm_status.grid(row=0, column=1, sticky="e")
 
         self.preview_player = VideoPreviewPlayer(
             player_container,
@@ -448,19 +521,58 @@ class StudioPipelineTab(ctk.CTkFrame):
         sub_bar.grid(row=3, column=0, columnspan=4, padx=16, pady=(6, 8), sticky="ew")
         sub_bar.grid_columnconfigure(0, weight=1)
 
+        sub_header_row = ctk.CTkFrame(sub_bar, fg_color="transparent")
+        sub_header_row.grid(row=0, column=0, columnspan=5, padx=14, pady=(8, 4), sticky="ew")
+
         ctk.CTkCheckBox(
-            sub_bar,
+            sub_header_row,
             text="Revisar Falas / Nomes antes de renderizar",
             variable=self.review_subtitles,
             fg_color=COLORS["accent_studio"],
             font=ctk.CTkFont(size=12, weight="bold")
-        ).grid(row=0, column=0, padx=14, pady=8, sticky="w")
+        ).pack(side="left")
 
-        ctk.CTkLabel(sub_bar, text="Estilo:", font=ctk.CTkFont(size=12, weight="bold"),
-                     text_color=COLORS["text_secondary"]).grid(row=0, column=1, padx=(10, 4), pady=8)
+        self.btn_open_sub_editor = ctk.CTkButton(
+            sub_header_row,
+            text="✏️ Abrir Editor de Legendas",
+            image=icon_manager.get_icon("sparkle", size=(13, 13), color="#34d399"),
+            compound="left",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            height=28,
+            fg_color="#182c23", hover_color="#223e32",
+            border_width=1, border_color="#10b981",
+            text_color="#34d399",
+            command=self._start_transcribe_and_review
+        )
+        self.btn_open_sub_editor.pack(side="left", padx=(14, 6))
+
+        self.sub_cache_badge = ctk.CTkLabel(
+            sub_header_row,
+            text="",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            text_color=COLORS["success"]
+        )
+        self.sub_cache_badge.pack(side="left", padx=(4, 6))
+
+        self.btn_reset_subs = ctk.CTkButton(
+            sub_header_row,
+            text="🔄 Resetar p/ Whisper",
+            font=ctk.CTkFont(size=10),
+            height=24,
+            fg_color="#27272a", hover_color="#3f3f46",
+            text_color=COLORS["text_muted"],
+            command=self._reset_subtitles_cache
+        )
+        # Not packed until custom edits exist
+
+        style_row = ctk.CTkFrame(sub_bar, fg_color="transparent")
+        style_row.grid(row=1, column=0, columnspan=5, padx=14, pady=(2, 6), sticky="ew")
+
+        ctk.CTkLabel(style_row, text="Estilo:", font=ctk.CTkFont(size=12, weight="bold"),
+                     text_color=COLORS["text_secondary"]).pack(side="left", padx=(0, 4))
 
         self.style_dropdown = ctk.CTkOptionMenu(
-            sub_bar,
+            style_row,
             values=STYLE_OPTIONS,
             variable=self.subtitle_style_label,
             command=self._on_style_changed,
@@ -470,13 +582,13 @@ class StudioPipelineTab(ctk.CTkFrame):
             button_color=COLORS["border"],
             dropdown_fg_color=COLORS["bg_card"]
         )
-        self.style_dropdown.grid(row=0, column=2, padx=4, pady=8)
+        self.style_dropdown.pack(side="left", padx=(0, 14))
 
-        ctk.CTkLabel(sub_bar, text="Efeito:", font=ctk.CTkFont(size=12, weight="bold"),
-                     text_color=COLORS["text_secondary"]).grid(row=0, column=3, padx=(10, 4), pady=8, sticky="e")
+        ctk.CTkLabel(style_row, text="Efeito:", font=ctk.CTkFont(size=12, weight="bold"),
+                     text_color=COLORS["text_secondary"]).pack(side="left", padx=(0, 4))
 
         self.effect_dropdown = ctk.CTkOptionMenu(
-            sub_bar,
+            style_row,
             values=EFFECT_OPTIONS,
             variable=self.subtitle_pop,
             width=230,
@@ -485,11 +597,11 @@ class StudioPipelineTab(ctk.CTkFrame):
             button_color=COLORS["border"],
             dropdown_fg_color=COLORS["bg_card"]
         )
-        self.effect_dropdown.grid(row=0, column=4, padx=(4, 14), pady=8, sticky="e")
+        self.effect_dropdown.pack(side="left", padx=(0, 4))
 
-        # Row 1: Live Subtitle Style Preview Card
+        # Row 2: Live Subtitle Style Preview Card
         self.preview_card = ctk.CTkFrame(sub_bar, fg_color=COLORS["bg_card"], corner_radius=6, border_width=1, border_color=COLORS["border"])
-        self.preview_card.grid(row=1, column=0, columnspan=5, padx=14, pady=(0, 10), sticky="ew")
+        self.preview_card.grid(row=2, column=0, columnspan=5, padx=14, pady=(0, 10), sticky="ew")
         self.preview_card.grid_columnconfigure(2, weight=1)
 
         self.lbl_preview_badge = ctk.CTkLabel(
@@ -581,6 +693,17 @@ class StudioPipelineTab(ctk.CTkFrame):
                     self.music_ducking_menu.configure(state="disabled")
                 if hasattr(self, 'ducking_hint_label'):
                     self.ducking_hint_label.configure(text="Modo Fixo (Constante): Volume equilibrado ao vídeo (Voice Carve EQ) — sem oscilar na fala.")
+
+            if hasattr(self, "preview_player") and self.preview_player:
+                self.preview_player.set_bgm_volume(val / 100.0)
+            if hasattr(self, "player_bgm_status") and self.include_music.get() and self.music_path.get():
+                m_name = Path(self.music_path.get()).name
+                if len(m_name) > 28:
+                    m_name = m_name[:25] + "..."
+                self.player_bgm_status.configure(
+                    text=f"🎵 BGM Ativa: {m_name} ({val}%)",
+                    text_color="#38bdf8"
+                )
 
         self._update_vol_label = _update_vol_label
 
@@ -812,19 +935,30 @@ class StudioPipelineTab(ctk.CTkFrame):
         self.anime_fx_model_menu = ctk.CTkOptionMenu(
             fx_ai_row,
             variable=self.anime_fx_model,
-            values=["qwen2.5:7b", "qwen2.5:14b", "deepseek-r1:8b", "llama3.1:8b"],
+            values=[
+                "qwen2.5vl:3b",
+                "qwen2.5vl:7b",
+                "moondream",
+                "phi3:vision",
+                "llava:7b",
+                "llama3.2-vision:latest",
+                "hf:Qwen/Qwen2-VL-2B-Instruct",
+                "hf:microsoft/Phi-3-vision-128k-instruct",
+                "hf:vikhyatk/moondream2",
+                "qwen2.5:7b",
+            ],
             font=ctk.CTkFont(size=10),
             fg_color=COLORS["bg_card"],
             button_color=COLORS["accent_dark"],
             button_hover_color=COLORS["accent_primary"],
-            width=115, height=24, corner_radius=6,
+            width=155, height=24, corner_radius=6,
             command=lambda _: self._start_ollama_check()
         )
         self.anime_fx_model_menu.pack(side="left", padx=(0, 12))
 
         self.ollama_status_badge = ctk.CTkLabel(
             fx_ai_row,
-            text="Verificando Ollama...",
+            text="Verificando Vision LLM...",
             font=ctk.CTkFont(size=10, weight="bold"),
             text_color=COLORS["accent_secondary"]
         )
@@ -833,12 +967,52 @@ class StudioPipelineTab(ctk.CTkFrame):
         # Inicia verificação assíncrona com segurança após início da mainloop
         self.after(600, self._start_ollama_check)
 
+        # Sublinha 2: Seletor de Tema / Estilo dos Quadros Mangá
+        fx_theme_row = ctk.CTkFrame(anime_fx_frame, fg_color="transparent")
+        fx_theme_row.grid(row=2, column=0, padx=16, pady=(2, 4), sticky="ew")
+
+        ctk.CTkLabel(
+            fx_theme_row,
+            text="🎭 Tema / Tipo de Recorte Mangá:",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            text_color=COLORS["text_primary"]
+        ).pack(side="left", padx=(0, 8))
+
+        self.anime_fx_theme_menu = ctk.CTkOptionMenu(
+            fx_theme_row,
+            variable=self.anime_fx_theme,
+            values=[
+                "🌟 Geral / Dinâmico (Padrão IA)",
+                "💧 Triste / Emocional & Melancólico",
+                "💖 Romântica / Casal & Shoujo",
+                "⚔️ Ação / Batalha & Poder Shonen",
+                "🎉 Animada / Comédia & Hype Pop",
+                "🌑 Sombria / Suspense & Seinen Dark",
+                "👑 Épica / Clímax Supremo & Divino",
+            ],
+            font=ctk.CTkFont(size=11, weight="bold"),
+            fg_color=COLORS["bg_card"],
+            button_color=COLORS["accent_studio"],
+            button_hover_color=COLORS["accent_primary"],
+            width=270, height=26, corner_radius=6,
+            command=self._on_anime_fx_theme_changed,
+        )
+        self.anime_fx_theme_menu.pack(side="left", padx=(0, 12))
+
+        self.lbl_fx_theme_desc = ctk.CTkLabel(
+            fx_theme_row,
+            text="Adapta quadros e tipografias automaticamente a qualquer cena (Borda Tripla HQ • Sem fundo circular)",
+            font=ctk.CTkFont(size=10),
+            text_color=COLORS["accent_secondary"]
+        )
+        self.lbl_fx_theme_desc.pack(side="left")
+
         fx_desc = ctk.CTkFrame(anime_fx_frame, fg_color="transparent")
-        fx_desc.grid(row=2, column=0, padx=16, pady=(0, 10), sticky="ew")
+        fx_desc.grid(row=3, column=0, padx=16, pady=(0, 10), sticky="ew")
 
         ctk.CTkLabel(
             fx_desc,
-            text="Recorte Neural de Mangá (ISNet-Anime) • Detecção de Feeling • Speed Lines Radiais • Anti-Colisão",
+            text="Quadros Editoriais HQ (Shonen Jump • Webtoon • Chuva Melancólica • Romance Glow • 2-Panel Split • Noir) • Fundo 100% Uniforme",
             font=ctk.CTkFont(size=11),
             text_color=COLORS["accent_secondary"]
         ).pack(side="left")
@@ -871,14 +1045,96 @@ class StudioPipelineTab(ctk.CTkFrame):
                                        state="disabled", wrap="word")
         self.console.grid(row=1, column=0, padx=16, pady=(4, 8), sticky="nsew")
 
+        # Inicializa o card do canal ativo
+        self._update_channel_profile_card()
+
     def _build_step_toggle(self, parent, row, col, title, desc, var, color):
         frame = ctk.CTkFrame(parent, fg_color=COLORS["bg_dark"], corner_radius=10)
         frame.grid(row=row, column=col, padx=6, pady=4, sticky="nsew")
         ctk.CTkSwitch(frame, text=title, variable=var, progress_color=color,
                        font=ctk.CTkFont(size=12, weight="bold"),
                        text_color=COLORS["text_primary"]).pack(padx=12, pady=(12, 4), anchor="w")
-        ctk.CTkLabel(frame, text=desc, font=ctk.CTkFont(size=10),
-                     text_color=COLORS["text_secondary"], justify="left").pack(padx=12, pady=(0, 12), anchor="w")
+        lbl = ctk.CTkLabel(frame, text=desc, font=ctk.CTkFont(size=10),
+                           text_color=COLORS["text_secondary"], justify="left")
+        lbl.pack(padx=12, pady=(0, 12), anchor="w")
+        if title == "Watermarks":
+            self.step_watermark_sublabel = lbl
+
+    # ==========================================
+    # GERENCIAMENTO DE PERFIS DE CANAIS (STUDIO)
+    # ==========================================
+
+    def _get_profile_menu_values(self) -> List[str]:
+        profs = cpm.get_all_profiles()
+        return [p.get("name", pid) for pid, p in profs.items()]
+
+    def _on_profile_dropdown_changed(self, chosen_name: str):
+        profs = cpm.get_all_profiles()
+        for pid, p in profs.items():
+            if p.get("name") == chosen_name:
+                cpm.set_active_profile_id(pid)
+                self._update_channel_profile_card()
+                self._log(f"[PERFIL] Canal ativo alterado para '{chosen_name}' ({p.get('handle')}).")
+                break
+
+    def _open_channel_profiles_dialog(self):
+        ChannelProfileDialog(
+            parent=self.winfo_toplevel(),
+            on_profile_changed=self._on_profile_manager_callback
+        )
+
+    def _on_profile_manager_callback(self, active_pid: str):
+        self.profile_option_menu.configure(values=self._get_profile_menu_values())
+        self._update_channel_profile_card()
+
+    def _update_channel_profile_card(self):
+        try:
+            prof = cpm.get_active_profile()
+            self.channel_profile_var.set(prof.get("name", "Animax"))
+
+            # Atualiza thumbnail circular
+            img_rel = prof.get("profile_png", "assets/Perfil_1.png")
+            img_full = cpm.get_base_dir() / img_rel
+            if not img_full.exists():
+                img_full = Path(img_rel)
+
+            if img_full.exists():
+                try:
+                    from PIL import Image
+                    im = Image.open(str(img_full)).convert("RGBA")
+                    im = im.resize((38, 38), Image.Resampling.LANCZOS)
+                    self._profile_avatar_ctk = ctk.CTkImage(light_image=im, dark_image=im, size=(38, 38))
+                    self.lbl_profile_thumb.configure(image=self._profile_avatar_ctk, text="")
+                except Exception:
+                    self.lbl_profile_thumb.configure(image=None, text="📺")
+            else:
+                self.lbl_profile_thumb.configure(image=None, text="📺")
+
+            # Atualiza badge de handle
+            h = prof.get("handle", "")
+            ver_check = " ✔️" if prof.get("verified", False) else ""
+            self.lbl_profile_handle.configure(text=f"{h}{ver_check}")
+
+            # Atualiza badge de cor do título
+            c_hex = prof.get("title_color", "#FFFFFF")
+            self.lbl_profile_color_badge.configure(
+                text=f"Título: {c_hex}",
+                fg_color=c_hex,
+                text_color="#000000" if c_hex in ["#FFFFFF", "#FFD700", "#00FFAA", "#00A8FF"] else "#FFFFFF"
+            )
+
+            # Atualiza badge de marca d'água
+            wm = prof.get("watermark_text", "@ANIMAX_97")
+            self.lbl_profile_wm_badge.configure(text=f"Marca d'água: {wm}")
+
+            # Atualiza descrição do switch de Watermarks no pipeline
+            if getattr(self, "step_watermark_sublabel", None):
+                self.step_watermark_sublabel.configure(
+                    text=f"{wm} (62px)\n+ Foto perfil circular"
+                )
+        except Exception:
+            pass
+
 
     def _on_style_changed(self, choice=None):
         """Atualiza a pré-visualização visual e animada do estilo de legenda em tempo real."""
@@ -999,10 +1255,28 @@ class StudioPipelineTab(ctk.CTkFrame):
             except Exception:
                 pass
 
+            # Verifica se há legendas salvas para este vídeo no cache
+            try:
+                from ai_cache_hub import ai_cache
+                cached_edited = ai_cache.get(p, "edited_subtitles")
+                if cached_edited and isinstance(cached_edited, dict) and cached_edited.get("items"):
+                    self._last_edited_items = cached_edited["items"]
+                    self._last_edited_video_path = p
+                else:
+                    self._last_edited_items = None
+                    self._last_edited_video_path = None
+                self._update_subtitles_cache_status()
+            except Exception:
+                pass
+
             if hasattr(self, "preview_player"):
                 self.preview_player.load_video(p)
+                self._sync_player_bgm()
         else:
             self.original_video_duration = 0.0
+            self._last_edited_items = None
+            self._last_edited_video_path = None
+            self._update_subtitles_cache_status()
             if hasattr(self, "cache_status_badge"):
                 self.cache_status_badge.configure(
                     text="[CACHE 24H: PRONTO]",
@@ -1010,6 +1284,110 @@ class StudioPipelineTab(ctk.CTkFrame):
                 )
             if hasattr(self, "preview_player"):
                 self.preview_player.stop()
+                self._sync_player_bgm()
+        self._update_trim_summary()
+
+    def _sync_player_bgm(self):
+        """Sincroniza a trilha sonora configurada com o reprodutor embutido do Studio para conferência antes do pipeline."""
+        if not hasattr(self, "preview_player") or not self.preview_player:
+            return
+
+        m_active = self.include_music.get()
+        m_path = self.music_path.get().strip() if m_active else ""
+
+        if m_active and m_path and os.path.exists(m_path):
+            m_vol = self.music_volume_slider.get() / 100.0 if hasattr(self, "music_volume_slider") else 0.15
+            m_start_sec = 0.0
+            try:
+                from subtitle_editor_dialog import str_to_sec
+                m_start_sec = str_to_sec(self.music_start.get().strip())
+            except Exception:
+                pass
+
+            anti_cp = self.anti_copyright.get() if hasattr(self, "anti_copyright") else True
+            anti_mode_map = {
+                "Avançado (Pitch + EQ + Estéreo)": "advanced",
+                "Agressivo (Anti-Bloqueio Máximo)": "aggressive",
+                "Sutil (Apenas Harmônicos)": "subtle",
+            }
+            anti_mode_key = anti_mode_map.get(self.anti_copyright_mode.get(), "advanced") if hasattr(self, "anti_copyright_mode") else "advanced"
+            ducking_map = {
+                "Cinema & Anime (Ultra Fluido -6dB)": "cinema",
+                "Equilibrado (Recomendado -9dB)": "balanced",
+                "Forte (Voz em Destaque -14dB)": "aggressive",
+            }
+            ducking_key = ducking_map.get(self.music_ducking_mode.get(), "cinema") if hasattr(self, "music_ducking_mode") else "cinema"
+            ducking_active = self.music_auto_ducking.get() if hasattr(self, "music_auto_ducking") else False
+
+            self.preview_player.load_bgm(
+                bgm_path=m_path,
+                volume=m_vol,
+                start_sec=m_start_sec,
+                music_auto_ducking=ducking_active,
+                ducking_mode=ducking_key,
+                anti_copyright=anti_cp,
+                anti_copyright_mode=anti_mode_key
+            )
+            if hasattr(self, "player_bgm_status"):
+                m_name = Path(m_path).name
+                if len(m_name) > 28:
+                    m_name = m_name[:25] + "..."
+                vol_pct = int(self.music_volume_slider.get()) if hasattr(self, "music_volume_slider") else 15
+                self.player_bgm_status.configure(
+                    text=f"🎵 BGM Ativa: {m_name} ({vol_pct}%)",
+                    text_color="#38bdf8"
+                )
+        else:
+            self.preview_player.load_bgm(None)
+            if hasattr(self, "player_bgm_status"):
+                self.player_bgm_status.configure(
+                    text="🎵 BGM: Desativada",
+                    text_color=COLORS["text_secondary"]
+                )
+
+    def _update_subtitles_cache_status(self):
+        """Atualiza badges e botões de acordo com o estado das legendas salvas."""
+        has_saved = bool(self._last_edited_items)
+        if hasattr(self, "sub_cache_badge"):
+            if has_saved:
+                count_items = len(self._last_edited_items) if self._last_edited_items else 0
+                self.sub_cache_badge.configure(
+                    text=f"[Legendas Salvas: {count_items} falas]",
+                    text_color=COLORS["success"]
+                )
+            else:
+                self.sub_cache_badge.configure(text="", text_color=COLORS["text_secondary"])
+
+        if hasattr(self, "btn_reset_subs"):
+            if has_saved:
+                self.btn_reset_subs.pack(side="left", padx=(4, 0))
+            else:
+                self.btn_reset_subs.pack_forget()
+
+        if hasattr(self, "review_btn"):
+            if has_saved:
+                self.review_btn.configure(text="✏️ Ajustar Legendas & Re-renderizar")
+            else:
+                self.review_btn.configure(text="Transcrever & Revisar")
+
+    def _reset_subtitles_cache(self):
+        """Descarta as legendas editadas salvas e restaura a transcrição do zero (Whisper)."""
+        if not messagebox.askyesno(
+            "Resetar Legendas",
+            "Deseja realmente descartar as correções manuais salvas para este vídeo e re-transcrever com Whisper do zero?"
+        ):
+            return
+        p = self.input_path.get().strip()
+        self._last_edited_items = None
+        self._last_edited_video_path = None
+        try:
+            if p:
+                ai_cache.invalidate(p, "edited_subtitles")
+        except Exception:
+            pass
+        self._update_subtitles_cache_status()
+        self._log("[RESET] Legendas manuais descartadas. A próxima revisão consultará o Whisper do zero.")
+        messagebox.showinfo("Legendas Resetadas", "Legendas manuais removidas com sucesso!\nA próxima execução consultará o Whisper.")
         self._update_trim_summary()
 
     def _update_trim_summary(self):
@@ -1140,37 +1518,52 @@ class StudioPipelineTab(ctk.CTkFrame):
     def _browse_music(self):
         path = filedialog.askopenfilename(
             title="Selecione a musica de fundo",
-            filetypes=[("Audio", "*.mp3 *.wav *.m4a *.aac"), ("Todos", "*.*")]
+            filetypes=[("Áudios", "*.mp3 *.wav *.m4a *.aac *.ogg *.flac"), ("Todos", "*.*")]
         )
         if path:
             self.music_path.set(path)
             self.include_music.set(True)
+            self._sync_player_bgm()
+
+    def _on_anime_fx_theme_changed(self, choice: Optional[str] = None):
+        """Atualiza o resumo do Tema / Tipo de Recorte Mangá selecionado no Studio."""
+        try:
+            from anime_fx_analyzer import MANGA_THEME_PROFILES, resolve_manga_theme_key
+            t_key = resolve_manga_theme_key(choice or self.anime_fx_theme.get())
+            prof = MANGA_THEME_PROFILES.get(t_key, MANGA_THEME_PROFILES["geral"])
+            if hasattr(self, "lbl_fx_theme_desc"):
+                self.lbl_fx_theme_desc.configure(text=prof.get("description", ""))
+        except Exception:
+            pass
 
     def _start_ollama_check(self):
-        """Inicia verificação assíncrona do Ollama a partir da thread principal."""
+        """Inicia verificação assíncrona do Ollama / Vision LLM a partir da thread principal."""
         try:
             if not self.winfo_exists():
                 return
-            cur_model = str(self.anime_fx_model.get()).strip() or "qwen2.5:7b"
+            cur_model = str(self.anime_fx_model.get()).strip() or "qwen2.5vl:3b"
             threading.Thread(target=self._check_ollama_status_worker, args=(cur_model,), daemon=True).start()
         except Exception:
             pass
 
     def _check_ollama_status_worker(self, cur_model: str):
-        """Worker em background que realiza ping HTTP sem tocar em variáveis do Tkinter."""
+        """Worker em background que garante Ollama ativo e verifica modelo Vision LLM."""
         try:
-            import requests
-            r = requests.get("http://localhost:11434/api/tags", timeout=2.5)
-            if r.status_code == 200:
-                models = [m.get("name") for m in r.json().get("models", []) if m.get("name")]
-                has_cur = any(cur_model in m for m in models)
-                st_txt = f"[Online] Ollama Conectado ({cur_model})" if has_cur else "[Online] Ollama Conectado"
+            if cur_model.startswith("hf:"):
+                st_txt = f"[GPU Ready] HuggingFace VLM ({cur_model.replace('hf:', '')})"
                 st_col = COLORS["success"]
             else:
-                st_txt = "[Offline] Ollama (Fallback Heuristico)"
-                st_col = COLORS["text_muted"]
+                from anime_fx_analyzer import ensure_ollama_running
+                models = ensure_ollama_running()
+                if models:
+                    has_cur = any(cur_model.lower() in m.lower() for m in models)
+                    st_txt = f"[Online] Vision LLM Ativo ({cur_model})" if has_cur else f"[Online] Ollama Conectado ({models[0]})"
+                    st_col = COLORS["success"]
+                else:
+                    st_txt = "[Offline] Ollama (Diretor Contextual Ativo)"
+                    st_col = COLORS["text_muted"]
         except Exception:
-            st_txt = "[Offline] Ollama (Fallback Heuristico)"
+            st_txt = "[Offline] Ollama (Diretor Contextual Ativo)"
             st_col = COLORS["text_muted"]
 
         def _update_ui():
@@ -1226,176 +1619,44 @@ class StudioPipelineTab(ctk.CTkFrame):
         threading.Thread(target=_train, daemon=True).start()
 
     def _transcribe_audio(self, input_path: str) -> List[Dict[str, Any]]:
-        """Extrai audio e transcreve com Groq Whisper retornando timestamps de palavras sincronizados com cache 24h."""
-        from subtitle_renderer import _find_ffmpeg, detect_speech_segments, clean_and_repair_whisper_words, get_media_duration
-        from settings_manager import load_app_settings
-        import tempfile
-        import requests
+        """Extrai audio e transcreve via Whisper Hub (Groq otimizado + GPU Local large-v3) com cache 24h."""
+        from subtitle_renderer import clean_and_repair_whisper_words, get_media_duration
+        from whisper_hub import transcribe_audio_smart
 
         total_dur = get_media_duration(input_path)
+        res = transcribe_audio_smart(
+            media_path=input_path,
+            language="pt",
+            groq_model="whisper-large-v3",
+            local_model="large-v3",
+            use_cache=True,
+            cache_key_path=input_path,
+            require_word_timestamps=True,
+            on_log=self._log,
+        )
 
-        # 1. Verifica cache persistente 24h compartilhado entre abas
-        try:
-            from ai_cache_hub import ai_cache
-            cached_trans = ai_cache.get(input_path, "transcription")
-            if cached_trans and isinstance(cached_trans, dict):
-                raw_c_words = cached_trans.get("words", [])
-                if raw_c_words:
-                    norm_words = []
-                    for w in raw_c_words:
-                        txt = w.get("word") if "word" in w else w.get("text", "")
-                        norm_words.append({
-                            "word": txt,
-                            "text": txt,
-                            "start": float(w.get("start", 0.0)),
-                            "end": float(w.get("end", 0.0))
-                        })
-                    repaired = clean_and_repair_whisper_words(norm_words, max_duration=total_dur if total_dur > 0 else None)
-                    if repaired:
-                        self._log(f"[CACHE 24H] Transcrição Whisper recuperada instantaneamente ({len(repaired)} palavras, 0 tokens gastos)!")
-                        if hasattr(self, 'cache_status_badge'):
-                            self.cache_status_badge.configure(
-                                text=f"[CACHE ATIVO: {len(repaired)} palavras]",
-                                text_color=COLORS["success"]
-                            )
-                        return repaired
-        except Exception:
-            pass
-
-        settings = load_app_settings()
-        groq_key = settings.get("groq_key", "") or os.environ.get("GROQ_API_KEY", "").strip()
-        if not groq_key:
-            self._log("Aviso: Chave Groq nao encontrada em Configuracoes.")
+        raw_words = res.get("words") or []
+        if not raw_words:
+            self._log("Nenhuma fala detectada pelo Whisper.")
             return []
 
-        ffmpeg_bin = _find_ffmpeg()
-        tmp_wav = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
-        tmp_wav.close()
+        norm_words = []
+        for w in raw_words:
+            txt = w.get("word") if "word" in w else w.get("text", "")
+            norm_words.append({
+                "word": txt,
+                "text": txt,
+                "start": float(w.get("start", 0.0)),
+                "end": float(w.get("end", 0.0)),
+            })
 
-        try:
-            self._log("Extraindo faixa de voz para Whisper...")
-            subprocess.run([
-                ffmpeg_bin, "-i", input_path,
-                "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le",
-                "-y", tmp_wav.name
-            ], capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
-
-            # Segmentação VAD para isolar trechos de fala e eliminar drift temporal causado por música/cenas de ação
-            speech_segments = detect_speech_segments(tmp_wav.name, min_silence_dur=0.6, silence_thresh_db=-26.0)
-            headers = {"Authorization": f"Bearer {groq_key}"}
-
-            if len(speech_segments) > 1:
-                self._log(f"Segmentação VAD ativa: {len(speech_segments)} blocos de diálogo identificados.")
-                all_words = []
-                for s_idx, (st, en) in enumerate(speech_segments):
-                    dur = en - st
-                    if dur < 0.35:
-                        continue
-                    seg_wav = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
-                    seg_wav.close()
-                    try:
-                        subprocess.run([
-                            ffmpeg_bin, "-ss", f"{st:.2f}", "-t", f"{dur:.2f}", "-i", tmp_wav.name,
-                            "-c:a", "copy", "-y", seg_wav.name
-                        ], capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
-
-                        with open(seg_wav.name, "rb") as f:
-                            files = {"file": (f"seg_{s_idx}.wav", f, "audio/wav")}
-                            data = {
-                                "model": "whisper-large-v3",
-                                "response_format": "verbose_json",
-                                "timestamp_granularities[]": "word",
-                                "language": "pt",
-                                "temperature": "0.0"
-                            }
-                            resp = requests.post(
-                                "https://api.groq.com/openai/v1/audio/transcriptions",
-                                headers=headers,
-                                files=files,
-                                data=data,
-                                timeout=45
-                            )
-                        if resp.status_code == 200:
-                            raw_words = resp.json().get("words", [])
-                            for w in raw_words:
-                                all_words.append({
-                                    "word": w.get("word", ""),
-                                    "start": round(st + float(w.get("start", 0.0)), 3),
-                                    "end": round(st + float(w.get("end", 0.0)), 3)
-                                })
-                        else:
-                            self._log(f"Aviso no segmento {s_idx} ({resp.status_code}): {resp.text[:100]}")
-                    finally:
-                        Path(seg_wav.name).unlink(missing_ok=True)
-
-                if all_words:
-                    repaired = clean_and_repair_whisper_words(all_words, max_duration=total_dur if total_dur > 0 else None)
-                    self._log(f"Transcrição VAD concluída: {len(repaired)} palavras sincronizadas com precisão!")
-                    try:
-                        from ai_cache_hub import ai_cache
-                        ai_cache.set(input_path, "transcription", {
-                            "words": repaired,
-                            "full_text": " ".join([w.get("word", "") for w in repaired]),
-                            "duration": total_dur
-                        })
-                        if hasattr(self, 'cache_status_badge'):
-                            self.cache_status_badge.configure(
-                                text=f"[CACHE ATIVO: {len(repaired)} palavras]",
-                                text_color=COLORS["success"]
-                            )
-                    except Exception:
-                        pass
-                    return repaired
-
-            # Transcrição direta com modelo de alta precisão whisper-large-v3
-            self._log("Enviando requisicao Whisper Groq (whisper-large-v3)...")
-            with open(tmp_wav.name, "rb") as f:
-                files = {"file": (Path(tmp_wav.name).name, f, "audio/wav")}
-                data = {
-                    "model": "whisper-large-v3",
-                    "response_format": "verbose_json",
-                    "timestamp_granularities[]": "word",
-                    "language": "pt",
-                    "temperature": "0.0"
-                }
-                resp = requests.post(
-                    "https://api.groq.com/openai/v1/audio/transcriptions",
-                    headers=headers,
-                    files=files,
-                    data=data,
-                    timeout=60
-                )
-
-            if resp.status_code == 200:
-                trans_json = resp.json()
-                raw_words = trans_json.get("words", [])
-                if raw_words:
-                    words = [{"word": w.get("word", ""), "start": w.get("start", 0.0), "end": w.get("end", 0.0)} for w in raw_words]
-                    repaired = clean_and_repair_whisper_words(words, max_duration=total_dur if total_dur > 0 else None)
-                    self._log(f"Transcricao: {len(repaired)} palavras detectadas!")
-                    try:
-                        from ai_cache_hub import ai_cache
-                        ai_cache.set(input_path, "transcription", {
-                            "words": repaired,
-                            "full_text": " ".join([w.get("word", "") for w in repaired]),
-                            "duration": total_dur
-                        })
-                        if hasattr(self, 'cache_status_badge'):
-                            self.cache_status_badge.configure(
-                                text=f"[CACHE ATIVO: {len(repaired)} palavras]",
-                                text_color=COLORS["success"]
-                            )
-                    except Exception:
-                        pass
-                    return repaired
-                else:
-                    self._log("Transcricao sem palavras detalhadas.")
-            else:
-                self._log(f"Erro na API Groq ({resp.status_code}): {resp.text[:150]}")
-        finally:
-            Path(tmp_wav.name).unlink(missing_ok=True)
-
-        return []
+        repaired = clean_and_repair_whisper_words(norm_words, max_duration=total_dur if total_dur > 0 else None)
+        if repaired and hasattr(self, "cache_status_badge"):
+            self.cache_status_badge.configure(
+                text=f"[CACHE ATIVO: {len(repaired)} palavras]",
+                text_color=COLORS["success"],
+            )
+        return repaired
 
     def _start_transcribe_and_review(self):
         """Disparado pelo botao 'Transcrever & Revisar'."""
@@ -1416,24 +1677,39 @@ class StudioPipelineTab(ctk.CTkFrame):
                 # Prepara o vídeo recortado antes de transcrever (garantindo timing perfeito)
                 work_video = self._prepare_pipeline_video(input_path)
 
-                self._log("=" * 50)
-                self._log("TRANSCREVENDO PARA REVISÃO...")
-                self._set_progress(15, "Transcrevendo audio...")
-
                 video_dur = get_media_duration(work_video)
                 if video_dur > 0:
                     self._log(f"Duração exata do vídeo: {video_dur:.2f}s (teto máximo para legendas).")
 
-                raw_words = self._transcribe_audio(work_video)
-                if not raw_words:
-                    self._log("Nenhuma fala detectada pelo Whisper ou erro de API.")
-                    self.after(0, lambda: messagebox.showwarning("Aviso", "Nenhuma fala detectada para revisar."))
-                    return
+                # VERIFICAÇÃO DE CACHE / EDIÇÃO PRÉVIA:
+                # Se o usuário já editou legendas para este vídeo ou se há cache em ai_cache_hub, usamos diretamente!
+                corrected_chunks = None
+                if self._last_edited_items and getattr(self, "_last_edited_video_path", None) == input_path:
+                    corrected_chunks = self._last_edited_items
+                    self._log(f"⚡ [CACHE/RE-EDIÇÃO] Carregando {len(corrected_chunks)} legendas previamente editadas pelo usuário!")
+                else:
+                    cached_subs = ai_cache.get(input_path, "edited_subtitles")
+                    if cached_subs and isinstance(cached_subs, list):
+                        corrected_chunks = cached_subs
+                        self._last_edited_items = cached_subs
+                        self._last_edited_video_path = input_path
+                        self._log(f"⚡ [CACHE 24H] Recuperadas {len(cached_subs)} legendas editadas anteriormente para este vídeo!")
 
-                chunks = group_whisper_words(raw_words, max_duration=video_dur if video_dur > 0 else None)
-                # Auto-corrige nomes de anime imediatamente
-                corrected_chunks = apply_corrections_to_items(chunks)
-                self._log(f"Dicionario de Anime aplicado em {len(corrected_chunks)} falas.")
+                if not corrected_chunks:
+                    self._log("=" * 50)
+                    self._log("TRANSCREVENDO PARA REVISÃO...")
+                    self._set_progress(15, "Transcrevendo audio...")
+
+                    raw_words = self._transcribe_audio(work_video)
+                    if not raw_words:
+                        self._log("Nenhuma fala detectada pelo Whisper ou erro de API.")
+                        self.after(0, lambda: messagebox.showwarning("Aviso", "Nenhuma fala detectada para revisar."))
+                        return
+
+                    chunks = group_whisper_words(raw_words, max_duration=video_dur if video_dur > 0 else None)
+                    # Auto-corrige nomes de anime imediatamente
+                    corrected_chunks = apply_corrections_to_items(chunks)
+                    self._log(f"Dicionario de Anime aplicado em {len(corrected_chunks)} falas.")
 
                 self._set_progress(30, "Pronto para revisao")
                 curr_style_key = STYLE_KEY_MAP.get(self.subtitle_style_label.get(), "dynamic_animax")
@@ -1443,13 +1719,66 @@ class StudioPipelineTab(ctk.CTkFrame):
                 m_vol = self.music_volume_slider.get() / 100.0
                 m_start = self.music_start.get().strip()
 
-                def _on_sub_approved(items, s_key, pop, final_m_vol=None):
+                def _on_sub_approved(items, s_key, pop, final_m_path=None, final_m_vol=None, **kwargs):
+                    actual_path: Optional[str] = None
+                    actual_vol: Optional[float] = None
+                    if isinstance(final_m_path, (int, float)):
+                        actual_vol = float(final_m_path)
+                    elif isinstance(final_m_path, str):
+                        actual_path = final_m_path
+
+                    if isinstance(final_m_vol, (int, float)):
+                        actual_vol = float(final_m_vol)
+                    elif isinstance(final_m_vol, str):
+                        actual_path = final_m_vol
+
+                    if actual_path is not None:
+                        if actual_path:
+                            self.music_path.set(actual_path)
+                            self.include_music.set(True)
+                        else:
+                            self.music_path.set("")
+                            self.include_music.set(False)
+                        self._sync_player_bgm()
+                    if actual_vol is not None:
+                        val_pct = int(actual_vol * 100)
+                        self.music_volume_slider.set(val_pct)
+                        if hasattr(self, '_update_vol_label'):
+                            self._update_vol_label(val_pct)
+                    self._on_subtitles_approved(work_video, items, s_key, pop, actual_path, actual_vol)
+
+                def _on_music_changed_in_modal(new_m_path, new_m_vol):
+                    if new_m_path:
+                        self.music_path.set(new_m_path)
+                        self.include_music.set(True)
+                    else:
+                        self.music_path.set("")
+                        self.include_music.set(False)
+                    val_pct = int(new_m_vol * 100)
+                    self.music_volume_slider.set(val_pct)
+                    if hasattr(self, '_update_vol_label'):
+                        self._update_vol_label(val_pct)
+                    self._sync_player_bgm()
+
+                def _on_save_draft_in_modal(items, final_m_path=None, final_m_vol=None):
+                    self._last_edited_items = items
+                    self._last_edited_video_path = input_path
+                    ai_cache.set(input_path, "edited_subtitles", items)
+                    if final_m_path is not None:
+                        if final_m_path:
+                            self.music_path.set(final_m_path)
+                            self.include_music.set(True)
+                        else:
+                            self.music_path.set("")
+                            self.include_music.set(False)
                     if final_m_vol is not None:
                         val_pct = int(final_m_vol * 100)
                         self.music_volume_slider.set(val_pct)
                         if hasattr(self, '_update_vol_label'):
                             self._update_vol_label(val_pct)
-                    self._on_subtitles_approved(work_video, items, s_key, pop, final_m_vol)
+                    self._sync_player_bgm()
+                    self._update_subtitles_cache_status()
+                    self._log(f"💾 [SALVO] Rascunho de {len(items)} falas salvo com sucesso para '{Path(input_path).name}'!")
 
                 def _on_vol_changed_in_modal(new_vol):
                     val_pct = int(new_vol * 100)
@@ -1488,14 +1817,18 @@ class StudioPipelineTab(ctk.CTkFrame):
                     ducking_mode=ducking_key,
                     anti_copyright=anti_cp,
                     anti_copyright_mode=anti_mode_key,
-                    on_music_volume_change=_on_vol_changed_in_modal
+                    on_music_volume_change=_on_vol_changed_in_modal,
+                    on_music_change=_on_music_changed_in_modal,
+                    on_save_draft=_on_save_draft_in_modal,
+                    on_reset_to_whisper=self._reset_subtitles_cache
                 ))
             except Exception as e:
                 self._log(f"Erro na revisao: {e}")
             finally:
                 self._processing = False
+                review_btn_text = "✏️ Ajustar Legendas & Re-renderizar" if getattr(self, "_last_edited_items", None) else "Transcrever & Revisar"
                 self.after(0, lambda: self.start_btn.configure(state="normal"))
-                self.after(0, lambda: self.review_btn.configure(state="normal"))
+                self.after(0, lambda: self.review_btn.configure(state="normal", text=review_btn_text))
                 self.after(0, lambda: self.cancel_btn.configure(state="disabled"))
 
         threading.Thread(target=_worker, daemon=True).start()
@@ -1597,9 +1930,16 @@ class StudioPipelineTab(ctk.CTkFrame):
 
         threading.Thread(target=self._pipeline_direct_thread, args=(input_path,), daemon=True).start()
 
-    def _on_subtitles_approved(self, input_path: str, edited_items: List[Dict[str, Any]], style_key: str, pop_enabled: Any, final_music_vol: Optional[float] = None):
+    def _on_subtitles_approved(self, input_path: str, edited_items: List[Dict[str, Any]], style_key: str, pop_enabled: Any, final_music_path: Optional[str] = None, final_music_vol: Optional[float] = None):
         """Callback chamado quando o usuario clica em 'GERAR VÍDEO FINAL' no editor modal."""
         self._log(f"Legendas confirmadas pelo usuario ({len(edited_items)} falas). Estilo: {style_key}")
+
+        # Salva em memória e no cache persistente (24h)
+        orig_video = self.input_path.get().strip() or input_path
+        self._last_edited_items = edited_items
+        self._last_edited_video_path = orig_video
+        ai_cache.set(orig_video, "edited_subtitles", edited_items)
+        self._update_subtitles_cache_status()
 
         self._processing = True
         self._cancel_flag = False
@@ -1609,7 +1949,7 @@ class StudioPipelineTab(ctk.CTkFrame):
 
         threading.Thread(
             target=self._render_thread,
-            args=(input_path, edited_items, style_key, pop_enabled, final_music_vol),
+            args=(input_path, edited_items, style_key, pop_enabled, final_music_path, final_music_vol),
             daemon=True
         ).start()
 
@@ -1627,13 +1967,25 @@ class StudioPipelineTab(ctk.CTkFrame):
 
             items = []
             if self.include_subtitles.get():
-                self._set_progress(10, "Transcrevendo audio...")
-                raw_words = self._transcribe_audio(work_video)
-                if raw_words:
-                    video_dur = get_media_duration(work_video)
-                    chunks = group_whisper_words(raw_words, max_duration=video_dur if video_dur > 0 else None)
-                    items = apply_corrections_to_items(chunks)
-                    self._log(f"Dicionario de Anime aplicado automaticamente em {len(items)} falas.")
+                orig_video = self.input_path.get().strip() or work_video
+                if self._last_edited_items and getattr(self, "_last_edited_video_path", None) == orig_video:
+                    items = self._last_edited_items
+                    self._log(f"⚡ [REUTILIZAÇÃO] Reutilizando {len(items)} falas previamente editadas pelo usuário!")
+                else:
+                    cached_subs = ai_cache.get(orig_video, "edited_subtitles")
+                    if cached_subs and isinstance(cached_subs, list):
+                        items = cached_subs
+                        self._last_edited_items = cached_subs
+                        self._last_edited_video_path = orig_video
+                        self._log(f"⚡ [CACHE 24H] Reutilizando {len(items)} falas editadas anteriormente para este vídeo!")
+                    else:
+                        self._set_progress(10, "Transcrevendo audio...")
+                        raw_words = self._transcribe_audio(work_video)
+                        if raw_words:
+                            video_dur = get_media_duration(work_video)
+                            chunks = group_whisper_words(raw_words, max_duration=video_dur if video_dur > 0 else None)
+                            items = apply_corrections_to_items(chunks)
+                            self._log(f"Dicionario de Anime aplicado automaticamente em {len(items)} falas.")
 
             style_key = STYLE_KEY_MAP.get(self.subtitle_style_label.get(), "dynamic_animax")
             pop_enabled = self.subtitle_pop.get()
@@ -1647,19 +1999,25 @@ class StudioPipelineTab(ctk.CTkFrame):
             self.after(0, lambda: self.review_btn.configure(state="normal"))
             self.after(0, lambda: self.cancel_btn.configure(state="disabled"))
 
-    def _render_thread(self, input_path: str, items: List[Dict[str, Any]], subtitle_style: str, subtitle_pop: Any, final_music_vol: Optional[float] = None):
+    def _render_thread(self, input_path: str, items: List[Dict[str, Any]], subtitle_style: str, subtitle_pop: Any, final_music_path: Optional[str] = None, final_music_vol: Optional[float] = None):
         """Executa a renderizacao FFmpeg final com os itens de legenda aprovados."""
         try:
             from subtitle_renderer import render_video_with_style
 
-            self._log("Renderizando video final com overlays Animax (187% Zoom, Watermark 62px)...")
+            active_prof = cpm.get_active_profile()
+            active_style = cpm.build_full_style_dict(active_prof)
+            self._log(f"Renderizando video final com perfil '{active_prof.get('name')}' ({active_prof.get('handle')}, Título {active_prof.get('title_color')}, Watermark: {active_prof.get('watermark_text')})...")
             self._set_progress(35, "Renderizando video...")
 
             # O nome de saída sempre preserva o caminho e pasta do vídeo original selecionado
             orig_p = Path(self.input_path.get().strip() or input_path)
             output_path = str(orig_p.parent / f"{orig_p.stem}_studio_final.mp4")
 
-            music_path = self.music_path.get().strip() if self.include_music.get() else None
+            if final_music_path is not None:
+                music_path = final_music_path.strip() if final_music_path else None
+            else:
+                music_path = self.music_path.get().strip() if self.include_music.get() else None
+
             if final_music_vol is not None:
                 music_vol = max(0.0, min(1.0, float(final_music_vol)))
             else:
@@ -1719,6 +2077,8 @@ class StudioPipelineTab(ctk.CTkFrame):
                 include_anime_fx=self.include_anime_fx.get(),
                 use_local_ai=self.anime_fx_use_local_ai.get(),
                 local_ai_model=self.anime_fx_model.get().strip() or "qwen2.5:7b",
+                manga_theme=self.anime_fx_theme.get(),
+                style=active_style,
                 on_log=self._log,
                 on_progress=lambda p, l: self._set_progress(35 + int(p * 0.65), l),
             )
@@ -1734,9 +2094,17 @@ class StudioPipelineTab(ctk.CTkFrame):
                 def _notify_and_ask():
                     self.watch_btn.configure(state="normal")
                     self.folder_btn.configure(state="normal")
+                    self.review_btn.configure(text="✏️ Ajustar Legendas & Re-renderizar")
+                    msg = (
+                        f"Vídeo finalizado com sucesso!\n\n"
+                        f"Arquivo:\n{Path(output_path).name}\n\n"
+                        f"Deseja assistir ao vídeo pronto agora?\n\n"
+                        f"💡 Dica: Suas edições de legenda foram salvas. Se notar alguma palavra que queira ajustar, "
+                        f"basta clicar em '✏️ Ajustar Legendas & Re-renderizar' para corrigir direto sem ter que transcrever de novo!"
+                    )
                     resp = messagebox.askyesno(
                         "Studio Pipeline - Sucesso!",
-                        f"Video finalizado com sucesso!\n\nArquivo:\n{Path(output_path).name}\n\nDeseja assistir ao video pronto agora?"
+                        msg
                     )
                     if resp:
                         self._open_ready_video()
@@ -1758,10 +2126,12 @@ class StudioPipelineTab(ctk.CTkFrame):
                     pass
                 self._active_trimmed_path = None
             self._processing = False
+            review_btn_text = "✏️ Ajustar Legendas & Re-renderizar" if getattr(self, "_last_edited_items", None) else "Transcrever & Revisar"
             self.after(0, lambda: self.start_btn.configure(state="normal"))
-            self.after(0, lambda: self.review_btn.configure(state="normal"))
+            self.after(0, lambda: self.review_btn.configure(state="normal", text=review_btn_text))
             self.after(0, lambda: self.cancel_btn.configure(state="disabled"))
-            if getattr(self, "_last_output_path", None) and os.path.exists(self._last_output_path):
+            out_p = getattr(self, "_last_output_path", None)
+            if out_p and os.path.exists(out_p):
                 self.after(0, lambda: self.watch_btn.configure(state="normal"))
                 self.after(0, lambda: self.folder_btn.configure(state="normal"))
 
